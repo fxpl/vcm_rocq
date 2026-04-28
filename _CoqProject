@@ -1,0 +1,15 @@
+-Q . Vcm
+
+-arg -w -arg -notation-incompatible-prefix
+
+Vcm.v
+Common.v
+SharedMemory.v
+Log.v
+LoggingSharedMemory.v
+Linear.v
+LoggingLinear.v
+LinearEquiv.v
+Branching.v
+LoggingBranching.v
+BranchingEquiv.v

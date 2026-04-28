@@ -1,0 +1,173 @@
+From Vcm Require Import Common.
+
+Inductive event :=
+| event_spawn (t1 t2 : tid)
+| event_join (t1 t2 : tid)
+| event_read (t : tid) (i : loc) (v : val)
+| event_write (t : tid) (i : loc) (v : val)
+| event_lock (t : tid) (l : lid)
+| event_unlock (t : tid) (l : lid)
+| event_start (t : tid)
+| event_end (t : tid)
+.
+
+Definition get_thread (e : event) :=
+  match e with
+  | event_spawn t _
+  | event_join t _
+  | event_read t _ _
+  | event_write t _ _
+  | event_lock t _
+  | event_unlock t _
+  | event_start t
+  | event_end t => t
+  end.
+
+Definition touches_lock (l : lid) (e : event) :=
+  match e with
+  | event_lock _ l'
+  | event_unlock _ l' => l = l'
+  | _ => False
+  end.
+
+Definition writes_location (i : loc) (e : event) :=
+  match e with
+  | event_write _ j _ => i = j
+  | _ => False
+  end.
+
+Definition is_write (e : event) :=
+  match e with
+  | event_write _ _ _ => True
+  | _ => False
+  end.
+
+Definition log := list event.
+
+Inductive hb (log : log) : event -> event -> Prop :=
+| HbPo : forall l1 l2 t e1 e2,
+    (* Events are adjacent when projecting the program order of a thread *)
+    l1 ++ e1 :: e2 :: l2 = LibList.filter (fun e => get_thread e = t) log ->
+    hb log e1 e2
+| HbLock : forall l1 l2 t1 t2 l,
+    (* Events unlock l/lock l are adjacent when projecting the events of a lock *)
+    l1 ++ event_unlock t1 l :: event_lock t2 l :: l2 =
+      LibList.filter (fun e => touches_lock l e) log ->
+    hb log (event_unlock t1 l) (event_lock t2 l)
+| HbSpawn : forall l1 l2 t1 t2,
+    (* The spawn event of a thread is before its start event *)
+    (* TODO: No need to split list. Well-formedness will ensure they are ordered *)
+    log = l1 ++ l2 ->
+    mem (event_spawn t1 t2) l1 ->
+    mem (event_start t2) l2 ->
+    hb log (event_spawn t1 t2) (event_start t2)
+| HbJoin : forall l1 l2 t1 t2,
+    (* The end event of a thread is before its join event(s) *)
+    log = l1 ++ l2 ->
+    mem (event_end t2) l1 ->
+    mem (event_join t1 t2) l2 ->
+    hb log (event_end t2) (event_join t1 t2)
+| HbTrans : forall e1 e2 e3,
+    (* Transitivity *)
+    hb log e1 e2 ->
+    hb log e2 e3 ->
+    hb log e1 e3
+.
+
+Inductive wf_lock_log : log -> Prop :=
+| WfLockEmpty :
+  wf_lock_log nil
+| WfLockSingle :
+  forall t l,
+    wf_lock_log (event_lock t l :: nil)
+| WfLockUnlock :
+  forall t1 l log,
+    wf_lock_log log ->
+    wf_lock_log (event_lock t1 l :: event_unlock t1 l :: log)
+.
+
+Definition wf_log (log : log) : Prop :=
+  (* Unique spawns *)
+  (forall l1 l2 t1 t2,
+      log = l1 ++ event_spawn t1 t2 :: l2 ->
+      (~exists t1', mem (event_spawn t1' t2) (l1 ++ l2)))
+
+  (* Alternative formulation based on length*)
+  (* forall t2, length (LibList.filter (fun e => exists t1, e = event_spawn t1 t2) log) <= 1 x*)
+  /\
+  (* Unique starts *)
+  (forall l1 l2 t,
+      log = l1 ++ event_start t :: l2 ->
+      (~mem (event_start t) (l1 ++ l2)))
+  /\
+  (* Unique ends *)
+  (forall l1 l2 t,
+      log = l1 ++ event_end t :: l2 ->
+      (~mem (event_end t) (l1 ++ l2)))
+  /\
+  (* Threads start after spawning *)
+  (forall l1 l2 t2,
+      log = l1 ++ event_start t2 :: l2 ->
+      exists t1, mem (event_spawn t1 t2) l1)
+  /\
+  (* Threads are joined after ending *)
+  (forall l1 l2 t1 t2,
+      log = l1 ++ event_join t1 t2 :: l2 ->
+      mem (event_end t2) l1)
+  /\
+  (* Threads start by starting *)
+  (forall l1 l2 e t,
+      log = l1 ++ e :: l2 ->
+      get_thread e = t ->
+      e <> event_start t ->
+      mem (event_start t) l1)
+  /\
+  (* Threads end by ending *)
+  (forall l1 l2 t,
+      log = l1 ++ event_end t :: l2 ->
+      LibList.Forall (fun e => get_thread e <> t) l2)
+  /\
+  (* Locks are locked and unlocked, in that order, by the same thread *)
+  (forall l,
+      wf_lock_log (LibList.filter (fun e => touches_lock l e) log)
+  )
+.
+
+Definition conflict_free (log : log) : Prop :=
+  forall l1 l2 t1 t2 i v1 v2,
+    log = l1 ++ l2 ->
+    mem (event_write t1 i v1) l1 ->
+    mem (event_write t2 i v2) l2 ->
+    (* mem e l2 -> *)
+    (* (e = event_write t2 i v2 \/ e = event_read t2 i v2) -> *)
+    hb log (event_write t1 i v1) (event_write t2 i v2)
+.
+
+Lemma last_eq_middle_inv :
+  forall A (xs : list A) x ys1 y ys2,
+    xs & x = ys1 ++ y :: ys2 ->
+    x = y /\ xs = ys1 /\ ys2 = nil \/
+    exists ys2', ys2 = ys2' & x /\ xs = ys1 ++ y :: ys2'.
+Proof.
+  introv Heq.
+  gen ys1 ys2 x y.
+  induction xs; rew_list in *; intros.
+  - destruct ys1; rew_list in *; inverts* Heq.
+    apply nil_eq_app_inv in H1 as (-> & contra). congruence.
+  - destruct ys1; rew_list in *; inverts* Heq.
+    forwards* [(-> & -> & ->) | (ys2' & -> & ->)]: IHxs H1.
+Qed.
+
+Lemma unique_spawn_snoc' :
+  forall log e t2,
+    length (LibList.filter (fun e => exists t1, e = event_spawn t1 t2) log) <= 1 ->
+    ~(exists t1 t2, e = event_spawn t1 t2) ->
+    length (LibList.filter (fun e => exists t1, e = event_spawn t1 t2) (log & e)) <= 1.
+Proof.
+  introv Hlen Hnex.
+  induction log0; rew_listx in *.
+  - cases_if~. rew_list~.
+  - cases_if~. rew_list in *. cases_if~; rew_list in *; autos~.
+    false Hnex. unpack. substs*.
+Qed.
+
