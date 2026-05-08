@@ -158,6 +158,49 @@ Proof.
     forwards* [(-> & -> & ->) | (ys2' & -> & ->)]: IHxs H1.
 Qed.
 
+Lemma wf_lock_log_snoc_lock : forall xs t l,
+    wf_lock_log xs ->
+    (xs = nil \/ exists t' xs', xs = xs' & event_unlock t' l) ->
+    wf_lock_log (xs & event_lock t l).
+Proof.
+  introv Hwf Hfree. induction Hwf.
+  - rew_list. apply WfLockSingle.
+  - destruct Hfree as [|( t' & xs' & Heq)]; [congruence|].
+    destruct xs' as [| x [| y xs']]; rew_list in Heq; inverts Heq; congruence.
+  - rew_list. apply WfLockUnlock.
+    apply IHHwf.
+    destruct Hfree as [Hnil | (t' & xs' & Heq)]; [congruence|].
+    destruct (last_case log0) as [-> | (x & log'' & ->)]; autos.
+    replaces (event_lock t1 l0 :: event_unlock t1 l0 :: log'' & x)
+        with ((event_lock t1 l0 :: event_unlock t1 l0 :: log'') & x)
+          in Heq.
+    { rew_list~. }
+    apply last_eq_last_inv in Heq as [_ ->].
+    right. exists t' log''. rew_list~.
+Qed.
+
+Lemma wf_lock_log_snoc_unlock : forall xs xs' t l,
+    wf_lock_log (LibList.filter (fun e : event => touches_lock l e) xs) ->
+    LibList.filter (fun e : event => touches_lock l e) xs = xs' & event_lock t l ->
+    wf_lock_log (LibList.filter (fun e : event => touches_lock l e) xs & event_unlock t l).
+Proof.
+  introv Hwf Heq. gen xs'. induction Hwf; intros.
+  - destruct xs'; rew_listx in Heq; congruence.
+  - destruct xs' as [| x [| y xs']]; rew_list in Heq; inverts Heq; try congruence.
+    rew_list. apply WfLockUnlock. apply WfLockEmpty.
+  - rew_list. apply WfLockUnlock.
+    destruct (last_case log0) as [-> | (y & log'' & ->)].
+    + replaces (event_lock t1 l0 :: event_unlock t1 l0 :: nil)
+          with ((event_lock t1 l0 :: nil) & event_unlock t1 l0) in Heq.
+      { rew_list~. }
+      apply last_eq_last_inv in Heq as [_ Hcontra]. congruence.
+    + replaces (event_lock t1 l0 :: event_unlock t1 l0 :: log'' & y)
+          with ((event_lock t1 l0 :: event_unlock t1 l0 :: log'') & y) in Heq.
+      { rew_list~. }
+      apply last_eq_last_inv in Heq as [_ ->].
+      apply (IHHwf log''). rew_list~.
+Qed.
+
 Lemma unique_spawn_snoc' :
   forall log e t2,
     length (LibList.filter (fun e => exists t1, e = event_spawn t1 t2) log) <= 1 ->

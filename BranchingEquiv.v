@@ -53,7 +53,7 @@ Proof.
     + exists. constructors*.
     + destruct G as (C & P).
       asserts (h' & cheat): (exists h, Branching.commit_fresh (C, P) h). admit.
-      exists. constructors*.
+      exists. constructors*. admit.
     + destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
       apply Hwrite in H6. admit. (* Cases on whether it is a global or local read *)
     + exists. constructors*.
@@ -62,26 +62,21 @@ Proof.
       rewrite Heq in H6.
       asserts (h' & cheat): (exists h, Branching.commit_fresh (C, P) h). admit.
       asserts* Hneq: (t <> t').
-      exists. constructors*.
-      applys_eq* Branching.PushThread.
-      * apply* binds_update_neq.
-        apply* binds_update_same.
-      * apply* binds_update_same.
+      exists. constructors*. admit.
     + destruct G as (C & P).
       apply Hexp in H4 as (d' & h' & Hbinds').
       asserts cheat: (d = \{}). admit. (* terminated thread has an empty staging area. *)
       substs.
       exists. constructors*.
-      admit. (* Revisit when pulling has been updated to match paper *)
+      all: admit.
     + exists. constructors*.
       admit. (* Correspondence between locks via log *)
-      admit. (* Revisit when pulling has been updated to match paper *)
+      all: admit.
     + destruct G as (C & P).
       asserts (h' & cheat): (exists h, Branching.commit_fresh (C, P) h). admit.
       exists. constructors*.
       * admit. (* Correspondence between locks via log *)
-      * applys_eq* Branching.PushLock.
-        admit. (* Correspondence between locks via log *)
+      * admit.
       * apply* binds_update_same.
   - introv (cfgB' & Hstep).
     destruct cfgSh as ((Tsh & H) & Lsh).

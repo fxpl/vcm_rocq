@@ -10,6 +10,12 @@ Definition staging_area := map loc val.
 
 Definition thread := (thread_state * thread_exp * staging_area * timestamp)%type.
 
+Instance inhab_thread : Inhab thread.
+  forwards* Hexp: inhab_exp.
+  destruct Hexp as [[e _]].
+  constructor. exists* (state_new, te_exp e, (empty : staging_area), (0 : timestamp)).
+Qed.
+
 Definition threads := map tid thread.
 
 Definition version_history := (set (val * timestamp)).
@@ -300,6 +306,23 @@ Definition is_max_timestamp (H : heap) (ts : timestamp) :=
       (v, ts') \in vh ->
       ts' <= ts).
 
+Definition finite_histories (H : heap) :=
+  forall i vh,
+    binds H i vh ->
+    LibSet.finite vh.
+
+Lemma finite_histories_update_inv :
+  forall H i vh,
+    finite_histories (H[i := vh]) ->
+    LibSet.finite vh.
+Proof.
+    introv Hfins.
+    unfolds finite_histories.
+    - asserts Hbinds: (binds H[i := vh] i vh).
+      { apply* binds_update_same. }
+      forwards*: Hfins.
+Qed.
+
 Lemma ninhab_empty :
   forall A B (M : map A B),
     ~Inhab B ->
@@ -374,29 +397,28 @@ Qed.
 Lemma max_timestamp_exists :
   forall H,
     finite H ->
+    finite_histories H ->
     (exists i vh, binds H i vh /\ vh <> \{}) ->
     exists ts, is_max_timestamp H ts.
 Proof.
   introv Hfin.
   pattern H.
   apply~ map_ind.
-  - introv (i & vh & Hbinds & Hneq).
+  - introv Hfins (i & vh & Hbinds & Hneq).
     inverts Hbinds.
-  - introv IH (i & vh & Hbinds & Hneq).
+  - introv IH Hfins (i & vh & Hbinds & Hneq).
     rename v into vh'.
+    simpl in Hfins.
     destruct (classic ((exists (i : loc) (vh : version_history), binds M' i vh /\ vh <> \{}))).
     + forwards~ (ts & Hmax): IH.
-      apply binds_update_inv in Hbinds.
-      case_if.
-      * substs. admit.
-      * admit.
+      forwards~ (v & ts' & Hin & Hle): ex_latest vh'.
+      all: admit. (* Proof idea: ts is max of M'. There is some maximum timestamp of vh'. The maximum of M'[k:=vh'] is the maximum of ts and the maximum timestamp of vh'. *)
     + rew_logic in H0.
       forwards Hnex: H0 i.
       rew_logic in Hnex.
       forwards Hndisj: Hnex vh.
       rew_logic in Hndisj. branches;[|congruence].
-
-      admit.
+      all: admit. (* Proof idea: by H0, there is no non-empty version history is M'. vh must be equal to vh'. vh is not empty, so there is some maximum timestamp of vh. *)
 Admitted.
 
 Definition push_staged (h : staging_area) (ts : timestamp) (H : heap): heap :=
@@ -434,6 +456,42 @@ Inductive pull (t : tid) : cfg -> cfg -> Prop :=
     is_max_timestamp H ts' ->
     pull t (T, H, L) (T[t := (st, e, h, ts')], H, L)
 .
+
+Lemma pull_preserves_thread_shape :
+  forall t T H L T' H' L' t' st e h ts,
+    pull t (T, H, L) (T', H', L') ->
+    binds T t' (st, e, h, ts) ->
+    exists h' ts', binds T' t' (st, e, h', ts').
+Proof.
+  introv Hpull Hbinds.
+  inversion Hpull as [T0 H0 L0 st0 e0 h0 ts0 ts1 Hb0 Hcf Hmax]; subst.
+  destruct (classic (t' = t)) as [->|Hneq].
+  - assert (Heq : (st, e, h, ts) = (st0, e0, h0, ts0)).
+    { eapply (binds_inj (H := inhab_thread)); eauto. }
+    inverts Heq.
+    exists h0 ts1.
+    apply binds_update_same.
+  - exists h ts.
+    apply* binds_update_neq.
+Qed.
+
+Lemma push_preserves_thread_shape :
+  forall t T H L T' H' L' t' st e h ts,
+    push t (T, H, L) (T', H', L') ->
+    binds T t' (st, e, h, ts) ->
+    exists h' ts', binds T' t' (st, e, h', ts').
+Proof.
+  introv Hpush Hbinds.
+  inversion Hpush as [T0 H0 L0 st0 e0 h0 ts0 ts1 Hb0 Hcf Hmax]; subst.
+  destruct (classic (t' = t)) as [->|Hneq].
+  - assert (Heq : (st, e, h, ts) = (st0, e0, h0, ts0)).
+    { eapply (binds_inj (H := inhab_thread)); eauto. }
+    inverts Heq.
+    exists (empty : staging_area) (S ts1).
+    apply binds_update_same.
+  - exists h ts.
+    apply* binds_update_neq.
+Qed.
 
 Inductive step : cfg -> cfg -> Prop :=
 | StepStart : forall T T' H L L' t e h ts,

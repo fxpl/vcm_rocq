@@ -9,6 +9,12 @@ Definition staging_area := map loc val.
 
 Definition thread := (thread_state * thread_exp * staging_area * commit)%type.
 
+Instance inhab_thread : Inhab thread.
+  forwards* Hexp: inhab_exp.
+  destruct Hexp as [[e _]].
+  constructor. exists* (state_new, te_exp e, (empty : staging_area), 0).
+Qed.
+
 Definition threads := map tid thread.
 
 (* TODO: unify staging_areas to something more general *)
@@ -33,6 +39,10 @@ Definition commit_fresh (G : graph) (h : commit) :=
   end.
 
 Definition locks := map lid (lock_state * commit).
+
+Instance inhab_lock : Inhab (lock_state * commit).
+  constructor. exists* (ls_free, 0).
+Qed.
 
 Definition cfg : Type := threads * graph * locks.
 
@@ -61,6 +71,24 @@ Definition wf_graph (G : graph) :=
     ancestor G h2 h1 ->
     h1 = h2.
 
+Definition change_set (G : graph) (h1 h2 : commit) : set loc :=
+  fun i =>
+  match G with
+  | (C, _) =>
+      exists h,
+        match C h with
+        | Some d =>
+          i \indom d /\
+          ancestor G h h2 /\ ~ancestor G h h1
+        | None => False
+        end
+  end.
+
+Definition conflict_free_merge (d : staging_area) (h1 h2 : commit) (G : graph) :=
+  (dom d \u change_set G h2 h1) \# (change_set G h1 h2).
+
+(*
+(* Old definition *)
 Definition conflict_free (G : graph) :=
   forall h h1 h2 d1 d2,
     ancestor G h1 h ->
@@ -70,8 +98,16 @@ Definition conflict_free (G : graph) :=
     ~dom d1 \# dom d2 ->
     ancestor G h1 h2 \/ ancestor G h2 h1
 .
+*)
 
-
+Definition do_commit (t : tid) (h_new : commit)
+    (T : threads) (G : graph)
+    : threads * graph :=
+  let '(C, P) := G in
+  let '(_, e, d, h) := T[t] in
+  (T[t := (state_running, e, empty, h_new)],
+   (C[h_new := d], \{(h, h_new)} \u P)).
+(*
 Inductive push_thread (t t' : tid) : cfg -> cfg -> Prop :=
 | PushThread : forall T C P L e e' d h h' h_new,
     binds T t (state_running, e, d, h) ->
@@ -80,6 +116,26 @@ Inductive push_thread (t t' : tid) : cfg -> cfg -> Prop :=
     push_thread t t' (T, (C, P), L) (T[t := (state_running, e, empty, h_new)][t' := (state_new, e', empty, h_new)], (C[h_new := d], \{(h, h_new)} \u P), L)
 .
 
+(* Currently we don't have requirements on thread state and staging areas like we do above *)
+Definition do_push_thread (t t' : tid) (h_new : commit)
+    (T : threads) (G : graph)
+    : threads * graph :=
+  let '(C, P) := G in
+  match T t, T t' with
+  | Some (_, e, d, h), Some (_, e', _, _) =>
+      (T[t := (state_running, e, empty, h_new)][t' := (state_new, e', empty, h_new)],
+       (C[h_new := d], \{(h, h_new)} \u P))
+  | _, _ => (T, G)
+  end.
+*)
+Definition push_thread (t t' : tid) (h_new : commit)
+    (T : threads) (G : graph)
+    : threads * graph :=
+  let '(T', G') := do_commit t h_new T G in
+  let '(ts, e, d, _) := T'[t'] in
+  (T'[t' := (ts, e, d, h_new)], G').
+
+(*
 Inductive push_lock (t : tid) (l : lid) : cfg -> cfg -> Prop :=
 | PushLock : forall T C P L e d h h' h_new,
     binds T t (state_running, e, d, h) ->
@@ -87,8 +143,28 @@ Inductive push_lock (t : tid) (l : lid) : cfg -> cfg -> Prop :=
     commit_fresh (C, P) h_new ->
     push_lock t l (T, (C, P), L) (T[t := (state_running, e, empty, h_new)], (C[h_new := d], \{(h, h_new)} \u P), L[l := (ls_held t, h_new)]).
 
-(* TODO: This needs looking at! Do we create two commits or use
-the staging area (d) when checking conflict_free *)
+(* Currently we don't have requirements on thread state like we do above *)
+Definition do_push_lock (t : tid) (l : lid) (h_new : commit)
+    (T : threads) (G : graph) (L : locks)
+    : threads * graph * locks :=
+  let '(C, P) := G in
+  match T t with
+  | Some (_, e, d, h) =>
+      (T[t := (state_running, e, empty, h_new)],
+       (C[h_new := d], \{(h, h_new)} \u P),
+       L[l := (ls_held t, h_new)])
+  | None => (T, G, L)
+  end.
+*)
+
+Definition push_lock (t : tid) (l : lid) (h_new : commit)
+    (T : threads) (G : graph) (L : locks)
+    : threads * graph * locks :=
+  let '(T', G') := do_commit t h_new T G in
+  let '(ls, _) := L[l] in
+  (T', G', L[l := (ls, h_new)]).
+
+(*
 Inductive pull_thread (t t' : tid) : cfg -> cfg -> Prop :=
 | PullThread : forall T C P G' L e e' d h h' h'' h_new,
     binds T t (state_running, e, d, h) ->
@@ -99,8 +175,29 @@ Inductive pull_thread (t t' : tid) : cfg -> cfg -> Prop :=
     conflict_free G' ->
     pull_thread t t' (T, (C, P), L) (T[t := (state_running, e, empty, h_new)][t' := (state_terminated, e', empty, h_new)], G', L)
 .
+*)
 
-(* TODO: This needs looking at! *)
+Definition do_merge (t : tid) (h h_new : commit)
+    (T : threads) (G : graph)
+    : threads * graph :=
+  let '(C, P) := G in
+  let '(ts, e, d, h_t) := T[t] in
+  (T[t := (ts, e, empty, h_new)],
+   (C[h_new := d], \{(h_t, h_new)} \u \{(h, h_new)} \u P)).
+
+Definition pull_thread (t t' : tid) (h_new : commit)
+    (T : threads) (G : graph)
+    : threads * graph :=
+    let '(_, _, _, h') := T[t'] in
+    do_merge t h' h_new T G.
+
+Definition pull_lock (t : tid) (l : lid) (h_new : commit)
+    (T : threads) (G : graph) (L : locks)
+    : threads * graph :=
+  let '(_, h) := L[l] in
+  do_merge t h h_new T G.
+
+(*
 Inductive pull_lock (t : tid) (l : lid) : cfg -> cfg -> Prop :=
 | PullLock : forall T C P G' L e d h h' h'' h_new,
     binds T t (state_running, e, d, h) ->
@@ -111,6 +208,7 @@ Inductive pull_lock (t : tid) (l : lid) : cfg -> cfg -> Prop :=
     conflict_free G' ->
     pull_lock t l (T, (C, P), L) (T[t := (state_running, e, empty, h_new)], G', L[l := (ls_free, h_new)])
 .
+*)
 
 Definition is_latest_value (G : graph) (h : commit) (i : loc) (v : val) :=
   exists h',
@@ -146,10 +244,11 @@ Inductive step : cfg -> cfg -> Prop :=
 | StepStart : forall T G L t e d h,
     binds T t (state_new, e, d, h) ->
     step (T, G, L) (T[t := (state_running, e, d, h)], G, L)
-| StepEnd : forall T C P L t r d h h',
+| StepEnd : forall T T' G G' L t r d h h',
     binds T t (state_running, te_ret r, d, h) ->
-    commit_fresh (C, P) h' ->
-    step (T, (C, P), L) (T[t := (state_terminated, te_ret r, empty, h')], (C[h' := d], \{(h, h')} \u P), L)
+    commit_fresh G h' ->
+    do_commit t h' T G = (T', G') ->
+    step (T, G, L) (T'[t := (state_terminated, te_ret r, empty, h')], G', L)
 | StepReadLocal : forall T G L t e d h K i v,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_read i) ->
@@ -165,31 +264,37 @@ Inductive step : cfg -> cfg -> Prop :=
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_write i v) ->
     step (T, G, L) (T[t := (state_running, te_exp (K void), d[i := v], h)], G, L)
-| StepSpawn : forall T T' G G' L t (t' : tid) e d h K e',
+ | StepSpawn : forall T T' G G' L t (t' : tid) e d h h' K e',
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_spawn e') ->
     t' \notindom T ->
-    push_thread t t' (T[t := (state_running, te_exp (K t'), d, h)][t' := (state_new, te_exp e', empty, 0)], G, L) (T', G', L) ->
+    commit_fresh G h' ->
+    push_thread t t' h' (T[t := (state_running, te_exp (K t'), d, h)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G') ->
     step (T, G, L) (T', G', L)
 | StepJoin : forall T T' G G' L t t' e d h h' h'' K r,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_join t') ->
     binds T t' (state_terminated, te_ret r, empty, h') ->
-    pull_thread t t' (T, G, L) (T', G', L) ->
+    conflict_free_merge d h h' G ->
+    commit_fresh G h'' ->
+    pull_thread t t' h'' T G = (T', G') ->
     binds T' t (state_running, te_exp e, d, h'') ->
     step (T, G, L) (T[t := (state_running, te_exp (K r), d, h'')], G', L)
 | StepLock : forall T T' G G' L t e d h h' K l,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_lock l) ->
     binds L l (ls_free, h') ->
-    pull_lock t l (T, G, L) (T', G', L) ->
+    conflict_free_merge d h h' G ->
+    commit_fresh G h' ->
+    pull_lock t l h' T G L = (T', G') ->
     binds T' t (state_running, te_exp e, d, h') ->
     step (T, G, L) (T[t := (state_running, te_exp (K void), d, h')], G', L[l := (ls_held t, h')])
 | StepRelease : forall T T' G G' (L L' : locks) t e d h h' h'' K l,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_unlock l) ->
     binds L l (ls_held t, h'') ->
-    push_lock t l (T, G, L) (T', G', L') ->
+    commit_fresh G h' ->
+    push_lock t l h' T G L = (T', G', L') ->
     binds T' t (state_running, te_exp e, empty, h') ->
     step (T, G, L) (T[t := (state_running, te_exp (K void), empty, h')], G', L'[l := (ls_free, h')])
 .

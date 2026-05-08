@@ -11,6 +11,10 @@ Ltac auto_tilde ::= try solve [intuition auto with vcm].
 
 Parameters val exc exp : Type.
 
+Parameter inhab_val : Inhab val.
+Parameter inhab_exc : Inhab exc.
+Parameter inhab_exp : Inhab exp.
+
 (* Something to feed to the continuation when no value is needed *)
 Parameter void : val.
 
