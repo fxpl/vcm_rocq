@@ -34,6 +34,9 @@ Qed.
 Theorem branching_equiv :
   forall log log' cfgSh cfgB,
     wf_log log ->
+    match cfgB with
+    | (_, G, _) => wf_graph G
+    end ->
     LoggingSharedMemory.describes log cfgSh ->
     LoggingBranching.describes log cfgB ->
     same_expressions cfgSh cfgB ->
@@ -41,10 +44,11 @@ Theorem branching_equiv :
       (exists cfgSh', LoggingSharedMemory.step (cfgSh, log) (cfgSh', log')) <->
       (exists cfgB', LoggingBranching.step (cfgB, log) (cfgB', log')).
 Proof.
-  introv Hwf HdescSh HdescB Hexp Hcf.
+  introv Hwf HwfG HdescSh HdescB Hexp Hcf.
   splits.
   - introv (cfgSh' & Hstep).
     destruct cfgB as [(T & G) L].
+    forwards* HdiscSh': LoggingSharedMemory.step_preserves_describes Hwf.
     inverts Hstep;
       match goal with
       | H: binds ?T ?t (?ts', ?e) |- _ =>
@@ -52,23 +56,59 @@ Proof.
       end.
     + exists. constructors*.
     + destruct G as (C & P).
-      asserts (h' & cheat): (exists h, Branching.commit_fresh (C, P) h). admit.
-      exists. constructors*. admit.
+      forwards (h' & Hfresh): exists_commit_fresh HwfG.
+      asserts (T' & G' & Hcommit): (exists T' G', do_commit t h' T (C, P) = (T', G')).
+      {
+        exists. unfolds do_commit.
+        forwards Hread: read_of_binds Hbinds.
+        replace T[t] with (state_running, te_ret r, d, h).
+        reflexivity.
+      }
+      exists. constructors*.
     + destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      apply Hwrite in H6. admit. (* Cases on whether it is a global or local read *)
+      apply Hwrite in H6 as (t' & log' & Hfilter).
+      admit. (* Cases on whether it is a global or local read *)
     + exists. constructors*.
     + destruct G as (C & P).
+      forwards (h' & Hfresh): exists_commit_fresh HwfG.
       forwards* Heq: same_expressions_same_domain.
       rewrite Heq in H6.
-      asserts (h' & cheat): (exists h, Branching.commit_fresh (C, P) h). admit.
       asserts* Hneq: (t <> t').
-      exists. constructors*. admit.
-    + destruct G as (C & P).
-      apply Hexp in H4 as (d' & h' & Hbinds').
-      asserts cheat: (d = \{}). admit. (* terminated thread has an empty staging area. *)
-      substs.
+      asserts (T' & G' & Hpush): (exists T' G', push_thread t t' h' T[t:=(state_running, te_exp (K t'), d, h)][t':=(state_new, te_exp e', \{}, 0)] (C, P) = (T', G')).
+      {
+        exists. unfolds push_thread, do_commit.
+        rewrite~ read_update_neq.
+        rewrite read_update_same.
+        rewrite~ read_update_neq.
+        rewrite read_update_same.
+        reflexivity.
+      }
       exists. constructors*.
-      all: admit.
+    + destruct G as (C & P).
+      forwards (h'' & Hfresh): exists_commit_fresh HwfG.
+      apply Hexp in H4 as (d' & h' & Hbinds').
+      asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_thread t t' h'' T (C, P) = (T', G') /\
+                                                           binds T' t (state_running, te_exp e, d', h'')).
+      {
+        exists. unfolds pull_thread, do_merge.
+        forwards Hread: read_of_binds Hbinds.
+        replace T[t'] with (state_terminated, te_ret r, d, h).
+        forwards Hread': read_of_binds Hbinds'.
+        replace T[t] with (state_running, te_exp e, d', h').
+        splits.
+        - reflexivity.
+        - apply binds_update_same.
+      }
+      asserts Hempty: (d = \{}).
+      {
+        admit. (* terminated thread has an empty staging area. *)
+      }
+      substs.
+      asserts Hmerge: (conflict_free_merge d' h' h (C, P)).
+      {
+        admit.
+      }
+      exists. constructors*.
     + exists. constructors*.
       admit. (* Correspondence between locks via log *)
       all: admit.
@@ -91,17 +131,13 @@ Proof.
     + exists. constructors*.
     + exists. constructors*.
     + exists. constructors*.
-(*      destruct HdescB as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite').
-      forwards~: Hwrite H4.
-      subst. apply Hwrite'.
-      forwards~ aoeu: LoggingBranching.find_write_writes_location H6. *)
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & _ & _ & _ & (D & TC & LC & Hplay & Hdelta & Hlocks)).
+      destruct HdescB as (_ & _ & _ & _ & _ & _ & (D & TC & LC & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       apply Hwrite.
-      (* i |-> v \in D[t] -> v is an uncommited write of t in the tail of the log *) admit.
+      (* i |-> v \in D[t] -> v is an uncommited write of t in the tail of the log *)
+      admit.
     + exists. constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
       destruct HdescB as (_ & _ & _ & _ & _ & _ & (D & TC & LC & Hplay & Hdelta & Hlocks)).
@@ -138,4 +174,3 @@ Lemma conflict_free_log_describes_conflict_free_graph :
     conflict_free log ->
     describes log G ->
     conflict_free G. *)
-

@@ -66,10 +66,33 @@ Inductive ancestor (G : graph) : commit -> commit -> Prop :=
 (* TODO: What is the relation between the data and ancestry? They
 should correspond domain-wise *)
 Definition wf_graph (G : graph) :=
+  (let '(C, _) := G in LibMap.finite C) /\
   forall h1 h2,
     ancestor G h1 h2 ->
     ancestor G h2 h1 ->
     h1 = h2.
+
+Lemma mem_le_sum : forall (n : nat) (l : list nat),
+  mem n l -> n <= fold_right plus 0 l.
+Proof.
+  introv Hmem. induction Hmem; rewrite fold_right_cons; nat_math.
+Qed.
+
+Lemma exists_commit_fresh :
+  forall G,
+    wf_graph G ->
+    exists h, commit_fresh G h.
+Proof.
+  introv [Hfin _]. destruct G as [C P].
+  simpl in Hfin.
+  lets (l & Hcov): finite_inv_list_covers Hfin.
+  exists (1 + fold_right plus 0 l).
+  unfolds commit_fresh. simpl.
+  introv Hindom.
+  forwards Hmem: Hcov Hindom.
+  forwards Hle: mem_le_sum Hmem.
+  nat_math.
+Qed.
 
 Definition change_set (G : graph) (h1 h2 : commit) : set loc :=
   fun i =>
@@ -182,8 +205,8 @@ Definition do_merge (t : tid) (h h_new : commit)
     : threads * graph :=
   let '(C, P) := G in
   let '(ts, e, d, h_t) := T[t] in
-  (T[t := (ts, e, empty, h_new)],
-   (C[h_new := d], \{(h_t, h_new)} \u \{(h, h_new)} \u P)).
+  (T[t := (ts, e, d, h_new)],
+   (C[h_new := empty], \{(h_t, h_new)} \u \{(h, h_new)} \u P)).
 
 Definition pull_thread (t t' : tid) (h_new : commit)
     (T : threads) (G : graph)
@@ -233,6 +256,7 @@ Example latest_value_exact :
     is_latest_value (C, P) h i v.
 Proof.
   introv Hwf Hbinds Hbinds'.
+  destruct Hwf as [_ Hwf].
   exists h. splits.
   - apply AncestorRefl.
   - exists d. splits*.
@@ -279,23 +303,22 @@ Inductive step : cfg -> cfg -> Prop :=
     commit_fresh G h'' ->
     pull_thread t t' h'' T G = (T', G') ->
     binds T' t (state_running, te_exp e, d, h'') ->
-    step (T, G, L) (T[t := (state_running, te_exp (K r), d, h'')], G', L)
-| StepLock : forall T T' G G' L t e d h h' K l,
+    step (T, G, L) (T'[t := (state_running, te_exp (K r), d, h'')], G', L)
+| StepLock : forall T T' G G' L t e d h h' h'' K l,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_lock l) ->
     binds L l (ls_free, h') ->
     conflict_free_merge d h h' G ->
-    commit_fresh G h' ->
-    pull_lock t l h' T G L = (T', G') ->
-    binds T' t (state_running, te_exp e, d, h') ->
-    step (T, G, L) (T[t := (state_running, te_exp (K void), d, h')], G', L[l := (ls_held t, h')])
+    commit_fresh G h'' ->
+    pull_lock t l h'' T G L = (T', G') ->
+    binds T' t (state_running, te_exp e, d, h'') ->
+    step (T, G, L) (T'[t := (state_running, te_exp (K void), d, h'')], G', L[l := (ls_held t, h')])
 | StepRelease : forall T T' G G' (L L' : locks) t e d h h' h'' K l,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_unlock l) ->
-    binds L l (ls_held t, h'') ->
-    commit_fresh G h' ->
-    push_lock t l h' T G L = (T', G', L') ->
-    binds T' t (state_running, te_exp e, empty, h') ->
-    step (T, G, L) (T[t := (state_running, te_exp (K void), empty, h')], G', L'[l := (ls_free, h')])
+    binds L l (ls_held t, h') ->
+    commit_fresh G h'' ->
+    push_lock t l h'' T G L = (T', G', L') ->
+    binds T' t (state_running, te_exp e, empty, h'') ->
+    step (T, G, L) (T'[t := (state_running, te_exp (K void), empty, h'')], G', L'[l := (ls_free, h'')])
 .
-
