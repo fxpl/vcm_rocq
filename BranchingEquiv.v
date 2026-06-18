@@ -31,6 +31,260 @@ Proof.
     exists (st, e). apply* Hexp.
 Qed.
 
+Lemma conflict_free_last_local_write :
+  forall log D TC G LC t i v,
+    conflict_free log ->
+    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) ->
+    t \indom D ->
+    binds D[t] i v ->
+    exists log', LibList.filter (fun e => writes_location i e) log = log' & event_write t i v.
+Proof.
+  introv Hcf Hplay Hdom Hdelta.
+  hint conflict_free_last_inv.
+  hint inhab_val.
+  inductions Hplay.
+  - forwards*: indom_empty_inv.
+  - inverts H.
+    + (* PlayRead*)
+      forwards* (log' & Hfilter): IHHplay.
+      exists log'.
+      rew_listx. cases_if. rew_list*.
+    + (* PlayWrite *)
+      destruct (classic (t = t0)).
+      * subst. rewrite read_update_same in Hdelta.
+        destruct (classic (i = i0)).
+        -- subst.
+           forwards ->: binds_update_same_inv Hdelta.
+           exists. rew_listx*. cases_if*.
+        -- forwards~ Hdelta': binds_update_neq_inv Hdelta.
+           asserts Hbinds: (binds D'[t0] i v).
+           {
+             forwards : read_of_binds H2.
+             subst*.
+           }
+           forwards* (log' & Hfilter): IHHplay.
+           exists log'.
+           rew_listx. cases_if. rew_list*.
+      * rewrite~ read_update_neq in Hdelta.
+        rew_dom. rew_set in Hdom. branches; [|congruence].
+        forwards* (log' & Hfilter): IHHplay.
+        exists log'.
+        rew_listx. cases_if as Hwrites.
+        -- simpl in Hwrites. subst. false.
+           (* There is at least one write by t to i0 in log (by Hfilter).
+              This write is in the delta of t (by Hdelta), so it has not been committed.
+              The log is conflict free (by Hcf) so the write by t to i0
+              happens before the write by t0 to i0.
+              But since t <> t0 and the write is uncommitted, the happens before
+              relation is a contradiction.
+            *)
+           asserts Hmem: (mem (event_write t i0 v) (LibList.filter (fun e => writes_location i0 e) log)).
+           {
+             rewrite Hfilter. rew_listx*.
+           }
+           asserts Hmem1: (mem (event_write t i0 v) (log & event_write t0 i0 v0)).
+           {
+             forwards (Hmem' & _): mem_filter_inv Hmem.
+             rew_listx~.
+           }
+           forwards (m & Hmth): mem_Nth Hmem1.
+           asserts Hneq: (m <> length log).
+           {
+             intros contra. subst.
+             forwards [contra | (k & Heq & Hnth)]: Nth_app_inv Hmth.
+             - forwards*: Nth_inbound contra.
+             - asserts* Heq': (k = 0).
+               subst.
+               forwards* [(_ & contra) | (? & contra)]: Nth_cons_inv Hnth.
+           }
+           asserts Hlt: (m < length log).
+           {
+             forwards Hlt: Nth_inbound Hmth.
+             rew_list* in Hlt.
+           }
+           asserts Hnth: (LibList.Nth (length log) (log & event_write t0 i0 v0) (event_write t0 i0 v0)).
+           {
+             applys* Nth_app_r'.
+           }
+           forwards Hhb: Hcf Hmth Hnth Hlt.
+           clears Hneq Hlt.
+           admit. (* After event m, t may not have another write
+           of i0, a start or end event, a spawn event, or an
+           unlock event. There cannot be a join of t0 since it has
+           not ended, and any locks taken by t are still held.
+           Since there are no possible synchronisation events *)
+        -- rew_list*.
+    + (* PlayStart *)
+      forwards* (log' & Hfilter): IHHplay.
+      exists log'.
+      rew_listx. cases_if. rew_list*.
+    + (* PlayEnd *)
+      asserts Hneq: (t <> t0).
+      {
+        intros contra.
+        subst. rewrite read_update_same in Hdelta.
+        forwards contra: (indom_of_binds Hdelta).
+        forwards*: indom_empty_inv.
+      }
+      rewrite~ read_update_neq in Hdelta.
+      rew_dom. rew_set in Hdom. inverts Hdom; [|congruence].
+      forwards* (log' & Hfilter): IHHplay.
+      exists log'.
+      rew_listx. cases_if. rew_list*.
+    + (* PlaySpawn *)
+      asserts Hneq2: (t <> t2).
+      {
+        intros contra.
+        subst. rewrite read_update_same in Hdelta.
+        forwards contra: (indom_of_binds Hdelta).
+        forwards*: indom_empty_inv.
+      }
+      rewrite~ read_update_neq in Hdelta.
+      asserts Hneq1: (t <> t1).
+      {
+        intros contra.
+        subst. rewrite read_update_same in Hdelta.
+        forwards contra: (indom_of_binds Hdelta).
+        forwards*: indom_empty_inv.
+      }
+      rewrite~ read_update_neq in Hdelta.
+      rew_dom. rew_set in Hdom. repeat (branches; [|congruence]).
+      forwards* (log' & Hfilter): IHHplay.
+      exists log'.
+      rew_listx. cases_if. rew_list*.
+    + (* PlayJoin *)
+      forwards* (log' & Hfilter): IHHplay.
+      exists log'.
+      rew_listx. cases_if. rew_list*.
+    + (* PlayLock*)
+      forwards* (log' & Hfilter): IHHplay.
+      exists log'.
+      rew_listx. cases_if. rew_list*.
+    + (* PlayUnlock*)
+      asserts Hneq: (t <> t0).
+      {
+        intros contra.
+        subst. rewrite read_update_same in Hdelta.
+        forwards contra: (indom_of_binds Hdelta).
+        forwards*: indom_empty_inv.
+      }
+      rewrite~ read_update_neq in Hdelta.
+      rew_dom. rew_set in Hdom. inverts Hdom; [|congruence].
+      forwards* (log' & Hfilter): IHHplay.
+      exists log'.
+      rew_listx. cases_if. rew_list*.
+Admitted.
+
+Lemma is_latest_value_commit_fresh :
+  forall G c c' d h i v,
+    commit_fresh G c' ->
+    h <> c' ->
+    is_latest_value (graph_commit G c c' d) i v h ->
+    is_latest_value G i v h.
+Proof.
+  Admitted.
+
+Lemma conflict_free_last_global_write :
+  forall log D TC G LC t i v h,
+    conflict_free log ->
+    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) ->
+    i \notindom (D[t]) ->
+    t \indom TC ->
+    TC[t] = h ->
+    is_latest_value G i v h ->
+    exists t' log', LibList.filter (fun e => writes_location i e) log = log' & event_write t' i v.
+Proof.
+  introv Hcf Hplay Hndom Hdom HTC Hval.
+  hint conflict_free_last_inv.
+  hint inhab_val.
+  inductions Hplay.
+  - forwards*: indom_empty_inv.
+  - inverts H.
+    + (* PlayRead*)
+      forwards* (t' & log' & Hfilter): IHHplay.
+      exists t' log'.
+      rew_listx. cases_if. rew_list*.
+    + (* PlayWrite *)
+      destruct (classic (t = t0)).
+      * subst. rewrite read_update_same in *.
+        destruct (classic (i = i0)).
+        -- subst.
+           rew_dom. false Hndom.
+           rew_set. auto.
+        -- rew_dom.
+           asserts Hndom': (i \notindom D'[t0]).
+           {
+             intros contra. apply Hndom.
+             forwards: read_of_binds H2.
+             subst. rew_set. auto.
+           }
+           forwards* (t' & log' & Hfilter): IHHplay.
+           exists t' log'.
+           rew_listx. cases_if. rew_list*.
+      * rewrite~ read_update_neq in Hndom.
+        forwards* (t' & log' & Hfilter): IHHplay.
+        exists t' log'.
+        rew_listx. cases_if as Hwrites.
+        -- simpl in Hwrites. subst. false.
+           asserts Hmem: (mem (event_write t' i0 v) (LibList.filter (fun e => writes_location i0 e) log)).
+           {
+             rewrite Hfilter. rew_listx*.
+           }
+           asserts Hmem1: (mem (event_write t' i0 v) (log & event_write t0 i0 v0)).
+           {
+             forwards (Hmem' & _): mem_filter_inv Hmem.
+             rew_listx~.
+           }
+           forwards (m & Hmth): mem_Nth Hmem1.
+           asserts Hneq: (m <> length log).
+           {
+             admit.
+           }
+           asserts Hlt: (m < length log).
+           {
+             forwards Hlt: Nth_inbound Hmth.
+             rew_list* in Hlt.
+           }
+           asserts Hnth: (LibList.Nth (length log) (log & event_write t0 i0 v0) (event_write t0 i0 v0)).
+           {
+             applys* Nth_app_r'.
+           }
+           forwards Hhb: Hcf Hmth Hnth Hlt.
+           clears Hneq Hlt.
+           admit.
+        -- rew_list*.
+    + (* PlayStart *)
+      forwards* (t' & log' & Hfilter): IHHplay.
+      exists t' log'.
+      rew_listx. cases_if. rew_list*.
+    + (* PlayEnd: thread t0 ends, committing staging area d as fresh commit c'.
+         Pre-state: (D, TC, (C, P), LC).
+         Constructor hypotheses (names may vary): binds TC t0 c, c' \notindom C, binds D t0 d. *)
+      destruct (classic (t = t0)) as [-> | Hne].
+      * (* t = t0: HTC reduces to c' = h *)
+        rewrite read_update_same in HTC. subst.
+        admit.
+      * (* t ≠ t0: rewrite post-state hypotheses back to the pre-state *)
+        rewrite~ read_update_neq in HTC.
+        rewrite~ read_update_neq in Hndom.
+        rew_dom. rew_set in Hdom. branches; [| congruence].
+        asserts Hval' : (is_latest_value G' i v h).
+        { applys~ is_latest_value_commit_fresh c c' d.
+          (* Surely all commits in TC is also in C *)
+          admit.
+        }
+        forwards* (t'' & log'' & Hfilter): IHHplay.
+        exists t'' log''. rew_listx. cases_if. rew_list*.
+    + (* PlaySpawn *)
+      admit.
+    + (* PlayJoin *)
+      admit.
+    + (* PlayLock*)
+      admit.
+    + (* PlayUnlock*)
+      admit.
+Admitted.
+
 Theorem branching_equiv :
   forall log log' cfgSh cfgB,
     wf_log log ->
@@ -55,9 +309,8 @@ Proof.
           apply Hexp in H as (d & h & Hbinds)
       end.
     + exists. constructors*.
-    + destruct G as (C & P).
-      forwards (h' & Hfresh): exists_commit_fresh HwfG.
-      asserts (T' & G' & Hcommit): (exists T' G', do_commit t h' T (C, P) = (T', G')).
+    + forwards (h' & Hfresh): exists_commit_fresh HwfG.
+      asserts (T' & G' & Hcommit): (exists T' G', do_commit t h' T G = (T', G')).
       {
         exists. unfolds do_commit.
         forwards Hread: read_of_binds Hbinds.
@@ -69,12 +322,11 @@ Proof.
       apply Hwrite in H6 as (t' & log' & Hfilter).
       admit. (* Cases on whether it is a global or local read *)
     + exists. constructors*.
-    + destruct G as (C & P).
-      forwards (h' & Hfresh): exists_commit_fresh HwfG.
+    + forwards (h' & Hfresh): exists_commit_fresh HwfG.
       forwards* Heq: same_expressions_same_domain.
       rewrite Heq in H6.
       asserts* Hneq: (t <> t').
-      asserts (T' & G' & Hpush): (exists T' G', push_thread t t' h' T[t:=(state_running, te_exp (K t'), d, h)][t':=(state_new, te_exp e', \{}, 0)] (C, P) = (T', G')).
+      asserts (T' & G' & Hpush): (exists T' G', push_thread t t' h' T[t:=(state_running, te_exp (K t'), d, h)][t':=(state_new, te_exp e', \{}, 0)] G = (T', G')).
       {
         exists. unfolds push_thread, do_commit.
         rewrite~ read_update_neq.
@@ -84,10 +336,9 @@ Proof.
         reflexivity.
       }
       exists. constructors*.
-    + destruct G as (C & P).
-      forwards (h'' & Hfresh): exists_commit_fresh HwfG.
+    + forwards (h'' & Hfresh): exists_commit_fresh HwfG.
       apply Hexp in H4 as (d' & h' & Hbinds').
-      asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_thread t t' h'' T (C, P) = (T', G') /\
+      asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_thread t t' h'' T G = (T', G') /\
                                                            binds T' t (state_running, te_exp e, d', h'')).
       {
         exists. unfolds pull_thread, do_merge.
@@ -104,20 +355,31 @@ Proof.
         admit. (* terminated thread has an empty staging area. *)
       }
       substs.
-      asserts Hmerge: (conflict_free_merge d' h' h (C, P)).
+      asserts Hmerge: (conflict_free_merge d' h' h G).
       {
         admit.
       }
       exists. constructors*.
     + exists. constructors*.
       admit. (* Correspondence between locks via log *)
-      all: admit.
-    + destruct G as (C & P).
-      asserts (h' & cheat): (exists h, Branching.commit_fresh (C, P) h). admit.
+      all: admit. (* This is where things are shelved *)
+    + forwards (h'' & Hfresh): exists_commit_fresh HwfG.
+      asserts (h' & HbindsL): (exists h', binds L l0 (ls_held t, h')).
+      {
+        admit.
+      }
+      asserts (T' & G' & L' & Hpush & Hbinds'): (exists T' G' L', push_lock t l0 h'' T G L = (T', G', L') /\ binds T' t (state_running, te_exp e, \{}, h'')).
+      {
+        exists. unfolds push_lock, do_commit.
+        forwards Hread: read_of_binds Hbinds.
+        replace T[t] with (state_running, te_exp e, d, h).
+        forwards Hread': read_of_binds HbindsL.
+        replace L[l0] with (ls_held t, h').
+        splits.
+        - reflexivity.
+        - apply binds_update_same.
+      }
       exists. constructors*.
-      * admit. (* Correspondence between locks via log *)
-      * admit.
-      * apply* binds_update_same.
   - introv (cfgB' & Hstep).
     destruct cfgSh as ((Tsh & H) & Lsh).
     inverts Hstep;
@@ -136,14 +398,22 @@ Proof.
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       apply Hwrite.
-      (* i |-> v \in D[t] -> v is an uncommited write of t in the tail of the log *)
-      admit.
+      forwards Hcf': conflict_free_last_inv Hcf.
+      forwards* Hbinds'': HdomD t.
+      forwards* Hex: conflict_free_last_local_write Hplay.
     + exists. constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & _ & _ & _ & (D & TC & LC & Hplay & Hdelta & Hlocks)).
+      destruct HdescB as (_ & _ & _ & _ & _ & _ & (D & TC & LC & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
+      forwards~ (ts & e' & Hbinds'): Hdelta t.
+      asserts* ->: (d = D[t]).
+      forwards* Heq: binds_inj Hbinds'.
+      inverts Heq.
+      asserts* ->: (h = TC[t]).
       apply Hwrite.
-      (* latest value is also latest value in commit graph *)
-      admit. (* binds H i v from global read *)
+      forwards Hcf': conflict_free_last_inv Hcf.
+      asserts* Hdom: (t \indom T).
+      forwards~ Hdom': HdomTC Hdom.
+      forwards* Hex: conflict_free_last_global_write Hplay.
     + exists. constructors*.
     + exists. constructors*.
       forwards* ->: same_expressions_same_domain.

@@ -44,6 +44,7 @@ Definition is_write (e : event) :=
 
 Definition log := list event.
 
+(*
 Inductive hb (log : log) : event -> event -> Prop :=
 | HbPo : forall l1 l2 t e1 e2,
     (* Events are adjacent when projecting the program order of a thread *)
@@ -67,11 +68,46 @@ Inductive hb (log : log) : event -> event -> Prop :=
     mem (event_end t2) l1 ->
     mem (event_join t1 t2) l2 ->
     hb log (event_end t2) (event_join t1 t2)
-| HbTrans : forall e1 e2 e3,
+| HbTrans: forall e1 e2 e3,
     (* Transitivity *)
     hb log e1 e2 ->
     hb log e2 e3 ->
     hb log e1 e3
+.
+*)
+
+Inductive hb (log : log) : nat -> nat -> Prop :=
+| HbPo : forall m n t e1 e2,
+    (* Events are ordered within a thread *)
+    LibList.Nth m log e1 ->
+    LibList.Nth n log e2 ->
+    get_thread e1 = t ->
+    get_thread e2 = t ->
+    m < n ->
+    hb log m n
+| HbLock : forall n m t1 t2 l,
+    (* All lock events of a lock are ordered after preceding unlock events *)
+    LibList.Nth m log (event_unlock t1 l) ->
+    LibList.Nth n log (event_lock t2 l) ->
+    m < n ->
+    hb log m n
+| HbSpawn : forall m n t1 t2,
+    (* The spawn event of a thread is before its start event *)
+    LibList.Nth m log (event_spawn t1 t2) ->
+    LibList.Nth n log (event_start t2) ->
+    m < n ->
+    hb log m n
+| HbJoin : forall m n t1 t2,
+    (* The end event of a thread is before its join event(s) *)
+    LibList.Nth m log (event_end t2) ->
+    LibList.Nth n log (event_join t1 t2) ->
+    m < n ->
+    hb log m n
+| HbTrans : forall m n k,
+    (* Transitivity *)
+    hb log m k ->
+    hb log k n ->
+    hb log m n
 .
 
 Inductive wf_lock_log : log -> Prop :=
@@ -133,6 +169,7 @@ Definition wf_log (log : log) : Prop :=
   )
 .
 
+(*
 Definition conflict_free (log : log) : Prop :=
   forall l1 l2 t1 t2 i v1 v2,
     log = l1 ++ l2 ->
@@ -141,6 +178,15 @@ Definition conflict_free (log : log) : Prop :=
     (* mem e l2 -> *)
     (* (e = event_write t2 i v2 \/ e = event_read t2 i v2) -> *)
     hb log (event_write t1 i v1) (event_write t2 i v2)
+.
+*)
+
+Definition conflict_free (log : log) : Prop :=
+  forall m n t1 t2 i v1 v2,
+    LibList.Nth m log (event_write t1 i v1) ->
+    LibList.Nth n log (event_write t2 i v2) ->
+    m < n ->
+    hb log m n
 .
 
 Lemma last_eq_middle_inv :
@@ -201,7 +247,7 @@ Proof.
       apply (IHHwf log''). rew_list~.
 Qed.
 
-Lemma unique_spawn_snoc' :
+Lemma unique_spawn_snoc :
   forall log e t2,
     length (LibList.filter (fun e => exists t1, e = event_spawn t1 t2) log) <= 1 ->
     ~(exists t1 t2, e = event_spawn t1 t2) ->
@@ -214,3 +260,68 @@ Proof.
     false Hnex. unpack. substs*.
 Qed.
 
+Lemma conflict_free_nil :
+  conflict_free nil.
+Proof.
+  introv Hnth1 Hnth2 Hlt.
+  inverts Hnth1.
+Qed.
+
+Lemma hb_lt :
+  forall log m n,
+    hb log m n ->
+    m < n.
+Proof.
+  introv Hhb.
+  induction* Hhb.
+Qed.
+
+Lemma hb_app_inv :
+  forall l1 l2 m n,
+    hb (l1 ++ l2) m n ->
+    n < length l1 ->
+    hb l1 m n.
+Proof.
+  introv Hhb Hlt.
+  induction Hhb.
+  - rew_listx in H1.
+    forwards* Hdisj1: Nth_app_inv m.
+    inverts Hdisj1; [| unpack; nat_math].
+    forwards* Hdisj2: Nth_app_inv n.
+    inverts Hdisj2; [| unpack; nat_math].
+    applys* HbPo.
+  - rew_listx in H1.
+    forwards* Hdisj1: Nth_app_inv m.
+    inverts Hdisj1; [| unpack; nat_math].
+    forwards* Hdisj2: Nth_app_inv n.
+    inverts Hdisj2; [| unpack; nat_math].
+    applys* HbLock.
+  - forwards* Hdisj1: Nth_app_inv m.
+    forwards* Hdisj2: Nth_app_inv n.
+    inverts Hdisj1; [| unpack; nat_math].
+    inverts Hdisj2; [| unpack; nat_math].
+    applys* HbSpawn.
+  - forwards* Hdisj1: Nth_app_inv m.
+    forwards* Hdisj2: Nth_app_inv n.
+    inverts Hdisj1; [| unpack; nat_math].
+    inverts Hdisj2; [| unpack; nat_math].
+    applys* HbJoin.
+  - hint hb_lt.
+    asserts* Hlt': (k < n).
+    applys* HbTrans.
+Qed.
+
+Lemma conflict_free_last_inv :
+  forall log e,
+    conflict_free (log & e) ->
+    conflict_free log.
+Proof.
+  introv Hcf.
+  introv Hnth1 Hnth2 Hlt.
+  hint Nth_app_l.
+  asserts* Hnth1': (LibList.Nth m (log0 & e) (event_write t1 i v1)).
+  asserts* Hnth2': (LibList.Nth n (log0 & e) (event_write t2 i v2)).
+  forwards* Hhb: Hcf Hnth1' Hnth2'.
+  applys* hb_app_inv.
+  applys* Nth_inbound.
+Qed.

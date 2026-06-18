@@ -21,35 +21,35 @@ Inductive play_event : event -> (deltas * commits * graph * lcommits) -> (deltas
   forall D TC G LC t,
     play_event (event_start t) (D, TC, G, LC) (D, TC, G, LC)
 | PlayEnd :
-  forall D TC C P LC t c c' d,
+  forall D TC G LC t c c' d,
     binds TC t c ->
-    c' \notindom C ->
+    commit_fresh G c' ->
     binds D t d ->
-    play_event (event_end t) (D, TC, (C, P), LC) (D[t := empty], TC[t := c'], (C[c' := d], \{(c, c')} \u P), LC)
+    play_event (event_end t) (D, TC, G, LC) (D[t := empty], TC[t := c'], graph_commit G c c' d, LC)
 | PlaySpawn :
-  forall D TC C P LC t1 t2 c c' d,
+  forall D TC G LC t1 t2 c c' d,
     binds TC t1 c ->
-    c' \notindom C ->
+    commit_fresh G c' ->
     binds D t1 d ->
-    play_event (event_spawn t1 t2) (D, TC, (C, P), LC) (D[t1 := empty][t2 := empty], TC[t1 := c'][t2 := c'], (C[c' := d], \{(c, c')} \u P), LC)
+    play_event (event_spawn t1 t2) (D, TC, G, LC) (D[t1 := empty][t2 := empty], TC[t1 := c'][t2 := c'], graph_commit G c c' d, LC)
 | PlayJoin :
-  forall D TC C P LC t1 t2 c1 c2 c',
+  forall D TC G LC t1 t2 c1 c2 c',
     binds TC t1 c1 ->
     binds TC t2 c2 ->
-    c' \notindom C ->
-    play_event (event_join t1 t2) (D, TC, (C, P), LC) (D, TC[t1 := c'], (C[c' := empty], \{(c1, c')} \u \{(c2, c')} \u P), LC)
+    commit_fresh G c' ->
+    play_event (event_join t1 t2) (D, TC, G, LC) (D, TC[t1 := c'], graph_merge G c2 c1 c', LC)
 | PlayLock :
-  forall D TC C P LC t l c1 c2 c',
+  forall D TC G LC t l c1 c2 c',
     binds TC t c1 ->
     binds LC l c2 ->
-    c' \notindom C ->
-    play_event (event_lock t l) (D, TC, (C, P), LC) (D, TC[t := c'], (C[c' := empty], \{(c1, c')} \u \{(c2, c')} \u P), LC)
+    commit_fresh G c' ->
+    play_event (event_lock t l) (D, TC, G, LC) (D, TC[t := c'], graph_merge G c2 c1 c', LC)
 | PlayUnlock :
-  forall D TC C P LC t l c c' d,
+  forall D TC G LC t l c c' d,
     binds TC t c ->
-    c' \notindom C ->
+    commit_fresh G c' ->
     binds D t d ->
-    play_event (event_unlock t l) (D, TC, (C, P), LC) (D[t := empty], TC[t := c'], (C[c' := d], \{(c, c')} \u P), LC[l := c'])
+    play_event (event_unlock t l) (D, TC, G, LC) (D[t := empty], TC[t := c'], graph_commit G c c' d, LC[l := c'])
 .
 
 Inductive play_log : log -> (deltas * commits * graph * lcommits) -> (deltas * commits * graph * lcommits) -> Prop :=
@@ -233,7 +233,7 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_read i) ->
     i \notindom d ->
-    is_latest_value G h i v ->
+    is_latest_value G i v h ->
     step ((T, G, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, h)], G, L), log & event_read t i v)
 | StepWrite : forall T G L t e d h K i v log,
     binds T t (state_running, te_exp e, d, h) ->
@@ -802,7 +802,6 @@ Proof.
   - (* StepEnd: log' = log & event_end t, T' = T'[t := terminated] *)
     destruct Hdesc as (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay).
     unfolds do_commit. simpl in H5.
-    destruct G as (C & P).
     asserts Ht: (T[t] = (state_running, te_ret r, d, h)).
     { apply* read_of_binds. }
     replace (T[t]) with (state_running, te_ret r, d, h) in H5.
@@ -912,10 +911,9 @@ Proof.
       asserts Htc: (TC[t] = h). { congruence. }
       exists (D[t := empty]) (TC[t := h']) LC. splits*.
       * applys PlaySnoc Hplay.
-        apply (PlayEnd _ _ _ _ _ _ h h' d).
-        { apply HdomTC in Htin. erewrite* binds_eq_indom_read. }
-        { match goal with H: commit_fresh (C, P) h' |- _ => exact H end. }
-        { apply HdomD in Htin. erewrite* binds_eq_indom_read. }
+        apply (PlayEnd _ _ _ _ _ h h' d); auto.
+        -- apply HdomTC in Htin. erewrite* binds_eq_indom_read.
+        -- apply HdomD in Htin. erewrite* binds_eq_indom_read.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
         -- asserts Hd_new: (D[t := empty][t] = empty). { rew_map*. }
@@ -1297,7 +1295,6 @@ Proof.
         rew_set in Hmem. branches; auto_star.
   - (* StepSpawn: log' = log & event_spawn t t', T' = T'[t := ...][t' := new] *)
     destruct Hdesc as (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay).
-    destruct G as (C & P).
     asserts* Hneq: (t' <> t).
     unfolds push_thread, do_commit. simpl in H7.
     rewrite~ read_update_neq in H7. rewrite~ read_update_same in H7.
@@ -1465,10 +1462,9 @@ Proof.
       asserts Htc: (TC[t] = h). { congruence. }
       exists (D[t := empty][t' := empty]) (TC[t := h'][t' := h']) LC. splits*.
       * applys PlaySnoc Hplay.
-        apply (PlaySpawn _ _ _ _ _ _ _ h h' d).
-        { apply HdomTC in Htin. erewrite* binds_eq_indom_read. }
-        { match goal with H: commit_fresh (C, P) h' |- _ => exact H end. }
-        { apply HdomD in Htin. erewrite* binds_eq_indom_read. }
+        apply (PlaySpawn _ _ _ _ _ _ h h' d); auto.
+        -- apply HdomTC in Htin. erewrite* binds_eq_indom_read.
+        -- apply HdomD in Htin. erewrite* binds_eq_indom_read.
       * intros t0 Hin.
         destruct (classic (t0 = t')) as [->|Hneq'].
         -- asserts Hd_t': ((D[t := empty][t' := empty])[t'] = empty).
@@ -1512,7 +1508,6 @@ Proof.
   - (* StepJoin: log' = log & event_join t t', T' = T[t := running K(r)] *)
     destruct Hdesc as (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay).
     asserts* Hneq: (t' <> t).
-    destruct G as (C & P).
     unfolds pull_thread, do_merge.
     asserts Ht': (T[t'] = (state_terminated, te_ret r, empty, h')).
     { apply* read_of_binds. }
@@ -1621,17 +1616,12 @@ Proof.
       forwards* Heq': binds_inj H5 Hbinds_delta'.
       exists D (TC[t := h'']) LC. splits*.
       * applys PlaySnoc Hplay.
-        apply (PlayJoin _ _ _ _ _ _ _ h h' h'').
-        {
-          inverts Heq.
-          apply HdomTC in Htin.
-          applys* binds_of_indom_read.
-        }
-        {
-          inverts Heq'.
-          applys* binds_of_indom_read.
-        }
-        { match goal with H: commit_fresh (C, P) h'' |- _ => exact H end. }
+        apply (PlayJoin _ _ _ _ _ _ h h' h''); auto.
+        -- inverts Heq.
+           apply HdomTC in Htin.
+           applys* binds_of_indom_read.
+        -- inverts Heq'.
+           applys* binds_of_indom_read.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq_t0].
         -- asserts Hd_t: (D[t] = d). { congruence. }
@@ -1653,7 +1643,6 @@ Proof.
         branches; auto_star.
   - (* StepLock: log' = log & event_lock t l, T' = T[t := ...], L' = L[l := held t] *)
     destruct Hdesc as (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay).
-    destruct G as (C & P).
     unfolds pull_lock, do_merge.
     asserts Hl: (L[l] = (ls_free, h')).
     { apply* read_of_binds. }
@@ -1794,14 +1783,11 @@ Proof.
       rewrite~ update_update.
       exists D (TC[t := h'']) LC. splits*.
       * applys PlaySnoc Hplay.
-        apply (PlayLock _ _ _ _ _ _ _ h h' h'').
-        { inverts Heq.
-          apply* binds_of_indom_read.
-        }
-        { inverts Heq'.
-          apply* binds_of_indom_read.
-        }
-        { match goal with H: commit_fresh (C, P) h'' |- _ => exact H end. }
+        apply (PlayLock _ _ _ _ _ _ h h' h''); auto.
+        -- inverts Heq.
+           apply* binds_of_indom_read.
+        -- inverts Heq'.
+           apply* binds_of_indom_read.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq_t0].
         -- asserts~ Hd_t: (D[t] = d).
@@ -1831,7 +1817,6 @@ Proof.
         rew_set in Hmem. branches; auto_star.
   - (* StepRelease: log' = log & event_unlock t l, T' = T[t := ...], L' = L'[l := free] *)
     destruct Hdesc as (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay).
-    destruct G as (C & P).
     unfolds push_lock, do_commit.
     asserts Ht: (T[t] = (state_running, te_exp e, d, h)).
     { apply* read_of_binds. }
@@ -1970,13 +1955,11 @@ Proof.
       forwards~ Heq': binds_inj H5 Hbinds_l.
       exists (D[t := empty]) (TC[t := h'']) (LC[l := h'']). splits*.
       * applys PlaySnoc Hplay.
-        apply (PlayUnlock _ _ _ _ _ _ _ h h'' d); auto. (* TODO: Do this in every case *)
-        { inverts Heq.
-          apply* binds_of_indom_read.
-        }
-        { inverts Heq.
-          apply* binds_of_indom_read.
-        }
+        apply (PlayUnlock _ _ _ _ _ _ h h'' d); auto.
+        -- inverts Heq.
+           apply* binds_of_indom_read.
+        -- inverts Heq.
+           apply* binds_of_indom_read.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq_t0].
         -- repeat rewrite read_update_same.
