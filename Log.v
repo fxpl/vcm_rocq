@@ -325,3 +325,84 @@ Proof.
   applys* hb_app_inv.
   applys* Nth_inbound.
 Qed.
+
+(* The events that commit a thread's delta, making its local changes visible to
+   other threads ("sync out"). These are exactly the source events of every
+   cross-thread happens-before edge. *)
+Definition is_commit_event (e : event) : Prop :=
+  match e with
+  | event_unlock _ _
+  | event_spawn _ _
+  | event_end _ => True
+  | _ => False
+  end.
+
+(* The events that merge other threads' changes in without committing the
+   thread's own delta. These keep the delta intact. *)
+Definition is_merge_event (e : event) : Prop :=
+  match e with
+  | event_lock _ _
+  | event_join _ _ => True
+  | _ => False
+  end.
+
+Lemma hb_Nth_l :
+  forall log m n,
+    hb log m n ->
+    exists e, LibList.Nth m log e.
+Proof.
+  introv Hhb. induction Hhb; eauto.
+Qed.
+
+Lemma hb_Nth_r :
+  forall log m n,
+    hb log m n ->
+    exists e, LibList.Nth n log e.
+Proof.
+  introv Hhb. induction Hhb; eauto.
+Qed.
+
+(* If [m] is an event of thread [t] and [t] performs no [is_commit_event] event at
+   any index [>= m], then every event [t] happens-before lies on thread [t].
+   Reason: every cross-thread hb edge has an [is_commit_event] source, and a chain
+   leaving [m] can only first cross threads via such a [t]-event at index [>= m]
+   (all base edges strictly increase the index). *)
+Lemma hb_preserves_thread :
+  forall log m n,
+    hb log m n ->
+    forall t em en,
+      LibList.Nth m log em ->
+      get_thread em = t ->
+      (forall p ep, m <= p -> LibList.Nth p log ep -> get_thread ep = t -> ~ is_commit_event ep) ->
+      LibList.Nth n log en ->
+      get_thread en = t.
+Proof.
+  introv Hhb.
+  induction Hhb as
+    [ m n th ea eb HNa HNb Hga Hgb Hlt
+    | n m lt1 lt2 ll HNsrc HNtgt Hlt
+    | m n st1 st2 HNsrc HNtgt Hlt
+    | m n jt1 jt2 HNsrc HNtgt Hlt
+    | m n mid Hmk IHmk Hkn IHkn ];
+    introv Hm Hgt Hns Hn.
+  - (* HbPo: same thread *)
+    forwards Heqa: Nth_functional Hm HNa.
+    forwards Heqb: Nth_functional Hn HNb.
+    congruence.
+  - (* HbLock: source [event_unlock lt1 ll] is a sync_out of t *)
+    forwards Heq: Nth_functional Hm HNsrc. subst em.
+    false (Hns m (event_unlock lt1 ll)); [ nat_math | assumption | assumption | simpl; exact I ].
+  - (* HbSpawn: source [event_spawn st1 st2] is a sync_out of t *)
+    forwards Heq: Nth_functional Hm HNsrc. subst em.
+    false (Hns m (event_spawn st1 st2)); [ nat_math | assumption | assumption | simpl; exact I ].
+  - (* HbJoin: source [event_end jt2] is a sync_out of t *)
+    forwards Heq: Nth_functional Hm HNsrc. subst em.
+    false (Hns m (event_end jt2)); [ nat_math | assumption | assumption | simpl; exact I ].
+  - (* HbTrans: chain through the intermediate index [mid] *)
+    forwards (ek & Hek): hb_Nth_r Hmk.
+    forwards Hgek: IHmk Hm Hgt Hns Hek.
+    asserts Hns': (forall p ep, mid <= p -> LibList.Nth p log0 ep -> get_thread ep = t -> ~ is_commit_event ep).
+    { introv Hle HN Hg. forwards Hlt': hb_lt Hmk.
+      apply Hns with (p := p); [ nat_math | exact HN | exact Hg ]. }
+    applys IHkn Hek Hgek Hns' Hn.
+Qed.

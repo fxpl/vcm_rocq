@@ -15,6 +15,13 @@ Parameter inhab_val : Inhab val.
 Parameter inhab_exc : Inhab exc.
 Parameter inhab_exp : Inhab exp.
 
+(* Register the Inhab witnesses as typeclass instances so that [Inhab val] etc.
+   are resolved automatically (they are [Parameter]s, not [Instance]s, so
+   typeclass resolution would otherwise not find them). *)
+Existing Instance inhab_val.
+Existing Instance inhab_exc.
+Existing Instance inhab_exp.
+
 (* Something to feed to the continuation when no value is needed *)
 Parameter void : val.
 

@@ -31,6 +31,127 @@ Proof.
     exists (st, e). apply* Hexp.
 Qed.
 
+(* Extending a "no commit event of [t] at index >= m" property by one event:
+   it survives appending any event that is not a commit event of [t]. *)
+Lemma no_commit_event_snoc :
+  forall (lg : log) E m t,
+    (forall p ep, m <= p -> LibList.Nth p lg ep -> get_thread ep = t -> ~ is_commit_event ep) ->
+    (get_thread E = t -> ~ is_commit_event E) ->
+    (forall p ep, m <= p -> LibList.Nth p (lg & E) ep -> get_thread ep = t -> ~ is_commit_event ep).
+Proof.
+  introv Hbase HE. introv Hle HN Hg.
+  forwards [HN' | (Hpe & Hee)]: Nth_last_inv HN.
+  - applys* Hbase.
+  - subst ep. applys* HE.
+Qed.
+
+(* A value in a thread's delta corresponds to a write event by that thread with
+   no later commit event by that thread: the write is genuinely uncommitted.
+   This is the play-log analogue of "the delta is the uncommitted suffix",
+   stated with the correct [is_commit_event] (flush) boundary. *)
+Lemma delta_is_uncommitted_write :
+  forall log D TC G LC t i v,
+    play_log log (empty, empty, (empty, empty), empty) (D, TC, G, LC) ->
+    t \indom D ->
+    binds D[t] i v ->
+    exists m,
+      LibList.Nth m log (event_write t i v) /\
+      (forall p ep, m <= p -> LibList.Nth p log ep -> get_thread ep = t -> ~ is_commit_event ep).
+Proof.
+  introv Hplay Hdom Hbinds.
+  inductions Hplay.
+  - (* PlayNil: D = empty *)
+    forwards*: indom_empty_inv.
+  - (* PlaySnoc *)
+    inverts H.
+    + (* PlayRead *)
+      forwards* (wm & wHN & wHns): IHHplay.
+      exists wm. split;
+        [ applys* Nth_app_l wHN
+        | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
+    + (* PlayWrite (event_write t0 i0 v0) *)
+      destruct (classic (t = t0)) as [Het | Hneq].
+      { subst t. rewrite read_update_same in Hbinds.
+        destruct (classic (i = i0)) as [Hei | Hnei].
+        { (* same location: the new event is the witness *)
+          subst i. forwards ->: binds_update_same_inv Hbinds.
+          match goal with |- exists m, LibList.Nth m (?lg & _) _ /\ _ => exists (length lg) end.
+          split.
+          - applys* Nth_app_r'.
+          - introv Hle HN Hg.
+            forwards [HN' | (Hpe & Hee)]: Nth_last_inv HN.
+            + forwards Hib: Nth_inbound HN'. exfalso. nat_math.
+            + subst ep. simpl. auto. }
+        { (* different location: carry the older write forward *)
+          forwards Hbd: binds_update_neq_inv Hbinds Hnei.
+          lets Hin: (indom_of_binds H2).
+          asserts Hb': (binds (D'[t0]) i v). { forwards: read_of_binds H2. subst*. }
+          forwards* (wm & wHN & wHns): IHHplay.
+          exists wm. split;
+            [ applys* Nth_app_l wHN
+            | applys no_commit_event_snoc wHns; intros _; simpl; auto ]. } }
+      { rewrite~ read_update_neq in Hbinds.
+        asserts Hin: (t \indom D').
+        { lets [Hc | Hd]: (indom_update_inv Hdom). congruence. exact Hd. }
+        forwards* (wm & wHN & wHns): IHHplay.
+        exists wm. split;
+          [ applys* Nth_app_l wHN
+          | applys no_commit_event_snoc wHns; intros _; simpl; auto ]. }
+    + (* PlayStart *)
+      forwards* (wm & wHN & wHns): IHHplay.
+      exists wm. split;
+        [ applys* Nth_app_l wHN
+        | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
+    + (* PlayEnd (event_end t0): flushes D[t0] *)
+      destruct (classic (t = t0)) as [Het | Hneq].
+      { subst t. rewrite read_update_same in Hbinds.
+        lets Hi: (indom_of_binds Hbinds). forwards*: indom_empty_inv. }
+      { rewrite~ read_update_neq in Hbinds.
+        asserts Hin: (t \indom D').
+        { lets [Hc | Hd]: (indom_update_inv Hdom). congruence. exact Hd. }
+        forwards* (wm & wHN & wHns): IHHplay.
+        exists wm. split;
+          [ applys* Nth_app_l wHN
+          | applys no_commit_event_snoc wHns; intros Hgt; simpl in Hgt; congruence ]. }
+    + (* PlaySpawn (event_spawn t1 t2): flushes D[t1] and D[t2] *)
+      destruct (classic (t = t2)) as [Het2 | Hneq2].
+      { subst t. rewrite read_update_same in Hbinds.
+        lets Hi: (indom_of_binds Hbinds). forwards*: indom_empty_inv. }
+      { rewrite~ read_update_neq in Hbinds.
+        destruct (classic (t = t1)) as [Het1 | Hneq1].
+        { subst t. rewrite read_update_same in Hbinds.
+          lets Hi: (indom_of_binds Hbinds). forwards*: indom_empty_inv. }
+        { rewrite~ read_update_neq in Hbinds.
+          asserts Hin: (t \indom D').
+          { lets [Hc2 | Hd2]: (indom_update_inv Hdom). congruence.
+            lets [Hc1 | Hd1]: (indom_update_inv Hd2). congruence. exact Hd1. }
+          forwards* (wm & wHN & wHns): IHHplay.
+          exists wm. split;
+            [ applys* Nth_app_l wHN
+            | applys no_commit_event_snoc wHns; intros Hgt; simpl in Hgt; congruence ]. } }
+    + (* PlayJoin: merge, D unchanged *)
+      forwards* (wm & wHN & wHns): IHHplay.
+      exists wm. split;
+        [ applys* Nth_app_l wHN
+        | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
+    + (* PlayLock: merge, D unchanged *)
+      forwards* (wm & wHN & wHns): IHHplay.
+      exists wm. split;
+        [ applys* Nth_app_l wHN
+        | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
+    + (* PlayUnlock (event_unlock t0 l): flushes D[t0] *)
+      destruct (classic (t = t0)) as [Het | Hneq].
+      { subst t. rewrite read_update_same in Hbinds.
+        lets Hi: (indom_of_binds Hbinds). forwards*: indom_empty_inv. }
+      { rewrite~ read_update_neq in Hbinds.
+        asserts Hin: (t \indom D').
+        { lets [Hc | Hd]: (indom_update_inv Hdom). congruence. exact Hd. }
+        forwards* (wm & wHN & wHns): IHHplay.
+        exists wm. split;
+          [ applys* Nth_app_l wHN
+          | applys no_commit_event_snoc wHns; intros Hgt; simpl in Hgt; congruence ]. }
+Qed.
+
 Lemma conflict_free_last_local_write :
   forall log D TC G LC t i v,
     conflict_free log ->
@@ -66,7 +187,8 @@ Proof.
            exists log'.
            rew_listx. cases_if. rew_list*.
       * rewrite~ read_update_neq in Hdelta.
-        rew_dom. rew_set in Hdom. branches; [|congruence].
+        asserts Hdom': (t \indom D').
+        { lets [Hc | Hd]: (indom_update_inv Hdom). congruence. exact Hd. }
         forwards* (log' & Hfilter): IHHplay.
         exists log'.
         rew_listx. cases_if as Hwrites.
@@ -78,41 +200,28 @@ Proof.
               But since t <> t0 and the write is uncommitted, the happens before
               relation is a contradiction.
             *)
-           asserts Hmem: (mem (event_write t i0 v) (LibList.filter (fun e => writes_location i0 e) log)).
-           {
-             rewrite Hfilter. rew_listx*.
-           }
-           asserts Hmem1: (mem (event_write t i0 v) (log & event_write t0 i0 v0)).
-           {
-             forwards (Hmem' & _): mem_filter_inv Hmem.
-             rew_listx~.
-           }
-           forwards (m & Hmth): mem_Nth Hmem1.
-           asserts Hneq: (m <> length log).
-           {
-             intros contra. subst.
-             forwards [contra | (k & Heq & Hnth)]: Nth_app_inv Hmth.
-             - forwards*: Nth_inbound contra.
-             - asserts* Heq': (k = 0).
-               subst.
-               forwards* [(_ & contra) | (? & contra)]: Nth_cons_inv Hnth.
-           }
-           asserts Hlt: (m < length log).
-           {
-             forwards Hlt: Nth_inbound Hmth.
-             rew_list* in Hlt.
-           }
-           asserts Hnth: (LibList.Nth (length log) (log & event_write t0 i0 v0) (event_write t0 i0 v0)).
-           {
-             applys* Nth_app_r'.
-           }
-           forwards Hhb: Hcf Hmth Hnth Hlt.
-           clears Hneq Hlt.
-           admit. (* After event m, t may not have another write
-           of i0, a start or end event, a spawn event, or an
-           unlock event. There cannot be a join of t0 since it has
-           not ended, and any locks taken by t are still held.
-           Since there are no possible synchronisation events *)
+           (* The write [event_write t i0 v] is still in [t]'s delta, hence
+              uncommitted: [t] performs no commit event after it. So it cannot
+              happen-before the final write by [t0 <> t] (a cross-thread hb edge
+              would need a commit event of [t]). But conflict-freedom forces such
+              an hb edge. *)
+           forwards (m0 & HN0 & Hns0): delta_is_uncommitted_write Hplay Hdom' Hdelta.
+           forwards Hlt0: Nth_inbound HN0.
+           asserts HN0f:
+             (LibList.Nth m0 (log & event_write t0 i0 v0) (event_write t i0 v)).
+           { applys* Nth_app_l. }
+           asserts Hnth:
+             (LibList.Nth (length log) (log & event_write t0 i0 v0) (event_write t0 i0 v0)).
+           { applys* Nth_app_r'. }
+           forwards Hhb: Hcf HN0f Hnth Hlt0.
+           asserts Hns0f:
+             (forall p ep, m0 <= p ->
+                LibList.Nth p (log & event_write t0 i0 v0) ep ->
+                get_thread ep = t -> ~ is_commit_event ep).
+           { applys no_commit_event_snoc Hns0. intros _; simpl; auto. }
+           asserts Hem: (get_thread (event_write t i0 v) = t). { reflexivity. }
+           forwards Hgt0: hb_preserves_thread Hhb HN0f Hem Hns0f Hnth.
+           simpl in Hgt0. congruence.
         -- rew_list*.
     + (* PlayStart *)
       forwards* (log' & Hfilter): IHHplay.
@@ -173,12 +282,7 @@ Proof.
       forwards* (log' & Hfilter): IHHplay.
       exists log'.
       rew_listx. cases_if. rew_list*.
-Admitted.
-
-(* [is_latest_value_commit_fresh] moved to Branching.v and proven there. Note it
-   now also requires [wf_graph G] (which forces a fresh commit to be a leaf in
-   the ancestry); [commit_fresh] alone is insufficient. The application below
-   must supply that well-formedness obligation. *)
+Qed.
 
 Lemma conflict_free_last_global_write :
   forall log D TC G LC t i v h,
