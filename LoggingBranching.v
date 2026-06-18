@@ -233,7 +233,7 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_read i) ->
     i \notindom d ->
-    is_latest_value G i v h ->
+    is_latest_value G h i v ->
     step ((T, G, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, h)], G, L), log & event_read t i v)
 | StepWrite : forall T G L t e d h K i v log,
     binds T t (state_running, te_exp e, d, h) ->

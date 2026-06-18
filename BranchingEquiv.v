@@ -175,14 +175,10 @@ Proof.
       rew_listx. cases_if. rew_list*.
 Admitted.
 
-Lemma is_latest_value_commit_fresh :
-  forall G c c' d h i v,
-    commit_fresh G c' ->
-    h <> c' ->
-    is_latest_value (graph_commit G c c' d) i v h ->
-    is_latest_value G i v h.
-Proof.
-  Admitted.
+(* [is_latest_value_commit_fresh] moved to Branching.v and proven there. Note it
+   now also requires [wf_graph G] (which forces a fresh commit to be a leaf in
+   the ancestry); [commit_fresh] alone is insufficient. The application below
+   must supply that well-formedness obligation. *)
 
 Lemma conflict_free_last_global_write :
   forall log D TC G LC t i v h,
@@ -191,7 +187,7 @@ Lemma conflict_free_last_global_write :
     i \notindom (D[t]) ->
     t \indom TC ->
     TC[t] = h ->
-    is_latest_value G i v h ->
+    is_latest_value G h i v ->
     exists t' log', LibList.filter (fun e => writes_location i e) log = log' & event_write t' i v.
 Proof.
   introv Hcf Hplay Hndom Hdom HTC Hval.
@@ -268,9 +264,10 @@ Proof.
         rewrite~ read_update_neq in HTC.
         rewrite~ read_update_neq in Hndom.
         rew_dom. rew_set in Hdom. branches; [| congruence].
-        asserts Hval' : (is_latest_value G' i v h).
+        asserts Hval' : (is_latest_value G' h i v).
         { applys~ is_latest_value_commit_fresh c c' d.
           (* Surely all commits in TC is also in C *)
+          admit.
           admit.
         }
         forwards* (t'' & log'' & Hfilter): IHHplay.
