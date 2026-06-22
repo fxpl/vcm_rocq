@@ -1813,8 +1813,9 @@ Proof.
         | forwards Hgw': graph_writes_graph_commit_inv Hc Hgw;
           applys Hlift; forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R ]
       end.
-    + admit.
-Admitted.
+    + (* PlayLockFresh: graph unchanged *)
+      applys Hlift; forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R.
+Qed.
 
 (* Graph edges only ever point to the freshly created commit, so ancestry follows
    creation order: a proper descendant of a commit born at [ka] (a commit event at
@@ -2396,6 +2397,111 @@ Proof.
   - applys Hnancb1. applys ancestor_trans Hc Hanca1.
 Qed.
 
+(* A graph commit [c] that writes a location [j] still uncommitted by a thread [t]
+   must be an ancestor of [t]'s commit [TC[t]].  Otherwise [t]'s pending write to
+   [j] and [c]'s committed write to [j] would be two writes to the same location
+   that are not happens-before related -- a data race, which [conflict_free]
+   forbids.  (Structurally this mirrors [write_hb_flush_ancestor], but the [t]
+   side of the race is a pending delta write rather than a flushed one.) *)
+Lemma delta_writer_ancestor :
+  forall log D TC G LC CH t j vt c vc,
+    wf_log log ->
+    conflict_free log ->
+    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    t \indom D ->
+    binds (D[t]) j vt ->
+    graph_writes G c j vc ->
+    ancestor G c (TC[t]).
+Proof.
+  introv Hwf Hcf Hplay Htdom Hbd Hgw.
+  (* [t]'s uncommitted [j]-write at [kt], with no [t]-commit at or after [kt]. *)
+  forwards (kt & HNkt & Hns): delta_is_uncommitted_write Hplay Htdom Hbd.
+  asserts Hgtt: (get_thread (event_write t j vt) = t). reflexivity.
+  (* the graph writer [c] has flushed: fed by [tc]'s write at [kc], committed at [fc]. *)
+  forwards (fc & efc & tc & kc & HNfcCH & HNfclog & Hgtc & Hcec & Hkclt & HNkc & Hncl):
+    graph_writes_flush Hplay Hgw.
+  (* [CH[kt]] is an ancestor of [TC[t]]. *)
+  forwards Hlen: play_log_CH_length Hplay.
+  forwards Hktlt: Nth_inbound HNkt.
+  asserts HktltCH: (kt < length CH). nat_math.
+  forwards (ckt & HNktCH): Nth_inbound_inv HktltCH.
+  forwards Hanckt: (>> CH_ancestor_TC Hwf Hplay HNkt Hgtt HNktCH).
+  destruct (classic (tc = t)) as [Hteq | Htne].
+  - (* [c] is [t]'s own commit, hence below [TC[t]]. *)
+    rewrite Hteq in Hgtc. applys CH_ancestor_TC Hwf Hplay HNfclog Hgtc HNfcCH.
+  - (* [tc <> t]: use conflict-freedom to order the two [j]-writes. *)
+    asserts Hkne: (kt <> kc).
+    { intros Heq. subst kc. forwards Heqw: Nth_functional HNkt HNkc.
+      inverts Heqw. apply Htne. reflexivity. }
+    destruct (classic (kt < kc)) as [Hlt | Hge].
+    + (* [kt < kc]: the cross-thread [hb] forces a [t]-commit at or after [kt]. *)
+      exfalso.
+      asserts Hacc: (accesses_location j (event_write tc j vc)). reflexivity.
+      forwards Hhb: (>> Hcf HNkt HNkc Hacc Hlt).
+      asserts Hgtcne: (get_thread (event_write tc j vc) <> t). { simpl. exact Htne. }
+      forwards (f'' & ef'' & Hktf'' & HNf'' & Hgf'' & Hcef'' & Hhbf''):
+        hb_cross_thread_flush Hhb HNkt Hgtt HNkc Hgtcne.
+      applys Hns Hktf'' HNf'' Hgf'' Hcef''.
+    + (* [kc < kt]: [tc]'s flush is below [TC[t]], so is its earlier commit [c]. *)
+      asserts Hltba: (kc < kt). nat_math.
+      asserts Hacc: (accesses_location j (event_write t j vt)). reflexivity.
+      forwards Hhb: (>> Hcf HNkc HNkt Hacc Hltba).
+      asserts Hgtc2: (get_thread (event_write tc j vc) = tc). reflexivity.
+      asserts Hgtne: (get_thread (event_write t j vt) <> tc).
+      { simpl. intros HH. apply Htne. symmetry. exact HH. }
+      forwards (f' & ef' & Hkcf' & HNf' & Hgf' & Hcef' & Hhbf'):
+        hb_cross_thread_flush Hhb HNkc Hgtc2 HNkt Hgtne.
+      asserts Hfcf': (fc <= f').
+      { destruct (classic (f' < fc)) as [Hltf | Hgef]; [ | nat_math ].
+        exfalso. forwards Hni: Hncl Hkcf' Hltf HNf' Hgf'. applys Hni Hcef'. }
+      forwards Hf'lt: Nth_inbound HNf'.
+      asserts Hf'ltCH: (f' < length CH). nat_math.
+      forwards (cf' & HNf'CH): Nth_inbound_inv Hf'ltCH.
+      forwards Hanc1: (>> CH_thread_monotone Hwf Hplay HNfclog Hgtc HNf' Hgf' Hfcf' HNfcCH HNf'CH).
+      forwards Hanc2: (>> hb_pointer_ancestor Hwf Hplay Hhbf' HNf'CH HNktCH).
+      applys ancestor_trans Hanc1. applys ancestor_trans Hanc2. exact Hanckt.
+Qed.
+
+(* The merge obligation discharged: when a running thread [t] (pending delta
+   [D[t]], commit [TC[t]]) merges with another commit [hc], the merge is
+   conflict-free.  The [change_set]/[change_set] half is the keystone
+   ([conflict_free_log_describes_conflict_free_graph]); the [dom (D[t])] half is
+   [delta_writer_ancestor] (no pending write of [t] can sit in the change set
+   merged in from [hc]). *)
+Lemma conflict_free_merge_holds :
+  forall log D TC G LC CH t hc,
+    wf_log log ->
+    conflict_free log ->
+    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    t \indom D ->
+    t \indom TC ->
+    graph_indom G hc ->
+    conflict_free_merge (D[t]) (TC[t]) hc G.
+Proof.
+  introv Hwf Hcf Hplay Htd Htc Hhc.
+  forwards Hcfg: conflict_free_log_describes_conflict_free_graph Hwf Hcf Hplay.
+  forwards Hpgwf: play_log_graph_wf Hplay.
+  destruct G as (C & P). destruct Hpgwf as (Hedge & HTCdom & _).
+  asserts Htcdom: (graph_indom (C, P) (TC[t])). { applys HTCdom Htc. }
+  unfold conflict_free_merge. rew_set. intros j Hj1 Hj2.
+  rew_set in Hj1. destruct Hj1 as [Hjd | Hjcs].
+  - (* [j] is pending in [t]'s delta: it cannot lie in [change_set (TC[t]) hc]. *)
+    unfold change_set in Hj2. destruct Hj2 as (c & Hjc & Hanchc & Hnanc).
+    asserts Hdomc: (graph_indom (C, P) c).
+    { forwards [Hin | Heq]: ancestor_src_indom Hedge Hanchc; [ exact Hin | subst c; exact Hhc ]. }
+    asserts Hgwc: (graph_writes (C, P) c j (C[c][j])).
+    { exists (C[c]). split.
+      - unfold graph_binds. applys binds_of_indom_read Hdomc; (reflexivity || typeclass).
+      - applys binds_of_indom_read Hjc; (reflexivity || typeclass). }
+    asserts Hbdj: (binds (D[t]) j (D[t][j])).
+    { applys binds_of_indom_read Hjd; (reflexivity || typeclass). }
+    applys Hnanc. applys (>> delta_writer_ancestor Hwf Hcf Hplay Htd Hbdj Hgwc).
+  - (* [j] lies in both change sets: contradicts conflict-freedom of the graph. *)
+    forwards Hcfm: Hcfg Htcdom Hhc.
+    unfold conflict_free_merge in Hcfm. rew_set in Hcfm.
+    applys Hcfm j; [ rew_set; right; exact Hjcs | exact Hj2 ].
+Qed.
+
 (* TODO: Should probably show preservation of same_expressions_and_locks as well *)
 Theorem branching_equiv :
   forall log log' cfgSh cfgB,
@@ -2432,8 +2538,51 @@ Proof.
       }
       exists. constructors*.
     + destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      apply Hwrite in H6 as (t' & log' & Hfilter).
-      admit. (* Cases on whether it is a global or local read *)
+      apply Hwrite in H6 as (t' & log'0 & Hfilter).
+      destruct HdescB as (_ & _ & _ & Hrun & _ & _ &
+        (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2)).
+      lets Htin: (indom_of_binds Hbinds).
+      forwards (ts0 & e0 & Hbd): Hdelta Htin.
+      forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
+      forwards Hcflog: conflict_free_last_inv Hcf.
+      destruct (classic (i \indom (D[t]))) as [Hin | Hnin].
+      * (* local (uncommitted) read: [i] is in [t]'s delta *)
+        asserts Hdt: (t \indom D). { applys HdomD Htin. }
+        asserts Hbdi: (binds (D[t]) i (D[t][i])).
+        { applys binds_of_indom_read Hin; (reflexivity || typeclass). }
+        forwards (log'' & Hfilt2): conflict_free_last_local_write Hcflog Hplay Hdt Hbdi.
+        rewrite Hfilter in Hfilt2.
+        forwards (_ & Heqw): last_eq_last_inv Hfilt2. inverts Heqw.
+        exists. applys StepReadLocal Hbinds; [ eassumption | exact Hbdi ].
+      * (* global (committed) read: [i] is visible as the latest committed value *)
+        forwards Hcfg: conflict_free_log_describes_conflict_free_graph Hwf Hcflog Hplay.
+        lets [_ Hback]: Hrun t. forwards (Hms & Hmne): Hback. { do 3 eexists. exact Hbinds. }
+        asserts Hwfr: (wf_log (log & event_read t i v)). { applys wf_log_read_last Hms Hmne Hwf. }
+        destruct (last_write_position log i log'0 t' v Hfilter) as (mw & HNL & Hlast).
+        forwards HLlt: Nth_inbound HNL.
+        asserts Hplayf: (exists CHf,
+          play_log (log & event_read t i v) (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CHf).
+        { eexists. applys PlaySnoc Hplay. apply PlayRead. }
+        destruct Hplayf as (CHf & Hplayf).
+        asserts HNLf: (LibList.Nth mw (log & event_read t i v) (event_write t' i v)).
+        { applys* Nth_app_l. }
+        asserts HNread: (LibList.Nth (length log) (log & event_read t i v) (event_read t i v)).
+        { applys* Nth_app_r'. }
+        asserts Hlastf:
+          (forall k tk vk, LibList.Nth k (log & event_read t i v) (event_write tk i vk) -> k <= mw).
+        { introv HNk. forwards [HN' | (Hpe & Hee)]: Nth_last_inv HNk.
+          - applys Hlast HN'.
+          - inverts Hee. }
+        asserts Hacc: (accesses_location i (event_read t i v)). { reflexivity. }
+        forwards Hhb: Hcf HNLf HNread Hacc HLlt.
+        asserts HndomL: (i \notindom (D[t'])).
+        { destruct (classic (t' = t)) as [-> | Hne].
+          - exact Hnin.
+          - applys last_writer_not_in_delta Hplayf HNLf Hlastf HNread Hhb. simpl. congruence. }
+        forwards Hlv:
+          (>> hb_last_write_visible Hwfr Hcf Hcfg Hplayf HNLf Hlastf HndomL HNread Hhb).
+        simpl in Hlv.
+        exists. applys StepReadGlobal Hbinds; [ eassumption | exact Hnin | exact Hlv ].
     + exists. constructors*.
     + forwards (h' & Hfresh): exists_commit_fresh HwfG.
       forwards* (Heq & _): same_expressions_same_domains.
@@ -2476,7 +2625,20 @@ Proof.
       substs.
       asserts Hmerge: (conflict_free_merge d' h' h G).
       {
-        admit. (* G is conflict free since log is conflict free, so any two merges (including h' and h) is conflict free *)
+        destruct HdescB as (_ & _ & _ & _ & _ & _ &
+          (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2)).
+        forwards Hcflog: conflict_free_last_inv Hcf.
+        (* joiner [t]: [D[t] = d'], [TC[t] = h']. *)
+        lets HtT: (indom_of_binds Hbinds').
+        forwards (ts0 & e0 & Hbdt): Hdelta HtT.
+        forwards* Heqt: binds_inj Hbinds' Hbdt. inverts Heqt.
+        (* joined [t']: [TC[t'] = h]. *)
+        lets Ht'T: (indom_of_binds Hbinds).
+        forwards (ts1 & e1 & Hbdt'): Hdelta Ht'T.
+        forwards* Heqt': binds_inj Hbinds Hbdt'. inverts Heqt'.
+        forwards Hpgwf: play_log_graph_wf Hplay. destruct Hpgwf as (_ & HTCdom & _).
+        applys conflict_free_merge_holds Hwf Hcflog Hplay;
+          [ applys HdomD HtT | applys HdomTC HtT | applys HTCdom; applys HdomTC Ht'T ].
       }
       exists. constructors*.
     + branches.
@@ -2484,7 +2646,20 @@ Proof.
         apply Hsame in H0 as (h' & Hlock).
         asserts Hmerge: (conflict_free_merge d h h' G).
         {
-          admit. (* G is conflict free since log is conflict free, so any two merges (including h and h') is conflict free *)
+          destruct HdescB as (_ & _ & _ & _ & _ & _ &
+            (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2)).
+          forwards Hcflog: conflict_free_last_inv Hcf.
+          (* locker [t]: [D[t] = d], [TC[t] = h]. *)
+          lets HtT: (indom_of_binds Hbinds).
+          forwards (ts0 & e0 & Hbdt): Hdelta HtT.
+          forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
+          (* lock [l0]: [LC[l0] = h']. *)
+          lets Hl0L: (indom_of_binds Hlock).
+          forwards (ls0 & Hbdl): Hlocks Hl0L.
+          forwards* Heql: binds_inj Hlock Hbdl. inverts Heql.
+          forwards Hpgwf: play_log_graph_wf Hplay. destruct Hpgwf as (_ & _ & HLCdom).
+          applys conflict_free_merge_holds Hwf Hcflog Hplay;
+            [ applys HdomD HtT | applys HdomTC HtT | applys HLCdom; applys HdomLC Hl0L ].
         }
         asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_lock t l0 h'' T G L = (T', G') /\
                                                                binds T' t (state_running, te_exp e, d, h'')).
@@ -2584,7 +2759,7 @@ Proof.
       destruct HdescB as (_ & _ & _ & _ & HunlockedB & _ & _).
       forwards* (t' & log' & Hiff): HlockedSh t l0.
       forwards* (t'' & log'' & Hiff'): HunlockedB t l0.
-Admitted.
+Qed.
 
 (* TODO: We currently model data races as stuck states. Regardless
 of whether we add the exception rules, we will probably need a
