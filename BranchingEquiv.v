@@ -7,28 +7,38 @@ From Vcm Require Import LoggingBranching.
 
 Import Log.
 
-Definition same_expressions (cfgSh : SharedMemory.cfg) (cfgB : Branching.cfg) :=
+Definition same_expressions_and_locks (cfgSh : SharedMemory.cfg) (cfgB : Branching.cfg) :=
   match cfgSh, cfgB with
-  | (TSh, _, _), (TB, _, _) =>
-      forall t st e,
-        binds TSh t (st, e) <-> exists d h, binds TB t (st, e, d, h)
+  | (TSh, _, LSh), (TB, _, LB) =>
+      (forall t st e,
+        binds TSh t (st, e) <-> exists d h, binds TB t (st, e, d, h)) /\
+      (forall l ls, binds LSh l ls <-> exists h, binds LB l (ls, h))
   end.
 
-Lemma same_expressions_same_domain :
-  forall Tsh H Lsh TB G LG,
-    same_expressions (Tsh, H, Lsh) (TB, G, LG) ->
-    dom Tsh = dom TB.
+Lemma same_expressions_same_domains :
+  forall Tsh H Lsh TB G LB,
+    same_expressions_and_locks (Tsh, H, Lsh) (TB, G, LB) ->
+    dom Tsh = dom TB /\ dom Lsh = dom LB.
 Proof.
   introv Hexp.
-  simpls. unfolds SharedMemory.threads, Branching.threads.
-  do 2 rewrite dom_eq_set_of_binds.
-  apply set_st_eq.
-  intros t. splits.
-  - introv ((st & e) & Hbinds).
-    apply Hexp in Hbinds as (d & h & Hbinds').
-    exists*.
-  - introv ((((st & e) & d ) & h) & Hbinds).
-    exists (st, e). apply* Hexp.
+  simpls. unfolds SharedMemory.threads, Branching.threads,
+          SharedMemory.locks, Branching.locks.
+  repeat rewrite dom_eq_set_of_binds.
+  splits.
+  - apply set_st_eq.
+    intros t. splits.
+    + introv ((st & e) & Hbinds).
+      apply Hexp in Hbinds as (d & h & Hbinds').
+      exists*.
+    + introv ((((st & e) & d ) & h) & Hbinds).
+      exists (st, e). apply* Hexp.
+  - apply set_st_eq.
+    intros l. splits.
+    + introv (ls & Hbinds).
+      apply Hexp in Hbinds as (ls' & Hbinds').
+      exists*.
+    + introv ((ls & h) & Hbinds).
+      exists ls. apply* Hexp.
 Qed.
 
 (* Extending a "no commit event of [t] at index >= m" property by one event:
@@ -150,6 +160,11 @@ Proof.
         exists wm. split;
           [ applys* Nth_app_l wHN
           | applys no_commit_event_snoc wHns; intros Hgt; simpl in Hgt; congruence ]. }
+    + (* PlayLockFresh: no-op, D unchanged *)
+      forwards* (wm & wHN & wHns): IHHplay.
+      exists wm. split;
+        [ applys* Nth_app_l wHN
+        | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
 Qed.
 
 Lemma conflict_free_last_local_write :
@@ -280,6 +295,10 @@ Proof.
       }
       rewrite~ read_update_neq in Hdelta.
       rew_dom. rew_set in Hdom. inverts Hdom; [|congruence].
+      forwards* (log' & Hfilter): IHHplay.
+      exists log'.
+      rew_listx. cases_if. rew_list*.
+    + (* PlayLockFresh: D unchanged *)
       forwards* (log' & Hfilter): IHHplay.
       exists log'.
       rew_listx. cases_if. rew_list*.
@@ -752,9 +771,14 @@ Lemma play_event_LC_preserved :
     binds LC'' l c.
 Proof.
   introv Hpe Hne Hb. inverts Hpe; try assumption.
-  (* PlayUnlock t l0: LC'' = LC'[l0 := c']; l0 <> l from Hne *)
-  applys binds_update_neq; [ | assumption ].
-  intro Heq. subst. eapply Hne; reflexivity.
+  - (* PlayUnlock t l0: LC'' = LC'[l0 := c']; l0 <> l from Hne *)
+    applys binds_update_neq; [ | assumption ].
+    intro Heq. subst. eapply Hne; reflexivity.
+  - (* PlayLockFresh t lf: LC'' = LC'[lf := TC[t]]; l = lf makes [Hb] vacuous *)
+    match goal with Hf : ?lf \notindom LC' |- _ =>
+      destruct (classic (l = lf)) as [-> | Hne2];
+      [ lets Hin: (indom_of_binds Hb); exfalso; applys Hf Hin
+      | applys binds_update_neq; [ congruence | exact Hb ] ] end.
 Qed.
 
 (* Held-lock invariant: if the [l]-filter of the log ends in [event_lock t l]
@@ -779,9 +803,14 @@ Proof.
       forwards (Hpre_eq & HEeq): last_eq_last_inv Hfilter.
       subst E.
       inverts H as Hb1 HbL Hfr.
-      exists c2. split.
-      * exact HbL.
-      * rewrite read_update_same. apply ancestor_graph_merge_edge_r.
+      * (* PlayLock: merged [LC[l]] into [t] *)
+        exists c2. split.
+        -- exact HbL.
+        -- rewrite read_update_same. apply ancestor_graph_merge_edge_r.
+      * (* PlayLockFresh: [t] records its own commit, [TC] unchanged *)
+        exists (TC[t]). split.
+        -- apply binds_update_same.
+        -- apply ancestor_refl.
     + (* E does not touch l: LC[l] and the held relation are preserved *)
       rew_list in Hfilter.
       asserts Hmemfilt:
@@ -927,12 +956,15 @@ Proof.
       forwards [HNchn0 | (HnNc & Hcneq)]: Nth_last_inv HNchn.
       { forwards Hib: Nth_inbound HNchn0. rewrite <- Hlen in HnN. nat_math. }
       inverts H as Hbc1 HbLC Hfresh.
-      cbn [get_thread] in Hcneq.
-      rewrite read_update_same in Hcneq. subst cn.
-      assert (cl = c2) as Heqc by (applys binds_inj HbLCl HbLC; typeclass).
-      apply ancestor_trans with (h' := cl).
-      * exact Hanc_lift.
-      * rewrite Heqc. apply ancestor_graph_merge_edge_r.
+      * (* PlayLock: merges [l]'s stored commit *)
+        cbn [get_thread] in Hcneq.
+        rewrite read_update_same in Hcneq. subst cn.
+        assert (cl = c2) as Heqc by (applys binds_inj HbLCl HbLC; typeclass).
+        apply ancestor_trans with (h' := cl).
+        -- exact Hanc_lift.
+        -- rewrite Heqc. apply ancestor_graph_merge_edge_r.
+      * (* PlayLockFresh: impossible, [l] was unlocked at [m] so [l] ∈ dom LC' *)
+        exfalso. lets* Hin: (indom_of_binds HbLCl).
 Qed.
 
 Lemma hb_spawn_pointer_ancestor :
@@ -1177,6 +1209,9 @@ Proof.
           forwards* (tw & m0 & HN): IHHplay;
           exists tw m0; rew_list; applys Nth_app_l HN ]
       end.
+    + (* PlayLockFresh: graph unchanged *)
+      forwards* (tw & m0 & HN): IHHplay.
+      exists tw m0. rew_list. applys Nth_app_l HN.
 Qed.
 
 (* A play step preserves every pre-existing committed write (the new commit is
@@ -1319,7 +1354,12 @@ Proof.
               ** rewrite read_update_neq; [ exact Hival | congruence ].
            ++ introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
               { applys Hnc Hg HNg0 Hgg. } { subst eg; simpls; congruence. }
-      * (* lock *) left; split.
+      * (* lock (PlayLock) *) left; split.
+        -- split; assumption.
+        -- introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
+           { applys Hnc Hg HNg0 Hgg. } { subst eg; simpl; auto. }
+      * (* lock (PlayLockFresh): graph unchanged, not a commit event *)
+        left; split.
         -- split; assumption.
         -- introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
            { applys Hnc Hg HNg0 Hgg. } { subst eg; simpl; auto. }
@@ -1606,6 +1646,12 @@ Proof.
         -- rewrite read_update_neq; [ | congruence ].
            apply indom_update_of_indom;
              (typeclass || (applys HLC; destruct Hcase as [Hc | Hc]; [ congruence | exact Hc ])).
+    + splits*.
+      introv Hl. simpls. rew_dom. rew_set in Hl. branches.
+      * destruct (classic (l = l0)).
+        -- subst. rewrite* read_update_same.
+        -- rewrite* read_update_neq.
+      * subst. rewrite* read_update_same.
   Unshelve. all: typeclass.
 Qed.
 
@@ -1767,7 +1813,8 @@ Proof.
         | forwards Hgw': graph_writes_graph_commit_inv Hc Hgw;
           applys Hlift; forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R ]
       end.
-Qed.
+    + admit.
+Admitted.
 
 (* Graph edges only ever point to the freshly created commit, so ancestry follows
    creation order: a proper descendant of a commit born at [ka] (a commit event at
@@ -2349,7 +2396,7 @@ Proof.
   - applys Hnancb1. applys ancestor_trans Hc Hanca1.
 Qed.
 
-(* TODO: Should probably show preservation of same_expressions as well *)
+(* TODO: Should probably show preservation of same_expressions_and_locks as well *)
 Theorem branching_equiv :
   forall log log' cfgSh cfgB,
     wf_log log ->
@@ -2358,12 +2405,12 @@ Theorem branching_equiv :
     end ->
     LoggingSharedMemory.describes log cfgSh ->
     LoggingBranching.describes log cfgB ->
-    same_expressions cfgSh cfgB ->
+    same_expressions_and_locks cfgSh cfgB ->
     conflict_free log' ->
       (exists cfgSh', LoggingSharedMemory.step (cfgSh, log) (cfgSh', log')) <->
       (exists cfgB', LoggingBranching.step (cfgB, log) (cfgB', log')).
 Proof.
-  introv Hwf HwfG HdescSh HdescB Hexp Hcf.
+  introv Hwf HwfG HdescSh HdescB Hsame Hcf.
   splits.
   - introv (cfgSh' & Hstep).
     destruct cfgB as [(T & G) L].
@@ -2372,7 +2419,7 @@ Proof.
       match goal with
       | H: binds ?T ?t (?ts', ?e) |- _ =>
           assert (Ht := H);
-          apply Hexp in H as (d & h & Hbinds)
+          apply (proj1 Hsame) in H as (d & h & Hbinds)
       end.
     + exists. constructors*.
     + forwards (h' & Hfresh): exists_commit_fresh HwfG.
@@ -2389,7 +2436,7 @@ Proof.
       admit. (* Cases on whether it is a global or local read *)
     + exists. constructors*.
     + forwards (h' & Hfresh): exists_commit_fresh HwfG.
-      forwards* Heq: same_expressions_same_domain.
+      forwards* (Heq & _): same_expressions_same_domains.
       rewrite Heq in H6.
       asserts* Hneq: (t <> t').
       asserts (T' & G' & Hpush): (exists T' G', push_thread t t' h' T[t:=(state_running, te_exp (K t'), d, h)][t':=(state_new, te_exp e', \{}, 0)] G = (T', G')).
@@ -2403,7 +2450,7 @@ Proof.
       }
       exists. constructors*.
     + forwards (h'' & Hfresh): exists_commit_fresh HwfG.
-      apply Hexp in H4 as (d' & h' & Hbinds').
+      apply Hsame in H4 as (d' & h' & Hbinds').
       asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_thread t t' h'' T G = (T', G') /\
                                                            binds T' t (state_running, te_exp e, d', h'')).
       {
@@ -2432,28 +2479,29 @@ Proof.
         admit. (* G is conflict free since log is conflict free, so any two merges (including h' and h) is conflict free *)
       }
       exists. constructors*.
-    + forwards (h'' & Hfresh): exists_commit_fresh HwfG.
-      asserts (h' & Hlock): (exists h', binds L l0 (ls_free, h')).
-      {
-        admit. (* Correspondence between locks via log *)
-      }
-      asserts Hmerge: (conflict_free_merge d h h' G).
-      {
-        admit. (* G is conflict free since log is conflict free, so any two merges (including h and h') is conflict free *)
-      }
-      asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_lock t l0 h'' T G L = (T', G') /\
-                                                           binds T' t (state_running, te_exp e, d, h'')).
-      {
-        exists. unfolds pull_lock, do_merge.
-        forwards Hread: read_of_binds Hlock.
-        replace L[l0] with (ls_free, h').
-        forwards Hread': read_of_binds Hbinds.
-        replace T[t] with (state_running, te_exp e, d, h).
-        splits.
-        - reflexivity.
-        - apply binds_update_same.
-      }
-      exists. constructors*.
+    + branches.
+      * forwards (h'' & Hfresh): exists_commit_fresh HwfG.
+        apply Hsame in H0 as (h' & Hlock).
+        asserts Hmerge: (conflict_free_merge d h h' G).
+        {
+          admit. (* G is conflict free since log is conflict free, so any two merges (including h and h') is conflict free *)
+        }
+        asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_lock t l0 h'' T G L = (T', G') /\
+                                                               binds T' t (state_running, te_exp e, d, h'')).
+        {
+          exists. unfolds pull_lock, do_merge.
+          forwards Hread: read_of_binds Hlock.
+          replace L[l0] with (ls_free, h').
+          forwards Hread': read_of_binds Hbinds.
+          replace T[t] with (state_running, te_exp e, d, h).
+          splits.
+          - reflexivity.
+          - apply binds_update_same.
+        }
+        exists. constructors*.
+      * forwards* (_ & Heq): same_expressions_same_domains.
+        rewrite Heq in *.
+        exists. applys* StepLockFresh.
     + forwards (h'' & Hfresh): exists_commit_fresh HwfG.
       asserts (h' & HbindsL): (exists h', binds L l0 (ls_held t, h')).
       {
@@ -2484,13 +2532,13 @@ Proof.
       | H: binds ?T ?t (?ts, ?e, ?d, ?h) |- _ =>
           asserts Hex: (exists d h, binds T t (ts, e, d, h));
           [exists d; exists h; exact H|];
-          apply Hexp in Hex as Hbinds; clear Hex
+          apply Hsame in Hex as Hbinds; clear Hex
       end.
     + exists. constructors*.
     + exists. constructors*.
     + exists. constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & Hstart & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
+      destruct HdescB as (_ & _ & _ & Hstart & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       apply Hwrite.
@@ -2499,7 +2547,7 @@ Proof.
       forwards* Hex: conflict_free_last_local_write Hplay.
     + exists. constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & Hrun & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
+      destruct HdescB as (_ & _ & _ & Hrun & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       forwards* Heq: binds_inj Hbinds'.
@@ -2519,16 +2567,18 @@ Proof.
       forwards* Hex: conflict_free_last_global_write Hcf Hwfr Hcfg Hplay.
     + exists. constructors*.
     + exists. constructors*.
-      forwards* ->: same_expressions_same_domain.
+      forwards* (-> & _): same_expressions_same_domains.
     + asserts* Hex: (exists d h, binds T t' (state_terminated, te_ret r, d, h)).
-      apply Hexp in Hex.
+      apply Hsame in Hex.
       exists. constructors*.
     + exists. constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & HunlockedSh & _).
       destruct HdescB as (_ & _ & _ & _ & _ & HunlockedB & _).
       forwards Hiff: HunlockedSh l0.
       forwards Hiff': HunlockedB l0.
-      apply Hiff. apply* Hiff'.
+      left. apply Hiff. apply* Hiff'.
+    + exists. constructors*.
+      forwards* (_ & ->): same_expressions_same_domains.
     + exists. constructors*.
       destruct HdescSh as (_ & _ & _ & _ & HlockedSh & _ & _).
       destruct HdescB as (_ & _ & _ & _ & HunlockedB & _ & _).

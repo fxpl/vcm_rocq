@@ -87,7 +87,8 @@ Inductive step : cfg -> cfg -> Prop :=
 | StepLock : forall (T : threads) H (L : locks) t e K l,
     binds T t (state_running, te_exp e) ->
     step_ul e K (eff_lock l) ->
-    binds L l ls_free ->
+    (* a free lock, or one that has never been acquired (hence not in [L]) *)
+    (binds L l ls_free \/ l \notindom L) ->
     step (T, H, L) (T[t := (state_running, te_exp (K void))], H, L[l := ls_held t])
 | StepRelease : forall (T : threads) H (L : locks) t e K l,
     binds T t (state_running, te_exp e) ->

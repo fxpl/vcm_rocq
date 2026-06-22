@@ -626,6 +626,12 @@ Inductive step : cfg -> cfg -> Prop :=
     pull_lock t l h'' T G L = (T', G') ->
     binds T' t (state_running, te_exp e, d, h'') ->
     step (T, G, L) (T'[t := (state_running, te_exp (K void), d, h'')], G', L[l := (ls_held t, h')])
+| StepLockFresh : forall T G L t e d h K l,
+    (* A never-acquired lock has no prior critical section to merge with. *)
+    binds T t (state_running, te_exp e, d, h) ->
+    step_ul e K (eff_lock l) ->
+    l \notindom L ->
+    step (T, G, L) (T[t := (state_running, te_exp (K void), d, h)], G, L[l := (ls_held t, h)])
 | StepRelease : forall T T' G G' (L L' : locks) t e d h h' h'' K l,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_unlock l) ->

@@ -318,6 +318,72 @@ Proof.
     right. exists t' log''. rew_list~.
 Qed.
 
+(* The last entry of a lock's touch-filter is a lock or unlock of that lock. *)
+Lemma filter_touches_lock_last_inv : forall l lg xs' x,
+    LibList.filter (fun e => touches_lock l e) lg = xs' & x ->
+    (exists t', x = event_lock t' l) \/ (exists t', x = event_unlock t' l).
+Proof.
+  introv Heq.
+  asserts Hmem: (mem x (LibList.filter (fun e => touches_lock l e) lg)).
+  { rewrite Heq. apply mem_last_r. }
+  forwards (_ & Htl): mem_filter_inv Hmem.
+  destruct x; simpls; try contradiction.
+  - left. exists t. congruence.
+  - right. exists t. congruence.
+Qed.
+
+(* Appending a lock event to a well-formed log keeps it well formed, given the
+   acquiring thread is running and the lock's touch-filter is empty or ends in an
+   unlock.  Both lock step rules (free and never-touched) produce the same log. *)
+Lemma wf_log_snoc_lock : forall lg t l,
+    wf_log lg ->
+    mem (event_start t) lg ->
+    ~ mem (event_end t) lg ->
+    (LibList.filter (fun e => touches_lock l e) lg = nil \/
+     exists t'' lg'', LibList.filter (fun e => touches_lock l e) lg = lg'' & event_unlock t'' l) ->
+    wf_log (lg & event_lock t l).
+Proof.
+  introv Hwf Hsmem Hlnmem Hlfree.
+  destruct Hwf as (Huspawn & Hustart & Huend & Hspawn & Hjoin & Hstart & Hend & Hlock).
+  splits.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
+    rew_listx. rew_listx in Hmem'. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros contra. apply~ (Hustart l1 l2' t0).
+    rew_listx. rew_listx in contra. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros contra. apply~ (Huend l1 l2' t0).
+    rew_listx. rew_listx in contra. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hspawn.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hjoin.
+  + introv Heq <- Hneq.
+    forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Hmem'. simpl. exact Hsmem.
+    * apply~ Hstart.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    rew_listx. splits.
+    * apply~ Hend.
+    * simpl. intros ->. apply Hlnmem. rew_listx*.
+  + introv. rew_listx.
+    cases_if as Heql.
+    * unfold touches_lock in Heql. subst. rew_list.
+      apply wf_lock_log_snoc_lock.
+      { apply~ Hlock. }
+      { destruct Hlfree as [Hnil | (t'' & lg'' & Hfilt)].
+        - left. exact Hnil.
+        - right. exists t'' lg''. exact Hfilt. }
+    * rew_list. apply~ Hlock.
+Qed.
+
 Lemma wf_lock_log_snoc_unlock : forall xs xs' t l,
     wf_lock_log (LibList.filter (fun e : event => touches_lock l e) xs) ->
     LibList.filter (fun e : event => touches_lock l e) xs = xs' & event_lock t l ->

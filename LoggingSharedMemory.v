@@ -31,10 +31,10 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (forall t l,
           (exists log', LibList.filter (fun e => touches_lock l e) log = log' & event_lock t l) <-> binds L l (ls_held t))
       /\
-      (* Unlocked locks are unlocked or untouched *)
+      (* A lock is free exactly when its last touch is an unlock.  A never-touched
+         lock is not in [L] at all (so neither this nor the locked clause binds it). *)
       (forall l,
-          (* TODO: Shouldn't be log = nil, but filter ... = nil *)
-          (log = nil \/ exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> binds L l ls_free)
+          (exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> binds L l ls_free)
       /\
       (* The value of each location is its latest write *)
       (forall i v,
@@ -70,7 +70,7 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 | StepLock : forall (T : threads) H (L : locks) t e K l log,
     binds T t (state_running, te_exp e) ->
     step_ul e K (eff_lock l) ->
-    binds L l ls_free ->
+    (binds L l ls_free \/ l \notindom L) ->
     step ((T, H, L), log) ((T[t := (state_running, te_exp (K void))], H, L[l := ls_held t]), log & event_lock t l)
 | StepRelease : forall (T : threads) H (L : locks) t e K l log,
     binds T t (state_running, te_exp e) ->
@@ -361,11 +361,20 @@ Proof.
       introv. rew_listx.
       cases_if~. rew_list~.
   - (* StepLock: log' = log & event_lock t l *)
-    destruct Hdesc as (_ & _ & _ & Hdrunning & _ & Hdunlock & _).
+    destruct Hdesc as (_ & _ & _ & Hdrunning & Hdlock & Hdunlock & _).
     asserts (Hsmem & Hlnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
-    asserts Hlfree: (log = nil \/ exists t'' log'', LibList.filter (fun e => touches_lock l e) log = log'' & event_unlock t'' l).
-    { apply* Hdunlock. }
+    asserts Hlfree: (LibList.filter (fun e => touches_lock l e) log = nil \/
+                     exists t'' log'', LibList.filter (fun e => touches_lock l e) log = log'' & event_unlock t'' l).
+    { match goal with Hpre: (binds _ l ls_free \/ l \notindom _) |- _ => destruct Hpre as [Hfree | Hnotin] end.
+      - right. apply~ Hdunlock.
+      - left. destruct (last_case (LibList.filter (fun e => touches_lock l e) log)) as [Hnil | (x & xs' & Heqf)].
+        + exact Hnil.
+        + exfalso. forwards [(t' & ->) | (t' & ->)]: filter_touches_lock_last_inv Heqf.
+          * forwards Hb: (proj1 (Hdlock t' l)). { exists xs'. exact Heqf. }
+            lets Hin: (indom_of_binds Hb). apply Hnotin. exact Hin.
+          * forwards Hb: (proj1 (Hdunlock l)). { exists t' xs'. exact Heqf. }
+            lets Hin: (indom_of_binds Hb). apply Hnotin. exact Hin. }
     splits.
     + introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
@@ -401,7 +410,7 @@ Proof.
         apply wf_lock_log_snoc_lock.
         { apply~ Hlock. }
         { destruct Hlfree as [Hnil | (t'' & log'' & Hfilt)].
-          - left. subst. rew_listx~.
+          - left. exact Hnil.
           - right. exists t'' log''. exact Hfilt. }
       * rew_list. apply~ Hlock.
   - (* StepRelease: log' = log & event_unlock t l *)
@@ -537,15 +546,7 @@ Proof.
       apply Hdlock.
     + intros l.
       rew_listx. cases_if~. rew_list.
-      splits.
-      * introv Hdisj. hint last_eq_nil_inv. branches~.
-        apply* Hdunlock.
-      * introv Hbinds. right. apply Hdunlock in Hbinds.
-        branches~. subst.
-        false.
-        asserts (t1 & Hmem & _): (exists t1, mem (event_spawn t1 t) nil /\ ~mem (event_start t) nil).
-        { apply* Hdstart. }
-        exact (mem_nil_inv Hmem).
+      apply Hdunlock.
     + intros l. rew_listx. cases_if~. rew_list.
       apply Hdwrite.
   - (* StepEnd: log' = log & event_end t, T' = T[t := (terminated, ret r)] *)
@@ -631,14 +632,7 @@ Proof.
     + (* Locked: L unchanged, filter unchanged *)
       intros t0 l. rew_listx. cases_if~. rew_list. apply Hdlock.
     + (* Unlocked: L unchanged, filter unchanged *)
-      intros l. rew_listx. cases_if~. rew_list. splits.
-      * introv Hdisj. hint last_eq_nil_inv. branches~. apply* Hdunlock.
-      * introv Hbinds. right. apply Hdunlock in Hbinds.
-        branches~. subst.
-        false.
-        asserts (Hmem & Hne): (mem (event_start t) nil /\ ~mem (event_end t) nil).
-        { apply* Hdrunning. }
-        exact (mem_nil_inv Hmem).
+      intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, filter unchanged *)
       intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
   - (* StepRead: log' = log & event_read t i v, T' = T[t := running K(v)] *)
@@ -725,14 +719,7 @@ Proof.
     + (* Locked: L unchanged, filter unchanged *)
       intros t0 l. rew_listx. cases_if~. rew_list. apply Hdlock.
     + (* Unlocked: L unchanged, filter unchanged *)
-      intros l. rew_listx. cases_if~. rew_list. splits.
-      * introv Hdisj. hint last_eq_nil_inv. branches~. apply* Hdunlock.
-      * introv Hbinds. right. apply Hdunlock in Hbinds.
-        branches~. subst.
-        false.
-        asserts (Hmem & Hne): (mem (event_start t) nil /\ ~mem (event_end t) nil).
-        { apply* Hdrunning. }
-        exact (mem_nil_inv Hmem).
+      intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, event_read not a write *)
       intros i0 v0. rew_listx. cases_if~. rew_list. apply Hdwrite.
   - (* StepWrite: log' = log & event_write t i v, T' = T[t := running K(void)], H' = H[i := v] *)
@@ -819,14 +806,7 @@ Proof.
     + (* Locked: L unchanged, filter unchanged *)
       intros t0 l. rew_listx. cases_if~. rew_list. apply Hdlock.
     + (* Unlocked: L unchanged, filter unchanged *)
-      intros l. rew_listx. cases_if~. rew_list. splits.
-      * introv Hdisj. hint last_eq_nil_inv. branches~. apply* Hdunlock.
-      * introv Hbinds. right. apply Hdunlock in Hbinds.
-        branches~. subst.
-        false.
-        asserts (Hmem & Hne): (mem (event_start t) nil /\ ~mem (event_end t) nil).
-        { apply* Hdrunning. }
-        exact (mem_nil_inv Hmem).
+      intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H[i := v], filter gains event_write t i v *)
       intros i0 v0. rew_listx. cases_if as Hcase.
       * (* i0 = i: filter grows by event_write t i v *)
@@ -961,14 +941,7 @@ Proof.
     + (* Locked: L unchanged, filter unchanged *)
       intros t0 l. rew_listx. cases_if~. rew_list. apply Hdlock.
     + (* Unlocked: L unchanged, filter unchanged *)
-      intros l. rew_listx. cases_if~. rew_list. splits.
-      * introv Hdisj. hint last_eq_nil_inv. branches~. apply* Hdunlock.
-      * introv Hbinds. right. apply Hdunlock in Hbinds.
-        branches~. subst.
-        false.
-        asserts (Hmem & Hne): (mem (event_start t) nil /\ ~mem (event_end t) nil).
-        { apply* Hdrunning. }
-        exact (mem_nil_inv Hmem).
+      intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, event_spawn not a write *)
       intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
   - (* StepJoin: log' = log & event_join t t', T' = T[t := running K(r)] *)
@@ -1055,14 +1028,7 @@ Proof.
     + (* Locked: L unchanged, filter unchanged *)
       intros t0 l. rew_listx. cases_if~. rew_list. apply Hdlock.
     + (* Unlocked: L unchanged, filter unchanged *)
-      intros l. rew_listx. cases_if~. rew_list. splits.
-      * introv Hdisj. hint last_eq_nil_inv. branches~. apply* Hdunlock.
-      * introv Hbinds. right. apply Hdunlock in Hbinds.
-        branches~. subst.
-        false.
-        asserts (Hmem & Hne): (mem (event_start t) nil /\ ~mem (event_end t) nil).
-        { apply* Hdrunning. }
-        exact (mem_nil_inv Hmem).
+      intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, event_join not a write *)
       intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
   - (* StepLock: log' = log & event_lock t l, T' = T[t := ...], L' = L[l := ls_held t] *)
@@ -1169,23 +1135,18 @@ Proof.
       intros l0. rew_listx. cases_if as Hcase.
       * (* l0 = l: filter grows by event_lock; l is now held → both sides false *)
         unfold touches_lock in Hcase. subst. rew_list. splits.
-        -- introv [Hnil | (t0 & log' & Hfilt)].
-           ++ false (last_eq_nil_inv Hnil).
-           ++ apply last_eq_last_inv in Hfilt. destruct Hfilt as [_ Heq]. congruence.
+        -- introv (t0 & log' & Hfilt).
+           apply last_eq_last_inv in Hfilt. destruct Hfilt as [_ Heq]. congruence.
         -- introv Hbinds.
            apply binds_update_same_inv in Hbinds. congruence.
       * (* l0 ≠ l: filter unchanged, L unchanged *)
         unfold touches_lock in Hcase. rew_list. splits.
-        -- introv [Hnil | (t0 & log' & Hfilt)].
-           ++ false (last_eq_nil_inv Hnil).
-           ++ apply~ binds_update_neq.
-              apply Hdunlock. right. exists t0 log'. exact Hfilt.
+        -- introv (t0 & log' & Hfilt).
+           apply~ binds_update_neq.
+           apply Hdunlock. exists t0 log'. exact Hfilt.
         -- introv Hbinds.
            forwards Hbinds': binds_update_neq_inv Hbinds Hcase.
-           right. apply Hdunlock in Hbinds'.
-           destruct Hbinds' as [Hnil | (t0 & log' & Hfilt)].
-           ++ subst. false (mem_nil_inv Hsmem).
-           ++ exists t0 log'. exact Hfilt.
+           apply Hdunlock in Hbinds'. exact Hbinds'.
     + (* Writes: H unchanged, event_lock not a write *)
       intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
   - (* StepRelease: log' = log & event_unlock t l, T' = T[t := ...], L' = L[l := ls_free] *)
@@ -1290,23 +1251,17 @@ Proof.
       intros l0. rew_listx. cases_if as Hcase.
       * (* l0 = l: filter grows by event_unlock t l → both sides true *)
         unfold touches_lock in Hcase. subst. rew_list. splits.
-        -- introv [Hnil | (t0 & log' & Hfilt)].
-           ++ false (last_eq_nil_inv Hnil).
-           ++ apply binds_update_same.
+        -- introv (t0 & log' & Hfilt). apply binds_update_same.
         -- introv Hbinds.
-           right. exists t (LibList.filter (fun e => touches_lock l e) log). reflexivity.
+           exists t (LibList.filter (fun e => touches_lock l e) log). reflexivity.
       * (* l0 ≠ l: filter unchanged, L unchanged *)
         unfold touches_lock in Hcase. rew_list. splits.
-        -- introv [Hnil | (t0 & log' & Hfilt)].
-           ++ false (last_eq_nil_inv Hnil).
-           ++ apply~ binds_update_neq.
-              apply Hdunlock. right. exists t0 log'. exact Hfilt.
+        -- introv (t0 & log' & Hfilt).
+           apply~ binds_update_neq.
+           apply Hdunlock. exists t0 log'. exact Hfilt.
         -- introv Hbinds.
            forwards Hbinds': binds_update_neq_inv Hbinds Hcase.
-           right. apply Hdunlock in Hbinds'.
-           destruct Hbinds' as [Hnil | (t0 & log' & Hfilt)].
-           ++ subst. false (mem_nil_inv Hsmem).
-           ++ exists t0 log'. exact Hfilt.
+           apply Hdunlock in Hbinds'. exact Hbinds'.
     + (* Writes: H unchanged, event_unlock not a write *)
       intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
 Qed.

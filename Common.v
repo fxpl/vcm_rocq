@@ -74,6 +74,10 @@ Inductive lock_state :=
 | ls_held (t : tid)
 .
 
+#[global]
+Instance inhab_lock_state : Inhab lock_state.
+Proof. apply (Inhab_of_val ls_free). Qed.
+
 (*
 Module FMap.
 
