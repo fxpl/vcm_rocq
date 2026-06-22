@@ -42,6 +42,14 @@ Definition is_write (e : event) :=
   | _ => False
   end.
 
+(* An event reads or writes location [i]. *)
+Definition accesses_location (i : loc) (e : event) :=
+  match e with
+  | event_read _ j _
+  | event_write _ j _ => i = j
+  | _ => False
+  end.
+
 Definition log := list event.
 
 (*
@@ -169,6 +177,88 @@ Definition wf_log (log : log) : Prop :=
   )
 .
 
+Lemma wf_log_read_last :
+  forall log t i v,
+    mem (event_start t) log ->
+    ~mem (event_end t) log ->
+    wf_log log ->
+    wf_log (log & event_read t i v).
+Proof.
+  introv Hstart Hend Hwf.
+  destruct Hwf as (Hspawns & Hstarts & Hends & Hspawn & Hjoin & Hstart' & Hend' & Hlock).
+  splits.
+  - introv Heq (t1' & Hmem).
+    destruct (last_case l2) as [-> | (e & l2' & ->)].
+    + forwards*: last_eq_last_inv Heq.
+    + replaces (l1 ++ event_spawn t1 t2 :: l2' & e)
+          with ((l1 ++ event_spawn t1 t2 :: l2') & e)
+            in Heq; [rew_list*|].
+      forwards* (Heq' & <-): last_eq_last_inv Heq.
+      apply Hspawns in Heq'.
+      apply Heq'. exists t1'.
+      rew_listx in Hmem.
+      rew_listx.
+      branches; auto_star.
+  - introv Heq Hmem.
+    destruct (last_case l2) as [-> | (e & l2' & ->)].
+    + forwards*: last_eq_last_inv Heq.
+    + replaces (l1 ++ event_start t0 :: l2' & e)
+          with ((l1 ++ event_start t0 :: l2') & e)
+            in Heq; [rew_list*|].
+      forwards* (Heq' & <-): last_eq_last_inv Heq.
+      apply Hstarts in Heq'.
+      apply Heq'.
+      rew_listx in Hmem.
+      rew_listx.
+      branches; auto_star.
+  - introv Heq Hmem.
+    destruct (last_case l2) as [-> | (e & l2' & ->)].
+    + forwards*: last_eq_last_inv Heq.
+    + replaces (l1 ++ event_end t0 :: l2' & e)
+          with ((l1 ++ event_end t0 :: l2') & e)
+            in Heq; [rew_list*|].
+      forwards* (Heq' & <-): last_eq_last_inv Heq.
+      apply Hends in Heq'.
+      apply Heq'.
+      rew_listx in Hmem.
+      rew_listx.
+      branches; auto_star.
+  - introv Heq.
+    destruct (last_case l2) as [-> | (e & l2' & ->)].
+    + forwards*: last_eq_last_inv Heq.
+    + replaces (l1 ++ event_start t2 :: l2' & e)
+          with ((l1 ++ event_start t2 :: l2') & e)
+            in Heq; [rew_list*|].
+      forwards* (Heq' & <-): last_eq_last_inv Heq.
+  - introv Heq.
+    destruct (last_case l2) as [-> | (e & l2' & ->)].
+    + forwards*: last_eq_last_inv Heq.
+    + replaces (l1 ++ event_join t1 t2 :: l2' & e)
+          with ((l1 ++ event_join t1 t2 :: l2') & e)
+            in Heq; [rew_list*|].
+      forwards* (Heq' & <-): last_eq_last_inv Heq.
+  - introv Heq Hthread Hneq.
+    destruct (last_case l2) as [-> | (e' & l2' & ->)].
+    + forwards*: last_eq_last_inv Heq.
+      unpack. subst. simpls*.
+    + replaces (l1 ++ e :: l2' & e')
+          with ((l1 ++ e :: l2') & e')
+            in Heq; [rew_list*|].
+      forwards* (Heq' & <-): last_eq_last_inv Heq.
+  - introv Heq.
+    destruct (last_case l2) as [-> | (e & l2' & ->)].
+    + rew_listx*.
+    + replaces (l1 ++ event_end t0 :: l2' & e)
+          with ((l1 ++ event_end t0 :: l2') & e)
+            in Heq; [rew_list*|].
+      forwards* (Heq' & <-): last_eq_last_inv Heq.
+      rew_listx. splits*.
+      asserts Hmem': (mem (event_end t0) log0).
+      { subst. rew_listx*. }
+      asserts* Hneq: (t <> t0).
+      simpls*.
+  - introv. rew_listx. cases_if*. rew_list*.
+Qed.
 (*
 Definition conflict_free (log : log) : Prop :=
   forall l1 l2 t1 t2 i v1 v2,
@@ -181,10 +271,13 @@ Definition conflict_free (log : log) : Prop :=
 .
 *)
 
+(* A write to [i] happens-before any later access (read or write) of [i]. This
+   rules out both write-write and (stale) read-write races on a location. *)
 Definition conflict_free (log : log) : Prop :=
-  forall m n t1 t2 i v1 v2,
+  forall m n t1 i v1 e2,
     LibList.Nth m log (event_write t1 i v1) ->
-    LibList.Nth n log (event_write t2 i v2) ->
+    LibList.Nth n log e2 ->
+    accesses_location i e2 ->
     m < n ->
     hb log m n
 .
@@ -263,7 +356,7 @@ Qed.
 Lemma conflict_free_nil :
   conflict_free nil.
 Proof.
-  introv Hnth1 Hnth2 Hlt.
+  introv Hnth1 Hnth2 Hacc Hlt.
   inverts Hnth1.
 Qed.
 
@@ -317,11 +410,11 @@ Lemma conflict_free_last_inv :
     conflict_free log.
 Proof.
   introv Hcf.
-  introv Hnth1 Hnth2 Hlt.
+  introv Hnth1 Hnth2 Hacc Hlt.
   hint Nth_app_l.
   asserts* Hnth1': (LibList.Nth m (log0 & e) (event_write t1 i v1)).
-  asserts* Hnth2': (LibList.Nth n (log0 & e) (event_write t2 i v2)).
-  forwards* Hhb: Hcf Hnth1' Hnth2'.
+  asserts* Hnth2': (LibList.Nth n (log0 & e) e2).
+  forwards* Hhb: Hcf Hnth1' Hnth2' Hacc.
   applys* hb_app_inv.
   applys* Nth_inbound.
 Qed.

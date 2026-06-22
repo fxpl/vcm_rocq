@@ -31,8 +31,9 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (forall t l,
           (exists log', LibList.filter (fun e => touches_lock l e) log = log' & event_lock t l) <-> binds L l (ls_held t))
       /\
-      (* Unlocked locks are unlocked *)
+      (* Unlocked locks are unlocked or untouched *)
       (forall l,
+          (* TODO: Shouldn't be log = nil, but filter ... = nil *)
           (log = nil \/ exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> binds L l ls_free)
       /\
       (* The value of each location is its latest write *)
