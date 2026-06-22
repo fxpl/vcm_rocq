@@ -167,16 +167,6 @@ Proof.
       destruct* a.
 Qed.
 
-Lemma find_write_get_uncommitted :
-  forall log t i v,
-    find_write (get_uncommitted t log) i = Some v ->
-    exists log' t, LibList.filter (writes_location i) log = log' & event_write t i v.
-Proof.
-  introv Hfind.
-  induction log; simpls*.
-  (* TODO: probably need to prove something more general about get_uncommitted' *)
-Admitted.
-
 Definition describes (log : log) (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, L) =>
@@ -188,9 +178,9 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (forall t2,
           (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log) <-> exists e h ts, binds T t2 (state_new, e, h, ts))
       /\
-      (* Ended threads are ended *)
+      (* Ended threads are ended, with empty staging areas *)
       (forall t,
-          mem (event_end t) log <-> exists e h ts, binds T t ((state_terminated, e, h, ts)))
+          mem (event_end t) log <-> exists e h, binds T t ((state_terminated, e, empty_staging_area, h)))
       /\
       (* Started threads that are not ended are running *)
       (forall t,
@@ -207,7 +197,7 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       /\
       (* Replaying the log produces the commit graph, staging areas and lock/thread commits *)
       (exists D TC LC CH,
-          play_log log (empty, empty, (empty, empty), empty) (D, TC, G, LC) CH /\
+          play_log log (empty, empty, empty_graph, empty) (D, TC, G, LC) CH /\
             (forall t, t \indom T -> exists ts e, binds T t (ts, e, D[t], TC[t])) /\
             (forall l, l \indom L -> exists ls, binds L l (ls, LC[l])) /\
             (forall t, t \indom T -> t \indom D) /\
@@ -727,14 +717,14 @@ Proof.
       intros t0. split.
       * introv Hmem.
         rew_listx in Hmem. destruct Hmem as [Hmem|Hmem]; [|congruence].
-        asserts (e2 & h2 & ts2 & Hbinds): (exists e2 h2 ts2, binds T t0 (state_terminated, e2, h2, ts2)).
+        asserts (e2 & h2 & Hbinds): (exists e2 h2, binds T t0 (state_terminated, e2, empty_staging_area, h2)).
         { apply (Hdend t0). exact Hmem. }
-        exists e2 h2 ts2. apply~ binds_update_neq.
-      * introv (e2 & h2 & ts2 & Hbinds).
+        exists e2 h2. apply~ binds_update_neq.
+      * introv (e2 & h2 & Hbinds).
         destruct (classic (t0 = t)) as [->|Hneq].
         -- apply binds_update_same_inv in Hbinds. congruence.
         -- forwards~ Hbinds': binds_update_neq_inv Hbinds.
-           rew_listx. left. apply (Hdend t0). exists e2 h2 ts2. exact Hbinds'.
+           rew_listx. left. apply (Hdend t0). exists e2 h2. exact Hbinds'.
     + (* 4. Running threads *)
       intros t0. split.
       * introv (Hmem & Hnmem).
@@ -753,7 +743,7 @@ Proof.
            split.
            ++ rew_listx*.
            ++ intros contra. rew_listx in contra. destruct contra as [contra|Heq]; [|congruence].
-              asserts (e3 & h3 & ts3 & Hbinds'): (exists e3 h3 ts3, binds T t (state_terminated, e3, h3, ts3)).
+              asserts (e3 & h3 & Hbinds'): (exists e3 h3, binds T t (state_terminated, e3, empty_staging_area, h3)).
               { apply (Hdend t). exact contra. }
               forwards*: binds_inj Hbinds'.
         -- forwards~ Hbinds': binds_update_neq_inv Hbinds.
@@ -861,16 +851,16 @@ Proof.
         rew_listx in Hmem. destruct Hmem as [Hmem|Heq].
         -- asserts Hneq: (t0 <> t).
            { intros ->. exact (Henmem Hmem). }
-           asserts (e2 & h2 & ts2 & Hbinds): (exists e2 h2 ts2, binds T t0 (state_terminated, e2, h2, ts2)).
+           asserts (e2 & h2 & Hbinds): (exists e2 h2, binds T t0 (state_terminated, e2, empty_staging_area, h2)).
            { apply (Hdend t0). exact Hmem. }
-           exists e2 h2 ts2. apply~ binds_update_neq. apply~ binds_update_neq.
-        -- inverts Heq. exists (te_ret r) (empty : staging_area) h'. apply binds_update_same.
-      * introv (e2 & h2 & ts2 & Hbinds).
+           exists e2 h2. apply~ binds_update_neq. apply~ binds_update_neq.
+        -- inverts Heq. exists (te_ret r) h'. apply binds_update_same.
+      * introv (e2 & h2 & Hbinds).
         destruct (classic (t0 = t)) as [->|Hneq].
         -- apply binds_update_same_inv in Hbinds. inverts Hbinds. rew_listx*.
         -- forwards~ Hbinds1: binds_update_neq_inv Hbinds.
            forwards~ Hbinds2: binds_update_neq_inv Hbinds1.
-           rew_listx. left. apply (Hdend t0). exists e2 h2 ts2. exact Hbinds2.
+           rew_listx. left. apply (Hdend t0). exists e2 h2. exact Hbinds2.
     + (* 4. Running threads *)
       intros t0. split.
       * introv (Hmem & Hnmem).
@@ -986,14 +976,14 @@ Proof.
       intros t0. split.
       * introv Hmem.
         rew_listx in Hmem. destruct Hmem as [Hmem|Hmem]; [|congruence].
-        asserts (e2 & h2 & ts2 & Hbinds): (exists e2 h2 ts2, binds T t0 (state_terminated, e2, h2, ts2)).
+        asserts (e2 & h2 & Hbinds): (exists e2 h2, binds T t0 (state_terminated, e2, empty_staging_area, h2)).
         { apply (Hdend t0). exact Hmem. }
-        exists e2 h2 ts2. apply~ binds_update_neq.
-      * introv (e2 & h2 & ts2 & Hbinds).
+        exists e2 h2. apply~ binds_update_neq.
+      * introv (e2 & h2 & Hbinds).
         destruct (classic (t0 = t)) as [->|Hneq].
         -- apply binds_update_same_inv in Hbinds. congruence.
         -- forwards~ Hbinds': binds_update_neq_inv Hbinds.
-           rew_listx. left. apply (Hdend t0). exists e2 h2 ts2. exact Hbinds'.
+           rew_listx. left. apply (Hdend t0). exists e2 h2. exact Hbinds'.
     + (* 4. Running threads *)
       intros t0. split.
       * introv (Hmem & Hnmem).
@@ -1104,14 +1094,14 @@ Proof.
       intros t0. split.
       * introv Hmem.
         rew_listx in Hmem. destruct Hmem as [Hmem|Hmem]; [|congruence].
-        asserts (e2 & h2 & ts2 & Hbinds): (exists e2 h2 ts2, binds T t0 (state_terminated, e2, h2, ts2)).
+        asserts (e2 & h2 & Hbinds): (exists e2 h2, binds T t0 (state_terminated, e2, empty_staging_area, h2)).
         { apply (Hdend t0). exact Hmem. }
-        exists e2 h2 ts2. apply~ binds_update_neq.
-      * introv (e2 & h2 & ts2 & Hbinds).
+        exists e2 h2. apply~ binds_update_neq.
+      * introv (e2 & h2 & Hbinds).
         destruct (classic (t0 = t)) as [->|Hneq].
         -- apply binds_update_same_inv in Hbinds. congruence.
         -- forwards~ Hbinds': binds_update_neq_inv Hbinds.
-           rew_listx. left. apply (Hdend t0). exists e2 h2 ts2. exact Hbinds'.
+           rew_listx. left. apply (Hdend t0). exists e2 h2. exact Hbinds'.
     + (* 4. Running threads *)
       intros t0. split.
       * introv (Hmem & Hnmem).
@@ -1220,14 +1210,14 @@ Proof.
       intros t0. split.
       * introv Hmem.
         rew_listx in Hmem. destruct Hmem as [Hmem|Hmem]; [|congruence].
-        asserts (e2 & h2 & ts2 & Hbinds): (exists e2 h2 ts2, binds T t0 (state_terminated, e2, h2, ts2)).
+        asserts (e2 & h2 & Hbinds): (exists e2 h2, binds T t0 (state_terminated, e2, empty_staging_area, h2)).
         { apply (Hdend t0). exact Hmem. }
-        exists e2 h2 ts2. apply~ binds_update_neq.
-      * introv (e2 & h2 & ts2 & Hbinds).
+        exists e2 h2. apply~ binds_update_neq.
+      * introv (e2 & h2 & Hbinds).
         destruct (classic (t0 = t)) as [->|Hneq].
         -- apply binds_update_same_inv in Hbinds. congruence.
         -- forwards~ Hbinds': binds_update_neq_inv Hbinds.
-           rew_listx. left. apply (Hdend t0). exists e2 h2 ts2. exact Hbinds'.
+           rew_listx. left. apply (Hdend t0). exists e2 h2. exact Hbinds'.
     + (* 4. Running threads *)
       intros t0. split.
       * introv (Hmem & Hnmem).
@@ -1390,14 +1380,14 @@ Proof.
       intros t0. split.
       * introv Hmem.
         rew_listx in Hmem. destruct Hmem as [Hmem|Hmem]; [|congruence].
-        asserts (e2 & h2 & ts2 & Hbinds): (exists e2 h2 ts2, binds T t0 (state_terminated, e2, h2, ts2)).
+        asserts (e2 & h2 & Hbinds): (exists e2 h2, binds T t0 (state_terminated, e2, empty_staging_area, h2)).
         { apply (Hdend t0). exact Hmem. }
         asserts Hneq': (t0 <> t').
         { intros ->. false* H5. }
-        exists e2 h2 ts2.
+        exists e2 h2.
         apply~ binds_update_neq. apply~ binds_update_neq.
         apply~ binds_update_neq. apply~ binds_update_neq.
-      * introv (e2 & h2 & ts2 & Hbinds).
+      * introv (e2 & h2 & Hbinds).
         destruct (classic (t0 = t')) as [->|Hneq'].
         -- apply binds_update_same_inv in Hbinds. congruence.
         -- forwards~ Hbinds1: binds_update_neq_inv Hbinds.
@@ -1406,7 +1396,7 @@ Proof.
            ++ forwards~ Hbinds2: binds_update_neq_inv Hbinds1.
               forwards~ Hbinds3: binds_update_neq_inv Hbinds2.
               forwards~ Hbinds4: binds_update_neq_inv Hbinds3.
-              rew_listx. left. apply (Hdend t0). exists e2 h2 ts2. exact Hbinds4.
+              rew_listx. left. apply (Hdend t0). exists e2 h2. exact Hbinds4.
     + (* 4. Running threads *)
       intros t0. split.
       * introv (Hmem & Hnmem).
@@ -1563,13 +1553,13 @@ Proof.
       intros t0. split.
       * introv Hmem.
         rew_listx in Hmem. destruct Hmem as [Hmem|Hmem]; [|congruence].
-        asserts (e2 & h2 & ts2 & Hbinds): (exists e2 h2 ts2, binds T t0 (state_terminated, e2, h2, ts2)).
+        asserts (e2 & h2 & Hbinds): (exists e2 h2, binds T t0 (state_terminated, e2, empty_staging_area, h2)).
         { apply (Hdend t0). exact Hmem. }
-        exists e2 h2 ts2. apply~ binds_update_neq.
-      * introv (e2 & h2 & ts2 & Hbinds).
+        exists e2 h2. apply~ binds_update_neq.
+      * introv (e2 & h2 & Hbinds).
         apply binds_update_inv in Hbinds.
         cases_if.
-        rew_listx. left. apply (Hdend t0). exists* e2 h2 ts2.
+        rew_listx. left. apply (Hdend t0). exists* e2 h2.
     + (* 4. Running threads *)
       intros t0. split.
       * introv (Hmem & Hnmem).
@@ -1698,15 +1688,15 @@ Proof.
       intros t0. split.
       * introv Hmem.
         rew_listx in Hmem. destruct Hmem as [Hmem|Hmem]; [|congruence].
-        asserts (e2 & h2 & ts2 & Hbinds): (exists e2 h2 ts2, binds T t0 (state_terminated, e2, h2, ts2)).
+        asserts (e2 & h2 & Hbinds): (exists e2 h2, binds T t0 (state_terminated, e2, empty_staging_area, h2)).
         { apply (Hdend t0). exact Hmem. }
-        exists e2 h2 ts2. repeat apply~ binds_update_neq.
-      * introv (e2 & h2 & ts2 & Hbinds).
+        exists e2 h2. repeat apply~ binds_update_neq.
+      * introv (e2 & h2 & Hbinds).
         rewrite~ update_update in Hbinds.
         destruct (classic (t0 = t)) as [->|Hneq].
         -- apply binds_update_same_inv in Hbinds. congruence.
         -- forwards~ Hbinds': binds_update_neq_inv Hbinds.
-           rew_listx. left. apply (Hdend t0). exists e2 h2 ts2. exact Hbinds'.
+           rew_listx. left. apply (Hdend t0). exists e2 h2. exact Hbinds'.
     + (* 4. Running threads *)
       intros t0. split.
       * introv (Hmem & Hnmem).
@@ -1873,14 +1863,14 @@ Proof.
       intros t0. split.
       * introv Hmem.
         rew_listx in Hmem. destruct Hmem as [Hmem|Hmem]; [|congruence].
-        asserts (e2 & h2 & ts2 & Hbinds): (exists e2 h2 ts2, binds T t0 (state_terminated, e2, h2, ts2)).
+        asserts (e2 & h2 & Hbinds): (exists e2 h2, binds T t0 (state_terminated, e2, empty_staging_area, h2)).
         { apply (Hdend t0). exact Hmem. }
-        exists e2 h2 ts2. apply~ binds_update_neq.
-      * introv (e2 & h2 & ts2 & Hbinds).
+        exists e2 h2. apply~ binds_update_neq.
+      * introv (e2 & h2 & Hbinds).
         destruct (classic (t0 = t)) as [->|Hneq].
         -- apply binds_update_same_inv in Hbinds. congruence.
         -- forwards~ Hbinds': binds_update_neq_inv Hbinds.
-           rew_listx. left. apply (Hdend t0). exists e2 h2 ts2. exact Hbinds'.
+           rew_listx. left. apply (Hdend t0). exists e2 h2. exact Hbinds'.
     + (* 4. Running threads *)
       intros t0. split.
       * introv (Hmem & Hnmem).

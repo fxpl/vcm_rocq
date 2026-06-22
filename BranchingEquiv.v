@@ -2371,6 +2371,7 @@ Proof.
     inverts Hstep;
       match goal with
       | H: binds ?T ?t (?ts', ?e) |- _ =>
+          assert (Ht := H);
           apply Hexp in H as (d & h & Hbinds)
       end.
     + exists. constructors*.
@@ -2417,7 +2418,13 @@ Proof.
       }
       asserts Hempty: (d = \{}).
       {
-        admit. (* terminated thread has an empty staging area. *)
+        destruct HdescSh as (_ & _ & Hend & _).
+        asserts Hmem: (mem (event_end t') log).
+        { apply* Hend. }
+        destruct HdescB as (_ & _ & Hend' & _).
+        apply Hend' in Hmem as (e' & d'' & Hbinds''').
+        forwards~ Heq: binds_inj Hbinds Hbinds'''.
+        inverts* Heq.
       }
       substs.
       asserts Hmerge: (conflict_free_merge d' h' h G).
@@ -2450,7 +2457,12 @@ Proof.
     + forwards (h'' & Hfresh): exists_commit_fresh HwfG.
       asserts (h' & HbindsL): (exists h', binds L l0 (ls_held t, h')).
       {
-        admit. (* Correspondence between locks via log *)
+        destruct HdescSh as (_ & _ & _ & _ & Hlock & _).
+        match goal with
+        | H : binds L0 l0 (ls_held t) |- _ => apply Hlock in H as Hex
+        end.
+        destruct HdescB as (_ & _ & _ & _ & Hlock' & _).
+        apply* Hlock'.
       }
       asserts (T' & G' & L' & Hpush & Hbinds'): (exists T' G' L', push_lock t l0 h'' T G L = (T', G', L') /\ binds T' t (state_running, te_exp e, \{}, h'')).
       {
