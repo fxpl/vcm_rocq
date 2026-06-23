@@ -393,6 +393,18 @@ Proof.
   - applys~ ancestor_graph_merge.
 Qed.
 
+Lemma ancestor_graph_root :
+  forall G c x y,
+    ancestor G x y ->
+    commit_fresh G c ->
+    ancestor (graph_root G c) x y.
+Proof.
+  introv Hanc Hfresh. destruct G as (C & P). unfold graph_root.
+  induction Hanc.
+  - apply ancestor_refl.
+  - applys AncestorTrans IHHanc. rew_set; auto_star.
+Qed.
+
 (* ---------------------------------------------------------------------- *)
 (* Lemmas relocated here from BranchingEquiv.v (organization pass).          *)
 (* ---------------------------------------------------------------------- *)

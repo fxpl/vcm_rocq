@@ -139,6 +139,7 @@ Proof.
     + introv contra.
       forwards*: indom_of_binds; [typeclass|].
       forwards*: indom_empty_inv.
+  - exists* t_root.
 Qed.
 
 Theorem step_equiv :
@@ -347,7 +348,16 @@ Proof.
     + introv Hmem'.
       rew_listx in Hmem'. branches; auto_star.
   - (* StepSpawn: log' = log & event_spawn t t' *)
-    destruct Hdesc as (Hdspawned & _ & _ & Hdrunning & _).
+    destruct Hdesc as (Hdspawned & _ & _ & Hdrunning & _ & _ & _ & (t'' & Hinit')).
+    asserts ->: (t'' = t_root).
+    {
+      apply mem_inv_middle in Hinit' as (l1 & l2 & Heq).
+      applys* Hinit.
+    }
+    asserts Hrmem: (t_root \indom T).
+    {
+      apply* Hdspawned.
+    }
     asserts (Hsmem & Hsnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     (* t' is fresh: it was not in dom T, so no spawn for t' exists in log *)
@@ -400,7 +410,6 @@ Proof.
       apply* Hinit.
     + introv Hmem'.
       rew_listx in Hmem'. branches; auto_star.
-      inverts H0. (* t_root \indom T *) admit.
   - (* StepJoin: log' = log & event_join t t' *)
     destruct Hdesc as (_ & _ & Hdend & Hdrunning & _).
     asserts (Hsmem & Hjnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
@@ -554,7 +563,7 @@ Proof.
       apply* Hinit.
     + introv Hmem'.
       rew_listx in Hmem'. branches; auto_star.
-Admitted.
+Qed.
 (*
 Instance threads_dom_inst : BagDom threads (set tid).
   constructor. rapply (@dom_impl tid thread).
@@ -569,12 +578,10 @@ Theorem step_preserves_describes :
     step (cfg, log) (cfg', log') ->
     describes log' cfg'.
 Proof.
-Admitted.
-(*
   introv Hwf Hdesc Hstep.
-  destruct Hwf as (Huspawn & Hustart & Huend & Hspawn & Hjoin & Hstart & Hend & Hlock).
+  destruct Hwf as (Huspawn & Hustart & Huend & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit).
   inversion Hstep; substs; clear Hstep.
-  - destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite).
+  - destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & (t'' & Hdinit)).
     splits.
     + intros.
       rew_dom. rew_set.
@@ -586,29 +593,56 @@ Admitted.
            asserts* Hin: (t2 \indom T).
            { applys* Hdspawned. }
            autos.
-        -- (* t_root \indom T *) admit.
+        -- asserts ->: (t2 = t_root).
+           {
+             apply mem_inv_middle in Hmem as (l1 & l2 & Heq).
+             applys* Hinit.
+           }
+           asserts Hrmem: (t_root \indom T).
+           {
+             apply* Hdspawned.
+           }
+           auto.
       * intros Hin. branches.
-        -- asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t2) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+        -- apply Hdspawned in H0.
+           branches; rew_listx*.
+           unpack.
+           left. exists. rew_listx*.
         -- subst.
-           asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+           asserts* Hdom: (t \indom T).
+           apply Hdspawned in Hdom.
+           branches; rew_listx*.
+           unpack.
+           left. exists. rew_listx*.
     + intros. splits.
-      * introv (t1 & Hmem & Hnmem).
+      * introv (Hdisj & Hnmem).
         asserts Hneq: (t2 <> t).
         { intros ->. false Hnmem. rew_listx*. }
         asserts (e' & Hbinds): (exists e, binds T t2 (state_new, e)).
-        { apply Hdstart. exists t1. rew_listx in *. splits*. }
+        { apply Hdstart. splits.
+          - rew_listx in Hdisj.
+            destruct Hdisj as [(t1 & Hmem) | [Hmem | Heq]]; [| | congruence].
+            + rew_listx in Hmem. branches; [| congruence].
+              left. exists* t1.
+            + right*.
+          - intros Hc. false Hnmem. rew_listx*. }
         exists e'.
         apply~ binds_update_neq.
       * introv (e' & Hbinds).
         asserts Hneq: (t2 <> t).
         { intros ->. apply binds_update_same_inv in Hbinds. congruence. }
-        asserts (t1 & Hmem & Hnmem): (exists t1, mem (event_spawn t1 t2) log /\ ~ mem (event_start t2) log).
-        { apply Hdstart. exists e'. forwards~: binds_update_neq_inv Hbinds. }
-        exists. rew_listx. splits*.
+        forwards~ Hbinds': binds_update_neq_inv Hbinds.
+        asserts (Hdisj & Hnmem):
+          (((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log)
+            /\ ~ mem (event_start t2) log).
+        { apply Hdstart. exists* e'. }
+        splits.
+        -- destruct Hdisj as [(t1 & Hmem) | Hmem].
+           ++ left. exists t1. rew_listx*.
+           ++ right. rew_listx*.
+        -- intros Hc. rew_listx in Hc. branches.
+           ++ false*.
+           ++ congruence.
     + intros. splits.
       * introv Hmem.
         rew_listx in Hmem. branches; [|congruence].
@@ -653,46 +687,63 @@ Admitted.
       apply Hdunlock.
     + intros l. rew_listx. cases_if~. rew_list.
       apply Hdwrite.
+    + exists t''. rew_listx*.
   - (* StepEnd: log' = log & event_end t, T' = T[t := (terminated, ret r)] *)
-    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite).
+    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & (t'' & Hdinit)).
     splits.
     + (* Spawned: dom T unchanged, event_end not a spawn *)
-      intros t2.
-      replaces (dom (T[t := (state_terminated, te_ret r)])) with (union (dom T) (single t));
-        [apply dom_update|].
-      rew_set. splits.
-      * introv (t1 & Hmem).
-        rew_listx in Hmem. branches; [| congruence].
-        asserts* Hin: (t2 \indom T). { apply* Hdspawned. }
-        autos.
+      intros.
+      rew_dom. rew_set. splits.
+      * introv Hsrc.
+        rew_listx in Hsrc.
+        destruct Hsrc as [(t1 & Hmem)|[Hmem | Heq]]; [| | congruence].
+        -- rew_listx in Hmem. branches; [| congruence].
+           asserts* Hin: (t2 \indom T). { applys* Hdspawned. }
+           autos.
+        -- asserts ->: (t2 = t_root).
+           { apply mem_inv_middle in Hmem as (l1 & l2 & Heq). applys* Hinit. }
+           asserts Hrmem: (t_root \indom T). { apply* Hdspawned. }
+           auto.
       * intros Hin. branches.
-        -- asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t2) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+        -- apply Hdspawned in H0.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
         -- subst.
-           asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+           asserts* Hdom: (t \indom T).
+           apply Hdspawned in Hdom.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
     + (* New threads: event_end not a spawn *)
       asserts (Hsmem & Henmem): (mem (event_start t) log /\ ~mem (event_end t) log).
       { apply* Hdrunning. }
       intros t2. splits.
-      * introv (t1 & Hmem & Hnmem).
-        rew_listx in Hmem. branches; [|congruence].
+      * introv (Hdisj & Hnmem).
         asserts Hneq: (t2 <> t).
         { intros ->. false Hnmem. rew_listx*. }
         asserts (e' & Hbinds): (exists e, binds T t2 (state_new, e)).
-        { apply Hdstart. exists t1. splits.
-          - autos*.
-          - intros contra. apply Hnmem. rew_listx*. }
+        { apply Hdstart. splits.
+          - rew_listx in Hdisj.
+            destruct Hdisj as [(t1 & Hmem) | [Hmem | Heq]]; [| | congruence].
+            + rew_listx in Hmem. branches; [| congruence].
+              left. exists* t1.
+            + right*.
+          - intros Hc. false Hnmem. rew_listx*. }
         exists e'. apply~ binds_update_neq.
       * introv (e' & Hbinds).
         asserts Hneq: (t2 <> t).
         { intros ->. apply binds_update_same_inv in Hbinds. congruence. }
         forwards~ Hbinds': binds_update_neq_inv Hbinds.
-        asserts (t1 & Hmem & Hnmem): (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log).
-        { apply Hdstart. exists e'. exact Hbinds'. }
-        exists. rew_listx. splits*.
+        asserts (Hdisj & Hnmem):
+          (((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log)
+            /\ ~ mem (event_start t2) log).
+        { apply Hdstart. exists* e'. }
+        splits.
+        -- destruct Hdisj as [(t1 & Hmem) | Hmem].
+           ++ left. exists t1. rew_listx*.
+           ++ right. rew_listx*.
+        -- intros Hc. rew_listx in Hc. branches.
+           ++ false*.
+           ++ congruence.
     + (* Ended: t now terminated, log gains event_end t *)
       asserts (Hsmem & Henmem): (mem (event_start t) log /\ ~mem (event_end t) log).
       { apply* Hdrunning. }
@@ -739,46 +790,64 @@ Admitted.
       intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, filter unchanged *)
       intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
+    + (* Init event still present *)
+      exists t''. rew_listx*.
   - (* StepRead: log' = log & event_read t i v, T' = T[t := running K(v)] *)
-    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite).
+    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & (t'' & Hdinit)).
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     splits.
     + (* Spawned: dom T unchanged, event_read not a spawn *)
-      intros t2.
-      replaces (dom (T[t := (state_running, te_exp (K (ret_val v)))])) with (union (dom T) (single t));
-        [apply dom_update|].
-      rew_set. splits.
-      * introv (t1 & Hmem).
-        rew_listx in Hmem. branches; [|congruence].
-        asserts* Hin: (t2 \indom T). { apply* Hdspawned. }
-        autos.
+      intros.
+      rew_dom. rew_set. splits.
+      * introv Hsrc.
+        rew_listx in Hsrc.
+        destruct Hsrc as [(t1 & Hmem)|[Hmem | Heq]]; [| | congruence].
+        -- rew_listx in Hmem. branches; [| congruence].
+           asserts* Hin: (t2 \indom T). { applys* Hdspawned. }
+           autos.
+        -- asserts ->: (t2 = t_root).
+           { apply mem_inv_middle in Hmem as (l1 & l2 & Heq). applys* Hinit. }
+           asserts Hrmem: (t_root \indom T). { apply* Hdspawned. }
+           auto.
       * intros Hin. branches.
-        -- asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t2) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+        -- apply Hdspawned in H0.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
         -- subst.
-           asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+           asserts* Hdom: (t \indom T).
+           apply Hdspawned in Hdom.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
     + (* New threads: event_read not a spawn *)
       intros t2. splits.
-      * introv (t1 & Hmem & Hnmem).
-        rew_listx in Hmem. branches; [|congruence].
+      * introv (Hdisj & Hnmem).
         asserts Hneq: (t2 <> t).
         { intros ->. false Hnmem. rew_listx*. }
         asserts (e' & Hbinds): (exists e, binds T t2 (state_new, e)).
-        { apply Hdstart. exists t1. splits.
-          - autos*.
-          - intros contra. apply Hnmem. rew_listx*. }
+        { apply Hdstart. splits.
+          - rew_listx in Hdisj.
+            destruct Hdisj as [(t1 & Hmem) | [Hmem | Heq]]; [| | congruence].
+            + rew_listx in Hmem. branches; [| congruence].
+              left. exists* t1.
+            + right*.
+          - intros Hc. false Hnmem. rew_listx*. }
         exists e'. apply~ binds_update_neq.
       * introv (e' & Hbinds).
         asserts Hneq: (t2 <> t).
         { intros ->. apply binds_update_same_inv in Hbinds. congruence. }
         forwards~ Hbinds': binds_update_neq_inv Hbinds.
-        asserts (t1 & Hmem & Hnmem): (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log).
-        { apply Hdstart. exists e'. exact Hbinds'. }
-        exists. rew_listx. splits*.
+        asserts (Hdisj & Hnmem):
+          (((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log)
+            /\ ~ mem (event_start t2) log).
+        { apply Hdstart. exists* e'. }
+        splits.
+        -- destruct Hdisj as [(t1 & Hmem) | Hmem].
+           ++ left. exists t1. rew_listx*.
+           ++ right. rew_listx*.
+        -- intros Hc. rew_listx in Hc. branches.
+           ++ false*.
+           ++ congruence.
     + (* Ended: event_read not an end, T terminated threads unchanged *)
       intros t0. splits.
       * introv Hmem.
@@ -826,46 +895,64 @@ Admitted.
       intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, event_read not a write *)
       intros i0 v0. rew_listx. cases_if~. rew_list. apply Hdwrite.
+    + (* Init event still present *)
+      exists t''. rew_listx*.
   - (* StepWrite: log' = log & event_write t i v, T' = T[t := running K(void)], H' = H[i := v] *)
-    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite).
+    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & (t'' & Hdinit)).
     asserts (Hsmem & Hwnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     splits.
     + (* Spawned: dom T unchanged, event_write not a spawn *)
-      intros t2.
-      replaces (dom (T[t := (state_running, te_exp (K void))])) with (union (dom T) (single t));
-        [apply dom_update|].
-      rew_set. splits.
-      * introv (t1 & Hmem).
-        rew_listx in Hmem. branches; [|congruence].
-        asserts* Hin: (t2 \indom T). { apply* Hdspawned. }
-        autos.
+      intros.
+      rew_dom. rew_set. splits.
+      * introv Hsrc.
+        rew_listx in Hsrc.
+        destruct Hsrc as [(t1 & Hmem)|[Hmem | Heq]]; [| | congruence].
+        -- rew_listx in Hmem. branches; [| congruence].
+           asserts* Hin: (t2 \indom T). { applys* Hdspawned. }
+           autos.
+        -- asserts ->: (t2 = t_root).
+           { apply mem_inv_middle in Hmem as (l1 & l2 & Heq). applys* Hinit. }
+           asserts Hrmem: (t_root \indom T). { apply* Hdspawned. }
+           auto.
       * intros Hin. branches.
-        -- asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t2) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+        -- apply Hdspawned in H0.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
         -- subst.
-           asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+           asserts* Hdom: (t \indom T).
+           apply Hdspawned in Hdom.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
     + (* New threads: event_write not a spawn *)
       intros t2. splits.
-      * introv (t1 & Hmem & Hnmem).
-        rew_listx in Hmem. branches; [|congruence].
+      * introv (Hdisj & Hnmem).
         asserts Hneq: (t2 <> t).
         { intros ->. false Hnmem. rew_listx*. }
         asserts (e' & Hbinds): (exists e, binds T t2 (state_new, e)).
-        { apply Hdstart. exists t1. splits.
-          - autos*.
-          - intros contra. apply Hnmem. rew_listx*. }
+        { apply Hdstart. splits.
+          - rew_listx in Hdisj.
+            destruct Hdisj as [(t1 & Hmem) | [Hmem | Heq]]; [| | congruence].
+            + rew_listx in Hmem. branches; [| congruence].
+              left. exists* t1.
+            + right*.
+          - intros Hc. false Hnmem. rew_listx*. }
         exists e'. apply~ binds_update_neq.
       * introv (e' & Hbinds).
         asserts Hneq: (t2 <> t).
         { intros ->. apply binds_update_same_inv in Hbinds. congruence. }
         forwards~ Hbinds': binds_update_neq_inv Hbinds.
-        asserts (t1 & Hmem & Hnmem): (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log).
-        { apply Hdstart. exists e'. exact Hbinds'. }
-        exists. rew_listx. splits*.
+        asserts (Hdisj & Hnmem):
+          (((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log)
+            /\ ~ mem (event_start t2) log).
+        { apply Hdstart. exists* e'. }
+        splits.
+        -- destruct Hdisj as [(t1 & Hmem) | Hmem].
+           ++ left. exists t1. rew_listx*.
+           ++ right. rew_listx*.
+        -- intros Hc. rew_listx in Hc. branches.
+           ++ false*.
+           ++ congruence.
     + (* Ended: event_write not an end, T terminated threads unchanged *)
       intros t0. splits.
       * introv Hmem.
@@ -930,8 +1017,10 @@ Admitted.
         -- introv Hbinds.
            forwards~ Hbinds': binds_update_neq_inv Hbinds.
            apply* Hdwrite.
+    + (* Init event still present *)
+      exists t''. rew_listx*.
   - (* StepSpawn: log' = log & event_spawn t t', T' = T[t := ...][t' := (new, e')] *)
-    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite).
+    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & (t'' & Hdinit)).
     asserts (Hsmem & Hsnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts Hnospawn: (~exists t1, mem (event_spawn t1 t') log).
@@ -947,50 +1036,66 @@ Admitted.
         [apply dom_update|].
       rew_set.
       splits.
-      * introv (t1 & Hmem).
-        rew_listx in Hmem. destruct Hmem as [Hmem|Heq]; [|inverts Heq; autos*].
-        asserts* Hin: (t2 \indom T). { apply* Hdspawned. }
-        autos.
-      * intros Hin. branches.
-        -- asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t2) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
-        -- subst. exists t. rew_listx*.
+      * introv Hsrc.
+        rew_listx in Hsrc.
+        destruct Hsrc as [(t1 & Hmem) | [Hmem | Heq]]; [| | congruence].
+        -- rew_listx in Hmem. destruct Hmem as [Hmem | Heq].
+           ++ left. left. applys Hdspawned. left. exists* t1.
+           ++ inverts Heq. autos*.
+        -- left. left.
+           asserts ->: (t2 = t_root).
+           { apply mem_inv_middle in Hmem as (l1 & l2 & Heq). applys* Hinit. }
+           applys Hdspawned. right. exact Hmem.
+      * intros Hin. destruct Hin as [[Hin | ->] | ->].
+        -- apply Hdspawned in Hin. branches.
+           ++ unpack. left. exists. rew_listx*.
+           ++ right. rew_listx*.
+        -- apply Hdspawned in Htin. branches.
+           ++ unpack. left. exists. rew_listx*.
+           ++ right. rew_listx*.
+        -- left. exists t. rew_listx*.
     + (* New threads: event_spawn t t' added, t' has no start yet *)
       intros t2. splits.
-      * introv (t1 & Hmem & Hnmem).
-        rew_listx in Hmem. destruct Hmem as [Hmem|Heq].
-        -- destruct (classic (t2 = t')) as [->|Hneq'].
-           ++ false Hnospawn. exists t1. autos*.
-           ++ destruct (classic (t2 = t)) as [->|Hneq].
-              ** false Hnmem. rew_listx*.
-              ** asserts (e0 & Hbinds): (exists e, binds T t2 (state_new, e)).
-                 { apply Hdstart. exists t1. splits.
-                   - autos*.
-                   - intros contra. apply Hnmem. rew_listx*. }
-                 exists e0. apply~ binds_update_neq. apply~ binds_update_neq.
-        -- inverts Heq.
+      * introv (Hdisj & Hnmem).
+        destruct (classic (t2 = t')) as [->|Hneq'].
+        -- (* the freshly spawned thread *)
            exists. apply binds_update_same.
+        -- destruct (classic (t2 = t)) as [->|Hneq].
+           ++ false Hnmem. rew_listx*.
+           ++ asserts (e0 & Hbinds): (exists e, binds T t2 (state_new, e)).
+              { apply Hdstart. splits.
+                - rew_listx in Hdisj.
+                  destruct Hdisj as [(t1 & Hmem) | [Hmem | Heq]]; [| | congruence].
+                  + rew_listx in Hmem. destruct Hmem as [Hmem | Heq].
+                    * left. exists* t1.
+                    * congruence.
+                  + right*.
+                - intros Hc. apply Hnmem. rew_listx*. }
+              exists e0. apply~ binds_update_neq. apply~ binds_update_neq.
       * introv (e0 & Hbinds).
         destruct (classic (t2 = t')) as [->|Hneq'].
         -- apply binds_update_same_inv in Hbinds. inverts Hbinds.
-           exists t. split.
-           ++ rew_listx*.
-           ++ introv contra. rew_listx in contra. destruct contra as [contra|Heq].
-              ** false Hnospawn.
-                 asserts (l1 & l2 & ->): (exists l1 l2, log = l1 ++ event_start t' :: l2).
-                 { apply~ mem_inv_middle. }
-                 forwards* (t1 & Hmem): Hspawn.
-                 exists t1. rew_listx*.
-              ** congruence.
+           split.
+           ++ left. exists t. rew_listx*.
+           ++ introv contra. rew_listx in contra. destruct contra as [contra|Heq]; [|congruence].
+              false H6.
+              asserts (l1 & l2 & Heq2): (exists l1 l2, log = l1 ++ event_start t' :: l2).
+              { apply~ mem_inv_middle. }
+              forwards [(t1 & Hmem) | Hmem]: Hspawn Heq2.
+              ** applys Hdspawned. left. exists t1. rewrite Heq2. rew_listx*.
+              ** applys Hdspawned. right. rewrite Heq2. rew_listx*.
         -- forwards~ Hbinds1: binds_update_neq_inv Hbinds.
            destruct (classic (t2 = t)) as [->|Hneq].
            ++ apply binds_update_same_inv in Hbinds1. congruence.
            ++ forwards~ Hbinds2: binds_update_neq_inv Hbinds1.
-              asserts (t1 & Hmem & Hnmem): (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log).
+              asserts (Hdisj & Hnmem):
+                (((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log)
+                  /\ ~mem (event_start t2) log).
               { apply Hdstart. exists e0. exact Hbinds2. }
-              exists t1. splits.
-              ** rew_listx*.
+              split.
+              ** destruct Hdisj as [(t1 & Hmem) | Hmem].
+                 --- left. exists t1. rew_listx*.
+                 --- right. rew_listx*.
               ** introv contra. apply Hnmem. rew_listx in contra. destruct contra as [contra|Heq]; [exact contra|congruence].
     + (* Ended: event_spawn not an end, terminated threads unchanged *)
       intros t0. splits.
@@ -1016,12 +1121,12 @@ Admitted.
         asserts Henmem0': (~mem (event_end t0) log).
         { introv Hmem. apply Henmem0. rew_listx*. }
         destruct (classic (t0 = t')) as [->|Hneq'].
-        -- false Hnospawn.
-           asserts (l1 & l2 & ->): (exists l1 l2, log = l1 ++ event_start t' :: l2).
+        -- false H6.
+           asserts (l1 & l2 & Heq2): (exists l1 l2, log = l1 ++ event_start t' :: l2).
            { apply~ mem_inv_middle. }
-           forwards* (t1 & Hmem): Hspawn.
-           exists t1. rew_listx*.
-        (* -- false Hnospawn. apply Hdspawned. autos*. *)
+           forwards [(t1 & Hmem) | Hmem]: Hspawn Heq2.
+           ++ applys Hdspawned. left. exists t1. rewrite Heq2. rew_listx*.
+           ++ applys Hdspawned. right. rewrite Heq2. rew_listx*.
         -- destruct (classic (t0 = t)) as [->|Hneq].
            ++ exists (te_exp (K t')). apply~ binds_update_neq. apply binds_update_same.
            ++ asserts (e0 & Hbinds): (exists e, binds T t0 (state_running, e)).
@@ -1048,46 +1153,64 @@ Admitted.
       intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, event_spawn not a write *)
       intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
+    + (* Init event still present *)
+      exists t''. rew_listx*.
   - (* StepJoin: log' = log & event_join t t', T' = T[t := running K(r)] *)
-    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite).
+    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & (t'' & Hdinit)).
     asserts (Hsmem & Hjnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     splits.
     + (* Spawned: dom T unchanged, event_join not a spawn *)
-      intros t2.
-      replaces (dom (T[t := (state_running, te_exp (K r))])) with (union (dom T) (single t));
-        [apply dom_update|].
-      rew_set. splits.
-      * introv (t1 & Hmem).
-        rew_listx in Hmem. branches; [|congruence].
-        asserts* Hin: (t2 \indom T). { apply* Hdspawned. }
-        autos.
+      intros.
+      rew_dom. rew_set. splits.
+      * introv Hsrc.
+        rew_listx in Hsrc.
+        destruct Hsrc as [(t1 & Hmem)|[Hmem | Heq]]; [| | congruence].
+        -- rew_listx in Hmem. branches; [| congruence].
+           asserts* Hin: (t2 \indom T). { applys* Hdspawned. }
+           autos.
+        -- asserts ->: (t2 = t_root).
+           { apply mem_inv_middle in Hmem as (l1 & l2 & Heq). applys* Hinit. }
+           asserts Hrmem: (t_root \indom T). { apply* Hdspawned. }
+           auto.
       * intros Hin. branches.
-        -- asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t2) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+        -- apply Hdspawned in H0.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
         -- subst.
-           asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+           asserts* Hdom: (t \indom T).
+           apply Hdspawned in Hdom.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
     + (* New threads: event_join not a spawn *)
       intros t2. splits.
-      * introv (t1 & Hmem & Hnmem).
-        rew_listx in Hmem. branches; [|congruence].
+      * introv (Hdisj & Hnmem).
         asserts Hneq: (t2 <> t).
         { intros ->. false Hnmem. rew_listx*. }
         asserts (e' & Hbinds): (exists e, binds T t2 (state_new, e)).
-        { apply Hdstart. exists t1. splits.
-          - autos*.
-          - intros contra. apply Hnmem. rew_listx*. }
+        { apply Hdstart. splits.
+          - rew_listx in Hdisj.
+            destruct Hdisj as [(t1 & Hmem) | [Hmem | Heq]]; [| | congruence].
+            + rew_listx in Hmem. branches; [| congruence].
+              left. exists* t1.
+            + right*.
+          - intros Hc. false Hnmem. rew_listx*. }
         exists e'. apply~ binds_update_neq.
       * introv (e' & Hbinds).
         asserts Hneq: (t2 <> t).
         { intros ->. apply binds_update_same_inv in Hbinds. congruence. }
         forwards~ Hbinds': binds_update_neq_inv Hbinds.
-        asserts (t1 & Hmem & Hnmem): (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log).
-        { apply Hdstart. exists e'. exact Hbinds'. }
-        exists. rew_listx. splits*.
+        asserts (Hdisj & Hnmem):
+          (((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log)
+            /\ ~ mem (event_start t2) log).
+        { apply Hdstart. exists* e'. }
+        splits.
+        -- destruct Hdisj as [(t1 & Hmem) | Hmem].
+           ++ left. exists t1. rew_listx*.
+           ++ right. rew_listx*.
+        -- intros Hc. rew_listx in Hc. branches.
+           ++ false*.
+           ++ congruence.
     + (* Ended: event_join not an end, terminated threads unchanged *)
       intros t0. splits.
       * introv Hmem.
@@ -1135,46 +1258,64 @@ Admitted.
       intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, event_join not a write *)
       intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
+    + (* Init event still present *)
+      exists t''. rew_listx*.
   - (* StepLock: log' = log & event_lock t l, T' = T[t := ...], L' = L[l := ls_held t] *)
-    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite).
+    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & (t'' & Hdinit)).
     asserts (Hsmem & Hlnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     splits.
     + (* Spawned: dom T unchanged, event_lock not a spawn *)
-      intros t2.
-      replaces (dom (T[t := (state_running, te_exp (K void))])) with (union (dom T) (single t));
-        [apply dom_update|].
-      rew_set. splits.
-      * introv (t1 & Hmem).
-        rew_listx in Hmem. branches; [|congruence].
-        asserts* Hin: (t2 \indom T). { apply* Hdspawned. }
-        autos.
+      intros.
+      rew_dom. rew_set. splits.
+      * introv Hsrc.
+        rew_listx in Hsrc.
+        destruct Hsrc as [(t1 & Hmem)|[Hmem | Heq]]; [| | congruence].
+        -- rew_listx in Hmem. branches; [| congruence].
+           asserts* Hin: (t2 \indom T). { applys* Hdspawned. }
+           autos.
+        -- asserts ->: (t2 = t_root).
+           { apply mem_inv_middle in Hmem as (l1 & l2 & Heq). applys* Hinit. }
+           asserts Hrmem: (t_root \indom T). { apply* Hdspawned. }
+           auto.
       * intros Hin. branches.
-        -- asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t2) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+        -- apply Hdspawned in H0.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
         -- subst.
-           asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+           asserts* Hdom: (t \indom T).
+           apply Hdspawned in Hdom.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
     + (* New threads: event_lock not a spawn *)
       intros t2. splits.
-      * introv (t1 & Hmem & Hnmem).
-        rew_listx in Hmem. branches; [|congruence].
+      * introv (Hdisj & Hnmem).
         asserts Hneq: (t2 <> t).
         { intros ->. false Hnmem. rew_listx*. }
         asserts (e' & Hbinds): (exists e, binds T t2 (state_new, e)).
-        { apply Hdstart. exists t1. splits.
-          - autos*.
-          - intros contra. apply Hnmem. rew_listx*. }
+        { apply Hdstart. splits.
+          - rew_listx in Hdisj.
+            destruct Hdisj as [(t1 & Hmem) | [Hmem | Heq]]; [| | congruence].
+            + rew_listx in Hmem. branches; [| congruence].
+              left. exists* t1.
+            + right*.
+          - intros Hc. false Hnmem. rew_listx*. }
         exists e'. apply~ binds_update_neq.
       * introv (e' & Hbinds).
         asserts Hneq: (t2 <> t).
         { intros ->. apply binds_update_same_inv in Hbinds. congruence. }
         forwards~ Hbinds': binds_update_neq_inv Hbinds.
-        asserts (t1 & Hmem & Hnmem): (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log).
-        { apply Hdstart. exists e'. exact Hbinds'. }
-        exists. rew_listx. splits*.
+        asserts (Hdisj & Hnmem):
+          (((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log)
+            /\ ~ mem (event_start t2) log).
+        { apply Hdstart. exists* e'. }
+        splits.
+        -- destruct Hdisj as [(t1 & Hmem) | Hmem].
+           ++ left. exists t1. rew_listx*.
+           ++ right. rew_listx*.
+        -- intros Hc. rew_listx in Hc. branches.
+           ++ false*.
+           ++ congruence.
     + (* Ended: event_lock not an end, terminated threads unchanged *)
       intros t0. splits.
       * introv Hmem.
@@ -1253,46 +1394,64 @@ Admitted.
            apply Hdunlock in Hbinds'. exact Hbinds'.
     + (* Writes: H unchanged, event_lock not a write *)
       intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
+    + (* Init event still present *)
+      exists t''. rew_listx*.
   - (* StepRelease: log' = log & event_unlock t l, T' = T[t := ...], L' = L[l := ls_free] *)
-    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite).
+    destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & (t'' & Hdinit)).
     asserts (Hsmem & Hlnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     splits.
     + (* Spawned: dom T unchanged, event_unlock not a spawn *)
-      intros t2.
-      replaces (dom (T[t := (state_running, te_exp (K void))])) with (union (dom T) (single t));
-        [apply dom_update|].
-      rew_set. splits.
-      * introv (t1 & Hmem).
-        rew_listx in Hmem. branches; [|congruence].
-        asserts* Hin: (t2 \indom T). { apply* Hdspawned. }
-        autos.
+      intros.
+      rew_dom. rew_set. splits.
+      * introv Hsrc.
+        rew_listx in Hsrc.
+        destruct Hsrc as [(t1 & Hmem)|[Hmem | Heq]]; [| | congruence].
+        -- rew_listx in Hmem. branches; [| congruence].
+           asserts* Hin: (t2 \indom T). { applys* Hdspawned. }
+           autos.
+        -- asserts ->: (t2 = t_root).
+           { apply mem_inv_middle in Hmem as (l1 & l2 & Heq). applys* Hinit. }
+           asserts Hrmem: (t_root \indom T). { apply* Hdspawned. }
+           auto.
       * intros Hin. branches.
-        -- asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t2) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+        -- apply Hdspawned in H0.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
         -- subst.
-           asserts (t1 & Hmem) : (exists t1, mem (event_spawn t1 t) log).
-           { apply* Hdspawned. }
-           exists. rew_listx*.
+           asserts* Hdom: (t \indom T).
+           apply Hdspawned in Hdom.
+           branches; rew_listx*.
+           unpack. left. exists. rew_listx*.
     + (* New threads: event_unlock not a spawn *)
       intros t2. splits.
-      * introv (t1 & Hmem & Hnmem).
-        rew_listx in Hmem. branches; [|congruence].
+      * introv (Hdisj & Hnmem).
         asserts Hneq: (t2 <> t).
         { intros ->. false Hnmem. rew_listx*. }
         asserts (e' & Hbinds): (exists e, binds T t2 (state_new, e)).
-        { apply Hdstart. exists t1. splits.
-          - autos*.
-          - intros contra. apply Hnmem. rew_listx*. }
+        { apply Hdstart. splits.
+          - rew_listx in Hdisj.
+            destruct Hdisj as [(t1 & Hmem) | [Hmem | Heq]]; [| | congruence].
+            + rew_listx in Hmem. branches; [| congruence].
+              left. exists* t1.
+            + right*.
+          - intros Hc. false Hnmem. rew_listx*. }
         exists e'. apply~ binds_update_neq.
       * introv (e' & Hbinds).
         asserts Hneq: (t2 <> t).
         { intros ->. apply binds_update_same_inv in Hbinds. congruence. }
         forwards~ Hbinds': binds_update_neq_inv Hbinds.
-        asserts (t1 & Hmem & Hnmem): (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log).
-        { apply Hdstart. exists e'. exact Hbinds'. }
-        exists. rew_listx. splits*.
+        asserts (Hdisj & Hnmem):
+          (((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log)
+            /\ ~ mem (event_start t2) log).
+        { apply Hdstart. exists* e'. }
+        splits.
+        -- destruct Hdisj as [(t1 & Hmem) | Hmem].
+           ++ left. exists t1. rew_listx*.
+           ++ right. rew_listx*.
+        -- intros Hc. rew_listx in Hc. branches.
+           ++ false*.
+           ++ congruence.
     + (* Ended: event_unlock not an end, terminated threads unchanged *)
       intros t0. splits.
       * introv Hmem.
@@ -1368,5 +1527,6 @@ Admitted.
            apply Hdunlock in Hbinds'. exact Hbinds'.
     + (* Writes: H unchanged, event_unlock not a write *)
       intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
+    + (* Init event still present *)
+      exists t''. rew_listx*.
 Qed.
-*)

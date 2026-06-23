@@ -41,6 +41,9 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (* The value of each location is its latest write *)
       (forall i v,
           (exists t log', LibList.filter (fun e => writes_location i e) log = log' & event_write t i v) <-> binds H i v)
+      /\
+      (* The log has the initialisation event *)
+      (exists t, mem (event_init t) log)
   end.
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=

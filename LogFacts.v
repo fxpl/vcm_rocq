@@ -542,7 +542,7 @@ Lemma event_after_end_snoc :
   forall log E m t2,
     wf_log (log & E) ->
     LibList.Nth m log (event_end t2) ->
-    get_thread E <> t2 /\ (forall t1, E <> event_spawn t1 t2).
+    get_thread E <> t2 /\ (forall t1, E <> event_spawn t1 t2) /\ (E <> event_init t2).
 Proof.
   introv Hwf HN.
   forwards Hmem: Nth_mem HN.
@@ -551,7 +551,7 @@ Proof.
   destruct Hwf as (Huspawn & Hustart & Huend & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & Hinit & Hrootsp).
   assert (Heq2: log & E = l1 ++ event_end t2 :: (l2 & E))
     by (rewrite Heq; rew_list; reflexivity).
-  split.
+  splits.
   - forwards HForall: Hendby Heq2.
     applys Forall_mem_inv HForall. rewrite mem_last_eq. right. reflexivity.
   - introv Heqsp.
@@ -570,6 +570,10 @@ Proof.
       { rewrite Heq3. rew_listx. tauto. }
       forwards ->: mem_init_root Hinit Hmi.
       apply (Hrootsp t1). rewrite Heqsp. apply mem_last_r.
+  - intros contra.
+    subst E.
+    forwards* (Heq3 & Heq4): Hinit.
+    subst. destruct l1; rew_list in Heq4; inverts Heq4.
 Qed.
 
 (* wf bookkeeping: before [t2] has started, no event is [t2] acting nor a
@@ -579,14 +583,14 @@ Lemma event_after_spawn_snoc :
     wf_log (log & E) ->
     LibList.Nth m log (event_spawn t1 t2) ->
     ~ LibList.mem (event_start t2) (log & E) ->
-    get_thread E <> t2 /\ (forall t1', E <> event_spawn t1' t2).
+    get_thread E <> t2 /\ (forall t1', E <> event_spawn t1' t2) /\ E <> event_init t2.
 Proof.
   introv Hwf HN Hnstart.
   forwards Hmem: Nth_mem HN.
   forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
   unfold wf_log in Hwf.
   destruct Hwf as (Huspawn & Hustart & Huend & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & Hinit & Hrootsp).
-  split.
+  splits.
   - intro Hgt.
     destruct (classic (E = event_start t2)) as [HE | HE].
     + apply Hnstart. rewrite mem_last_eq. right. rewrite HE. reflexivity.
@@ -605,6 +609,10 @@ Proof.
     forwards Hnospawn: Huspawn Heq4.
     apply Hnospawn. exists t1. rew_list.
     rewrite Heq. rewrite mem_app_eq. right. rewrite mem_cons_eq. left. reflexivity.
+  - intros contra.
+    subst E.
+    forwards* (Heq3 & Heq4): Hinit.
+    subst. destruct l1; rew_list in Heq4; inverts Heq4.
 Qed.
 
 (* wf bookkeeping: a thread's start event is unique. *)
