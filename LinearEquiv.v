@@ -2,10 +2,13 @@ From Vcm Require Import Common.
 From Vcm Require Import SharedMemory.
 From Vcm Require Import Log.
 From Vcm Require Import LoggingSharedMemory.
+From Vcm Require Import LoggingSharedMemoryFacts.
 From Vcm Require Import Linear.
 From Vcm Require Import LoggingLinear.
+From Vcm Require Import LogFacts.
 
 Import Log.
+Import LogFacts.
 
 Definition same_expressions (cfgSh : SharedMemory.cfg) (cfgL : Linear.cfg) :=
   match cfgSh, cfgL with

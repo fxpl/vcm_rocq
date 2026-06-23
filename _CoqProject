@@ -6,10 +6,15 @@ Vcm.v
 Common.v
 SharedMemory.v
 Log.v
+LogFacts.v
 LoggingSharedMemory.v
+LoggingSharedMemoryFacts.v
 Linear.v
 LoggingLinear.v
 LinearEquiv.v
+Graph.v
+GraphFacts.v
 Branching.v
 LoggingBranching.v
+LoggingBranchingFacts.v
 BranchingEquiv.v

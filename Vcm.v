@@ -1,10 +1,15 @@
 From Vcm Require Import Common.
 From Vcm Require Import SharedMemory.
 From Vcm Require Import Log.
+From Vcm Require Import LogFacts.
 From Vcm Require Import LoggingSharedMemory.
+From Vcm Require Import LoggingSharedMemoryFacts.
 From Vcm Require Import Linear.
 From Vcm Require Import LoggingLinear.
 From Vcm Require Import LinearEquiv.
+From Vcm Require Import Graph.
+From Vcm Require Import GraphFacts.
 From Vcm Require Import Branching.
 From Vcm Require Import LoggingBranching.
+From Vcm Require Import LoggingBranchingFacts.
 From Vcm Require Import BranchingEquiv.

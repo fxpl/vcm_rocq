@@ -1,9 +1,11 @@
 From Vcm Require Import Common.
 From Vcm Require Import Linear.
 From Vcm Require Import Log.
+From Vcm Require Import LogFacts.
 
 Import Linear.
 Import Log.
+Import LogFacts.
 
 Definition describes (log : log) (cfg : cfg) : Prop :=
   match cfg with
