@@ -2,6 +2,8 @@ From Vcm Require Import Common.
 
 Definition commit := nat.
 
+Definition root_commit := 0.
+
 Hint Unfold commit : vcm.
 Hint Extern 1 => unfolds commit : vcm.
 
@@ -94,6 +96,14 @@ Definition conflict_free_graph (G : graph) :=
     graph_indom G h1 ->
     graph_indom G h2 ->
     conflict_free_merge empty h1 h2 G.
+
+(* Introduce an origin commit [h] with empty data and no incoming/outgoing edges.
+   Used to bootstrap the root thread's commit when it is initialised. *)
+Definition graph_root (G : graph) (h : commit) :=
+  match G with
+  | (C, P) => (C[h := empty], P)
+  end
+.
 
 Definition graph_commit (G : graph) (h1 h2 : commit) (d : staging_area) :=
   match G with

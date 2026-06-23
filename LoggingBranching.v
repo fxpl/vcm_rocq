@@ -63,6 +63,10 @@ Inductive play_event : event -> (deltas * commits * graph * lcommits) -> (deltas
     t \indom TC ->
     l \notindom LC ->
     play_event (event_lock t l) (D, TC, G, LC) (D, TC, G, LC[l := TC[t]])
+| PlayInit :
+  forall D TC G LC t,
+    commit_fresh G root_commit ->
+    play_event (event_init t) (D, TC, G, LC) (D[t := empty], TC[t := root_commit], graph_root G root_commit, LC)
 .
 
 (* [play_log] additionally produces a commit history [CH], a list parallel to the
@@ -116,11 +120,11 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
   | (T, G, L) =>
       (* Spawned threads exist *)
       (forall t2,
-          (exists t1, mem (event_spawn t1 t2) log) <-> t2 \indom T)
+          (exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log <-> t2 \indom T)
       /\
       (* Spawned threads that have not started are new *)
       (forall t2,
-          (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log) <-> exists e h ts, binds T t2 (state_new, e, h, ts))
+          (((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log) /\ ~mem (event_start t2) log) <-> exists e h ts, binds T t2 (state_new, e, h, ts))
       /\
       (* Ended threads are ended, with empty staging areas *)
       (forall t,
@@ -221,4 +225,3 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 .
 
 Hint Constructors step Branching.step : vcm.
-

@@ -28,6 +28,10 @@ Parameter void : val.
 (* thread id *)
 Definition tid := nat.
 
+(* The distinguished initial ("root") thread: it is not spawned by anyone, and
+   is brought into existence by an [event_init] at the start of the log. *)
+Parameter t_root : tid.
+
 (* lock id *)
 Definition lid := nat.
 
@@ -64,10 +68,18 @@ Inductive thread_state :=
 | state_terminated
 .
 
+#[global]
+Instance inhab_thread_state : Inhab thread_state.
+Proof. apply (Inhab_of_val state_new). Qed.
+
 Inductive thread_exp :=
 | te_exp (e : exp)
 | te_ret (r : ret)
 .
+
+#[global]
+Instance inhab_thread_exp : Inhab thread_exp.
+Proof. apply (Inhab_of_val (te_ret void)). Qed.
 
 Inductive lock_state :=
 | ls_free
@@ -77,6 +89,17 @@ Inductive lock_state :=
 #[global]
 Instance inhab_lock_state : Inhab lock_state.
 Proof. apply (Inhab_of_val ls_free). Qed.
+
+Ltac rew_dom :=
+  repeat
+  match goal with
+  | H : context[dom ?M[?k := ?v]] |- _ =>
+      replace (dom M[k := v]) with (union (dom M) (single k)) in H;
+      [| solve[symmetry; apply dom_update] ]
+  | _ : _ |- context[dom ?M[?k := ?v]] =>
+      replace (dom M[k := v]) with (union (dom M) (single k));
+      [| solve[symmetry; apply dom_update] ]
+  end.
 
 (*
 Module FMap.
@@ -114,4 +137,3 @@ don't work on fmaps (of course). I could write the semantics so
 that they work on the underlying map instead. *)
 End FMap.
 *)
-

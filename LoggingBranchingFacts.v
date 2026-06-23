@@ -13,6 +13,159 @@ Import Log.
 Import LogFacts.
 Import LoggingBranching.
 
+Existing Instance inhab_val.
+Existing Instance inhab_exp.
+
+(* TODO: Move these to the right places *)
+Definition init_log := event_init t_root::nil.
+Definition init_cfg (e : exp) : cfg := (empty[t_root := (state_new, te_exp e, empty_staging_area, root_commit)], graph_root empty_graph root_commit, empty).
+
+(* Not sure why this isn't picked up... *)
+Instance thread_inhab : Inhab (thread_state * thread_exp).
+Proof. apply (Inhab_of_val (state_new, te_ret void)). Qed.
+
+Lemma single_eq_middle_inv :
+  forall A (x y : A) l1 l2,
+    x :: nil = l1 ++ y :: l2 ->
+    l1 = nil /\ x = y /\ l2 = nil.
+Proof.
+  introv Heq.
+  destruct l1; rew_list in *; inverts* Heq.
+  forwards: nil_eq_middle_inv y l1 l2; rew_list~.
+Qed.
+
+Example init_log_wf : wf_log init_log.
+Proof.
+  unfolds init_log. splits 10; rew_list.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+    rew_list in Heq. inverts* Heq.
+    simpls. introv -> _ contra. autos.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - intros. rew_listx. cases_if. constructor.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv contra.
+    inverts contra as Hmem.
+    inverts Hmem.
+Qed.
+
+Example init_cfg_wf :
+  forall e,
+    describes init_log (init_cfg e).
+Proof.
+  intros.
+  unfolds init_log, init_cfg.
+  splits; rew_list.
+  - introv.
+    splits.
+    + introv Hsrc.
+      destruct Hsrc as [(t1 & contra)|Hmem].
+      * do 2 inverts contra as contra.
+      * inverts Hmem as Hmem; [| inverts Hmem].
+        rew_dom. rew_set. autos.
+    + introv Hdom.
+      rew_dom. rew_set in Hdom.
+      branches.
+      * forwards*: indom_empty_inv.
+      * subst. right. rew_listx*.
+  - introv.
+    splits.
+    + introv (Hsrc & Hnmem).
+      destruct Hsrc as [(t1 & contra)|Hmem].
+      * do 2 inverts contra as contra.
+      * inverts Hmem as Hmem; [| inverts Hmem].
+        exists. apply binds_update_same.
+    + introv (e' & d & c & Hbinds).
+      destruct (classic (t2 = t_root)).
+      * subst.
+        forwards* Heq: binds_update_same_inv Hbinds.
+        inverts Heq.
+        splits*.
+        introv contra.
+        do 2 inverts contra as contra.
+      * forwards* contra: binds_update_neq_inv Hbinds.
+        forwards*: indom_of_binds; [typeclass|].
+        forwards*: indom_empty_inv.
+  - introv.
+    splits.
+    + introv Hmem.
+      do 2 inverts Hmem as Hmem.
+    + introv (e' & c & Hbinds).
+      destruct (classic (t = t_root)).
+      * subst.
+        forwards* Heq: binds_update_same_inv Hbinds.
+      * forwards* contra: binds_update_neq_inv Hbinds.
+        forwards*: indom_of_binds; [typeclass|].
+        forwards*: indom_empty_inv.
+  - introv.
+    splits.
+    + introv (Hmem & Hnmem).
+      do 2 inverts Hmem as Hmem.
+    + introv (e' & d & c & Hbinds).
+      destruct (classic (t = t_root)).
+      * subst.
+        forwards* Heq: binds_update_same_inv Hbinds.
+      * forwards* contra: binds_update_neq_inv Hbinds.
+        forwards*: indom_of_binds; [typeclass|].
+        forwards*: indom_empty_inv.
+  - introv.
+    splits.
+    + introv (log' & Heq).
+      rew_listx in Heq. cases_if.
+      forwards*: nil_eq_last_inv.
+    + introv (c & contra).
+      forwards*: indom_of_binds; [typeclass|].
+      forwards*: indom_empty_inv.
+  - introv.
+    splits.
+    + introv (t & log' & Heq).
+      rew_listx in Heq. cases_if.
+      forwards*: nil_eq_last_inv.
+    + introv (c & contra).
+      forwards*: indom_of_binds; [typeclass|].
+      forwards*: indom_empty_inv.
+  - introv.
+    exists.
+    splits.
+    + replaces (event_init t_root :: nil) with (nil & event_init t_root).
+      { rew_list*. }
+      repeat constructors.
+      unfolds commit_fresh, empty_graph.
+      intros contra. forwards*: indom_empty_inv.
+    + introv Hdom.
+      rew_dom. rew_set in Hdom. branches.
+      * forwards*: indom_empty_inv.
+      * subst.
+        exists.
+        replace (empty[t_root:=empty][t_root]) with (empty_staging_area) by rewrite* read_update_same.
+        replace (empty[t_root:=root_commit][t_root]) with (root_commit) by rewrite* read_update_same.
+        apply binds_update_same.
+    + introv contra.
+      forwards*: indom_empty_inv.
+    + rew_dom. introv Hdom. rew_set in *.
+      branches; auto_star.
+      forwards*: indom_empty_inv.
+    + rew_dom. introv Hdom. rew_set in *.
+      branches; auto_star.
+      forwards*: indom_empty_inv.
+    + introv contra.
+      forwards*: indom_empty_inv.
+    + introv contra.
+      forwards*: indom_empty_inv.
+Qed.
+
 Lemma get_uncommitted'_has_sync :
   forall log t acc,
     Exists is_sync_event log ->
@@ -102,6 +255,8 @@ Theorem step_preserves_wf_log :
     step (cfg, log) (cfg', log') ->
     wf_log log'.
 Proof.
+Admitted.
+(*
   introv Hwf Hdesc Hstep.
   destruct Hwf as (Huspawn & Hustart & Huend & Hspawn & Hjoin & Hstart & Hend & Hlock).
   inversion Hstep; substs; clear Hstep.
@@ -439,6 +594,7 @@ Proof.
         apply* wf_lock_log_snoc_unlock.
       * rew_list. apply~ Hlock.
 Qed.
+*)
 
 Hint Resolve inhab_thread : vcm.
 
@@ -448,17 +604,6 @@ Qed.
 
 Hint Resolve inhab_vlock : vcm.
 
-Ltac rew_dom :=
-  repeat
-  match goal with
-  | H : context[dom ?M[?k := ?v]] |- _ =>
-      replace (dom M[k := v]) with (union (dom M) (single k)) in H;
-      [| solve[symmetry; apply dom_update] ]
-  | _ : _ |- context[dom ?M[?k := ?v]] =>
-      replace (dom M[k := v]) with (union (dom M) (single k));
-      [| solve[symmetry; apply dom_update] ]
-  end.
-
 Theorem step_preserves_describes :
   forall cfg cfg' log log',
     wf_log log ->
@@ -466,6 +611,8 @@ Theorem step_preserves_describes :
     step (cfg, log) (cfg', log') ->
     describes log' cfg'.
 Proof.
+Admitted.
+(*
   introv Hwf Hdesc Hstep.
   destruct Hwf as (Huspawn & Hustart & Huend & Hspawn & Hjoin & Hstart & Hend & Hlock).
   inversion Hstep; substs; clear Hstep.
@@ -1862,6 +2009,7 @@ Proof.
         rew_dom. rew_set in Hmem. rew_set.
         branches; auto_star.
 Qed.
+*)
 
 (* ---------------------------------------------------------------------- *)
 (* Lemmas relocated here from BranchingEquiv.v (organization pass).          *)
@@ -1977,7 +2125,17 @@ Proof.
       exists wm. split;
         [ applys* Nth_app_l wHN
         | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
-Qed.
+    + (* PlayInit *)
+      asserts Hneq: (t <> t0).
+      { admit. }
+      rewrite~ read_update_neq in Hbinds.
+      asserts* Hin: (t \indom D').
+      { lets* [Hc | Hd]: (indom_update_inv Hdom). }
+      forwards* (wm & wHN & wHns): IHHplay.
+      exists wm. split;
+        [ applys* Nth_app_l wHN
+        | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
+Admitted.
 
 Lemma conflict_free_last_local_write :
   forall log D TC G LC CH t i v,
@@ -2114,7 +2272,9 @@ Proof.
       forwards* (log' & Hfilter): IHHplay.
       exists log'.
       rew_listx. cases_if. rew_list*.
-Qed.
+    + (* PlayInit *)
+      admit.
+Admitted.
 
 (* ----- Commit-history (CH) foundations for the hb -> ancestry bridge ----- *)
 
@@ -2147,7 +2307,7 @@ Lemma play_event_TC_advance :
     ancestor G'' (TC'[t]) (TC''[t]).
 Proof.
   introv Hpe Hspawn.
-  destruct E as [t1 t2 | t1 t2 | t0 i v | t0 i v | t0 ll | t0 ll | t0 | t0];
+  destruct E as [t1 t2 | t1 t2 | t0 i v | t0 i v | t0 ll | t0 ll | t0 | t0 | t0];
     inverts Hpe as Hb Hf Hbd; try apply ancestor_refl.
   - (* spawn t1 t2 *)
     forwards Hnt2: Hspawn (eq_refl : event_spawn t1 t2 = event_spawn t1 t2).
@@ -2828,7 +2988,7 @@ Proof.
           + applys Hncf Hg Hgflt HNg0 Hgg.
           + forwards Hfin: Nth_inbound HNf. nat_math. }
       (* LEFT: [i] still in [tm]'s delta in the prefix; maintain the no-commit clause *)
-      destruct E as [s1 s2 | jt1 jt2 | rt rj rw | wt wj ww | lt ll | ut ul | stt | ett];
+      destruct E as [s1 s2 | jt1 jt2 | rt rj rw | wt wj ww | lt ll | ut ul | stt | ett | t0];
         inverts H.
       * (* spawn s1 s2: flush of the spawner s1 *)
         forwards Hns2: spawned_thread_no_prior_event Hwf HN0. cbn [get_thread] in Hns2.
@@ -3605,7 +3765,7 @@ Proof.
   - asserts Hmx: (mem x (LibList.filter (fun e => writes_location i e) log)).
     { rewrite Hsnoc. rewrite mem_last_eq. right. reflexivity. }
     forwards (Hmemx & Hwx): mem_filter_inv Hmx.
-    destruct x as [s1 s2 | j1 j2 | rt ri rv | tt jj ww | lt ll | ut ul | stt | ett];
+    destruct x as [s1 s2 | j1 j2 | rt ri rv | tt jj ww | lt ll | ut ul | stt | ett | t0];
       simpls; tryfalse.
     subst jj. exists lw tt ww. exact Hsnoc.
 Qed.

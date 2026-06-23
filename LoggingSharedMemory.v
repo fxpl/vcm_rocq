@@ -13,13 +13,13 @@ that a location exists as soon as it has been written to? *)
 Definition describes (log : log) (cfg : cfg) : Prop :=
   match cfg with
   | (T, H, L) =>
-      (* Spawned threads exist *)
+      (* Spawned and intited threads exist *)
       (forall t2,
-          (exists t1, mem (event_spawn t1 t2) log) <-> t2 \indom T)
+          (exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log <-> t2 \indom T)
       /\
-      (* Spawned threads that have not started are new *)
+      (* Spawned and inited threads that have not started are new *)
       (forall t2,
-          (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log) <-> exists e, binds T t2 (state_new, e))
+          ((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log) /\ ~mem (event_start t2) log <-> exists e, binds T t2 (state_new, e))
       /\
       (* Ended threads are ended *)
       (forall t,

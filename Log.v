@@ -9,6 +9,7 @@ Inductive event :=
 | event_unlock (t : tid) (l : lid)
 | event_start (t : tid)
 | event_end (t : tid)
+| event_init (t : tid)
 .
 
 Definition get_thread (e : event) :=
@@ -20,7 +21,8 @@ Definition get_thread (e : event) :=
   | event_lock t _
   | event_unlock t _
   | event_start t
-  | event_end t => t
+  | event_end t
+  | event_init t => t
   end.
 
 Definition touches_lock (l : lid) (e : event) :=
@@ -149,21 +151,22 @@ Definition wf_log (log : log) : Prop :=
       log = l1 ++ event_end t :: l2 ->
       (~mem (event_end t) (l1 ++ l2)))
   /\
-  (* Threads start after spawning *)
+  (* Threads start after spawning, or are initialised (the root) *)
   (forall l1 l2 t2,
       log = l1 ++ event_start t2 :: l2 ->
-      exists t1, mem (event_spawn t1 t2) l1)
+      (exists t1, mem (event_spawn t1 t2) l1) \/ mem (event_init t2) l1)
   /\
   (* Threads are joined after ending *)
   (forall l1 l2 t1 t2,
       log = l1 ++ event_join t1 t2 :: l2 ->
       mem (event_end t2) l1)
   /\
-  (* Threads start by starting *)
+  (* Threads start by starting (the init event needs no prior start) *)
   (forall l1 l2 e t,
       log = l1 ++ e :: l2 ->
       get_thread e = t ->
       e <> event_start t ->
+      e <> event_init t ->
       mem (event_start t) l1)
   /\
   (* Threads end by ending *)
@@ -175,6 +178,14 @@ Definition wf_log (log : log) : Prop :=
   (forall l,
       wf_lock_log (LibList.filter (fun e => touches_lock l e) log)
   )
+  /\
+  (* The init event initialises the root thread and is the very first event *)
+  (forall l1 l2 t,
+      log = l1 ++ event_init t :: l2 ->
+      t = t_root /\ l1 = nil)
+  /\
+  (* The root thread is never spawned *)
+  (forall t1, ~ mem (event_spawn t1 t_root) log)
 .
 
 (*

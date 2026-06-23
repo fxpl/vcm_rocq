@@ -9,8 +9,8 @@ Lemma wf_log_read_last :
     wf_log (lg & event_read t i v).
 Proof.
   introv Hstart Hend Hwf.
-  destruct Hwf as (Hspawns & Hstarts & Hends & Hspawn & Hjoin & Hstart' & Hend' & Hlock).
-  splits.
+  destruct Hwf as (Hspawns & Hstarts & Hends & Hspawn & Hjoin & Hstart' & Hend' & Hlock & Hinit & Hrootsp).
+  splits 10.
   - introv Heq (t1' & Hmem).
     destruct (last_case l2) as [-> | (e & l2' & ->)].
     + forwards*: last_eq_last_inv Heq.
@@ -61,7 +61,7 @@ Proof.
           with ((l1 ++ event_join t1 t2 :: l2') & e)
             in Heq; [rew_list*|].
       forwards* (Heq' & <-): last_eq_last_inv Heq.
-  - introv Heq Hthread Hneq.
+  - introv Heq Hthread Hneq Hni.
     destruct (last_case l2) as [-> | (e' & l2' & ->)].
     + forwards*: last_eq_last_inv Heq.
       unpack. subst. simpls*.
@@ -81,7 +81,17 @@ Proof.
       { subst. rew_listx*. }
       asserts* Hneq: (t <> t0).
       simpls*.
-  - introv. rew_listx. cases_if*. rew_list*.
+  - (* locks *) introv. rew_listx. cases_if*. rew_list*.
+  - (* init *) introv Heq.
+    destruct (last_case l2) as [-> | (e & l2' & ->)].
+    + forwards*: last_eq_last_inv Heq.
+    + replaces (l1 ++ event_init t0 :: l2' & e)
+          with ((l1 ++ event_init t0 :: l2') & e)
+            in Heq; [rew_list*|].
+      forwards* (Heq' & <-): last_eq_last_inv Heq.
+      apply Hinit in Heq'. exact Heq'.
+  - (* root never spawned *) intros t1 Hmem. rew_listx in Hmem.
+    destruct Hmem as [Hmem | Hmem]; (applys Hrootsp Hmem || inverts Hmem).
 Qed.
 
 Lemma last_eq_middle_inv :
@@ -146,8 +156,8 @@ Lemma wf_log_snoc_lock : forall lg t l,
     wf_log (lg & event_lock t l).
 Proof.
   introv Hwf Hsmem Hlnmem Hlfree.
-  destruct Hwf as (Huspawn & Hustart & Huend & Hspawn & Hjoin & Hstart & Hend & Hlock).
-  splits.
+  destruct Hwf as (Huspawn & Hustart & Huend & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hrootsp).
+  splits 10.
   + introv Heq.
     forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
     intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
@@ -166,7 +176,7 @@ Proof.
   + introv Heq.
     forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
     apply* Hjoin.
-  + introv Heq <- Hneq.
+  + introv Heq <- Hneq Hninit.
     forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
     * inverts Hmem'. simpl. exact Hsmem.
     * apply~ Hstart.
@@ -175,7 +185,7 @@ Proof.
     rew_listx. splits.
     * apply~ Hend.
     * simpl. intros ->. apply Hlnmem. rew_listx*.
-  + introv. rew_listx.
+  + (* locks *) introv. rew_listx.
     cases_if as Heql.
     * unfold touches_lock in Heql. subst. rew_list.
       apply wf_lock_log_snoc_lock.
@@ -184,6 +194,11 @@ Proof.
         - left. exact Hnil.
         - right. exists t'' lg''. exact Hfilt. }
     * rew_list. apply~ Hlock.
+  + (* init *) introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hinit.
+  + (* root never spawned *) intros t1 Hmem. rew_listx in Hmem.
+    destruct Hmem as [Hmem | Hmem]; (applys Hrootsp Hmem || inverts Hmem).
 Qed.
 
 Lemma wf_lock_log_snoc_unlock : forall xs xs' t l,
@@ -423,8 +438,8 @@ Lemma wf_log_last_inv :
   forall log E, wf_log (log & E) -> wf_log log.
 Proof.
   introv Hwf. unfold wf_log in *.
-  destruct Hwf as (Huspawn & Hustart & Huend & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock).
-  splits.
+  destruct Hwf as (Huspawn & Hustart & Huend & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & Hinit & Hrootsp).
+  splits 10.
   - introv Heq. intros (t1' & Hm).
     forwards Hno: (>> Huspawn l1 (l2 & E) t1 t2).
     { rewrite Heq. rew_list. reflexivity. }
@@ -445,20 +460,26 @@ Proof.
     forwards Hm: (>> Hjoinend l1 (l2 & E) t1 t2).
     { rewrite Heq. rew_list. reflexivity. }
     exact Hm.
-  - introv Heq Hgt Hne.
+  - introv Heq Hgt Hne Hni.
     forwards Hm: (>> Hstartby l1 (l2 & E) e t).
-    { rewrite Heq. rew_list. reflexivity. } { exact Hgt. } { exact Hne. }
+    { rewrite Heq. rew_list. reflexivity. } { exact Hgt. } { exact Hne. } { exact Hni. }
     exact Hm.
   - introv Heq.
     forwards HF: (>> Hendby l1 (l2 & E) t).
     { rewrite Heq. rew_list. reflexivity. }
     rewrite Forall_last_eq in HF. destruct HF as (HF & _). exact HF.
-  - intro l.
+  - (* locks *) intro l.
     forwards Hwll: Hlock l.
     rewrite filter_last in Hwll.
     cases_if as Ht.
     + applys wf_lock_log_drop_last Hwll. rew_list. reflexivity.
     + rew_list in Hwll. exact Hwll.
+  - (* init *) introv Heq.
+    forwards Hr: (>> Hinit l1 (l2 & E) t).
+    { rewrite Heq. rew_list. reflexivity. }
+    exact Hr.
+  - (* root never spawned *) intros t1 Hmem.
+    apply (Hrootsp t1). rewrite mem_last_eq. auto.
 Qed.
 
 Lemma spawned_thread_no_prior_event :
@@ -471,7 +492,7 @@ Proof.
   forwards Hmem: Nth_mem HN.
   forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
   unfold wf_log in Hwf.
-  destruct Hwf as (Huspawn & Hustart & Huend & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock).
+  destruct Hwf as (Huspawn & Hustart & Huend & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & Hinit & Hrootsp).
   intro Hgt.
   assert (Hmemstart: mem (event_start t2) log).
   { destruct (classic (em = event_start t2)) as [Hes | Hes].
@@ -480,16 +501,39 @@ Proof.
         by (rewrite Heq; rew_list; reflexivity).
       forwards Hms: (>> Hstartby l1 (l2 & event_spawn t1 t2) em t2).
       { exact Heq2. } { exact Hgt. } { exact Hes. }
+      { (* em <> event_init t2: else t2 = t_root, but t2 is spawned *)
+        intro Hci. subst em.
+        forwards (Het & _): Hinit Heq2.
+        apply (Hrootsp t1). rewrite Het. apply mem_last_r. }
       rewrite Heq. rewrite mem_app_eq. left. exact Hms. }
   forwards (a & b & Heqs): mem_inv_middle Hmemstart.
   assert (Heq3: log & event_spawn t1 t2 = a ++ event_start t2 :: (b & event_spawn t1 t2))
     by (rewrite Heqs; rew_list; reflexivity).
-  forwards (tsp & Hmemsp): Hstartsp Heq3.
-  assert (Heq4: log & event_spawn t1 t2 = log ++ event_spawn t1 t2 :: nil)
-    by (rew_list; reflexivity).
-  forwards Hnospawn: Huspawn Heq4.
-  apply Hnospawn. exists tsp. rew_list.
-  rewrite Heqs. rewrite mem_app_eq. left. exact Hmemsp.
+  forwards [(tsp & Hmemsp) | Hminit]: Hstartsp Heq3.
+  - (* start preceded by a spawn: contradicts unique spawn *)
+    assert (Heq4: log & event_spawn t1 t2 = log ++ event_spawn t1 t2 :: nil)
+      by (rew_list; reflexivity).
+    forwards Hnospawn: Huspawn Heq4.
+    apply Hnospawn. exists tsp. rew_list.
+    rewrite Heqs. rewrite mem_app_eq. left. exact Hmemsp.
+  - (* start preceded by an init: t2 = t_root, but t2 is spawned *)
+    assert (Hmi: mem (event_init t2) (log & event_spawn t1 t2)).
+    { rewrite Heqs. rew_listx. tauto. }
+    forwards (c & d & Heqc): mem_inv_middle Hmi.
+    forwards (Het & _): Hinit Heqc.
+    apply (Hrootsp t1). rewrite Het. apply mem_last_r.
+Qed.
+
+(* Any thread that has an init event is the root (from the init conjunct of
+   [wf_log], here taken as a hypothesis to avoid re-destructing). *)
+Lemma mem_init_root :
+  forall lg t,
+    (forall l1 l2 t', lg = l1 ++ event_init t' :: l2 -> t' = t_root /\ l1 = nil) ->
+    mem (event_init t) lg ->
+    t = t_root.
+Proof.
+  introv Hinit Hmem. forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
+  forwards (Het & _): Hinit Heq. exact Het.
 Qed.
 
 (* wf bookkeeping: an event appended after [t2] has ended is not [t2] acting nor
@@ -504,7 +548,7 @@ Proof.
   forwards Hmem: Nth_mem HN.
   forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
   unfold wf_log in Hwf.
-  destruct Hwf as (Huspawn & Hustart & Huend & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock).
+  destruct Hwf as (Huspawn & Hustart & Huend & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & Hinit & Hrootsp).
   assert (Heq2: log & E = l1 ++ event_end t2 :: (l2 & E))
     by (rewrite Heq; rew_list; reflexivity).
   split.
@@ -512,16 +556,20 @@ Proof.
     applys Forall_mem_inv HForall. rewrite mem_last_eq. right. reflexivity.
   - introv Heqsp.
     forwards Hmemstart: (>> Hstartby l1 (l2 & E) (event_end t2) t2).
-    { exact Heq2. } { reflexivity. } { discriminate. }
+    { exact Heq2. } { reflexivity. } { discriminate. } { discriminate. }
     forwards (a & b & Heql1): mem_inv_middle Hmemstart.
     assert (Heq3: log & E = a ++ event_start t2 :: (b ++ event_end t2 :: (l2 & E))).
     { rewrite Heq2. rewrite Heql1. rew_list. reflexivity. }
-    forwards (tsp & Hmemsp): Hstartsp Heq3.
-    assert (Heq4: log & E = log ++ event_spawn t1 t2 :: nil)
-      by (rewrite Heqsp; rew_list; reflexivity).
-    forwards Hnospawn: Huspawn Heq4.
-    apply Hnospawn. exists tsp. rew_list.
-    rewrite Heq, Heql1. rewrite mem_app_eq. left. rewrite mem_app_eq. left. exact Hmemsp.
+    forwards [(tsp & Hmemsp) | Hminit]: Hstartsp Heq3.
+    + assert (Heq4: log & E = log ++ event_spawn t1 t2 :: nil)
+        by (rewrite Heqsp; rew_list; reflexivity).
+      forwards Hnospawn: Huspawn Heq4.
+      apply Hnospawn. exists tsp. rew_list.
+      rewrite Heq, Heql1. rewrite mem_app_eq. left. rewrite mem_app_eq. left. exact Hmemsp.
+    + assert (Hmi: mem (event_init t2) (log & E)).
+      { rewrite Heq3. rew_listx. tauto. }
+      forwards ->: mem_init_root Hinit Hmi.
+      apply (Hrootsp t1). rewrite Heqsp. apply mem_last_r.
 Qed.
 
 (* wf bookkeeping: before [t2] has started, no event is [t2] acting nor a
@@ -537,13 +585,19 @@ Proof.
   forwards Hmem: Nth_mem HN.
   forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
   unfold wf_log in Hwf.
-  destruct Hwf as (Huspawn & Hustart & Huend & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock).
+  destruct Hwf as (Huspawn & Hustart & Huend & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & Hinit & Hrootsp).
   split.
   - intro Hgt.
     destruct (classic (E = event_start t2)) as [HE | HE].
     + apply Hnstart. rewrite mem_last_eq. right. rewrite HE. reflexivity.
     + forwards Hms: (>> Hstartby log (@nil event) E t2).
       { rew_list. reflexivity. } { exact Hgt. } { exact HE. }
+      { intro Hci.
+        assert (Heqe: log & E = log ++ event_init t2 :: nil)
+          by (rewrite Hci; rew_list; reflexivity).
+        forwards (_ & Hnil): Hinit Heqe. rewrite Hnil in *. subst.
+        forwards*: Nth_nil_inv.
+      }
       apply Hnstart. rewrite mem_last_eq. left. exact Hms.
   - introv Heqsp.
     assert (Heq4: log & E = log ++ event_spawn t1' t2 :: nil)
@@ -575,7 +629,7 @@ Lemma unlock_prev_lock :
     exists pre, LibList.filter (fun e => touches_lock l e) log = pre & event_lock t l.
 Proof.
   introv Hwf. unfold wf_log in Hwf.
-  destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & Hlock).
+  destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & Hlock & _).
   forwards Hwll: Hlock l.
   rewrite filter_last in Hwll.
   cases_if as Ht.
