@@ -3035,6 +3035,8 @@ Lemma indom_update_cases :
     j \indom (M[i := v]) -> j = i \/ j \indom M.
 Proof. introv H. applys indom_update_inv H; typeclass. Qed.
 
+(* TODO: Stregthen this to full wf_graph (acyclicity should hold
+since we only ever use fresh commits for commits and merges) *)
 Lemma play_log_graph_wf :
   forall log D TC G LC CH,
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
