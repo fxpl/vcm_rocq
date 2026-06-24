@@ -574,3 +574,105 @@ Proof.
   introv He. forwards (Ha & _): Hedge He.
   destruct G as (C0 & P0). applys Hfresh Ha.
 Qed.
+
+(* Committing a fresh commit [c'] onto a parent [c] already in the graph
+   preserves well-formedness. Freshness of [c'] keeps it a sink, so the new
+   edge [(c, c')] cannot close a cycle; [c \indom G] is what ties the new edge's
+   source into the data domain. *)
+Lemma graph_commit_wf :
+  forall G c c' d,
+    wf_graph G ->
+    commit_fresh G c' ->
+    graph_indom G c ->
+    wf_graph (graph_commit G c c' d).
+Proof.
+  introv Hwf Hfresh Hin.
+  lets (Hfin & Hantisym & Hedge_wf): Hwf.
+  asserts Hneq: (c <> c').
+  {
+    intro Heq. subst c'. applys commit_fresh_not_indom Hfresh Hin.
+  }
+  destruct G as (C & P). unfolds graph_indom.
+  splits.
+  - simpl. unfolds finite. rew_dom.
+    applys~ LibSet.finite_union.
+    applys~ LibSet.finite_single.
+  - introv Hab Hba.
+    asserts Hsink: (forall z, ancestor (graph_commit (C, P) c c' d) c' z -> z = c').
+    {
+      introv Hz. applys ancestor_no_out_edge Hz.
+      introv He. unfolds graph_commit, graph_edge.
+      rew_set in He. destruct~ He as [Heq | HeP].
+      forwards (Hin' & _): Hedge_wf HeP.
+      applys commit_fresh_not_indom Hfresh Hin'.
+    }
+    destruct (classic (h1 = c')) as [-> | Hane].
+    + symmetry. applys Hsink Hab.
+    + destruct (classic (h2 = c')) as [-> | Hbne].
+      * applys Hsink Hba.
+      * asserts Hsink': (forall z, ancestor (C, P) c' z -> z = c').
+        {
+          introv Hanc.
+          forwards*: ancestor_commit_fresh_eq.
+        }
+        forwards~ Hab': ancestor_graph_commit_inv Hab.
+        forwards~ Hba': ancestor_graph_commit_inv Hba.
+  - introv He. unfolds graph_commit, graph_edge.
+    rew_set in He. destruct He as [Heq | Hin'].
+    + inverts Heq. split.
+      * applys~ indom_update_of_indom. typeclass.
+      * applys indom_update_same. typeclass.
+    + forwards (Ha & Hb): Hedge_wf Hin'. unfolds graph_indom.
+      split; applys~ indom_update_of_indom; typeclass.
+Qed.
+
+(* Merging two parents [p1], [p2] (both already in the graph) into a fresh commit
+   [h] preserves well-formedness: [h] is a sink, so the two new edges into it
+   cannot create a cycle. *)
+Lemma graph_merge_wf :
+  forall G p1 p2 h,
+    wf_graph G ->
+    commit_fresh G h ->
+    graph_indom G p1 ->
+    graph_indom G p2 ->
+    wf_graph (graph_merge G p1 p2 h).
+Proof.
+  introv Hwf Hfresh Hin1 Hin2.
+  lets (Hfin & Hantisym & Hedge_wf): Hwf.
+  asserts Hneq1: (p1 <> h). { intro Heq. subst h. applys commit_fresh_not_indom Hfresh Hin1. }
+  asserts Hneq2: (p2 <> h). { intro Heq. subst h. applys commit_fresh_not_indom Hfresh Hin2. }
+  destruct G as (C & P). unfolds graph_indom, graph_indom.
+  splits.
+  - simpl. unfolds finite. rew_dom. applys~ LibSet.finite_union.
+    applys LibSet.finite_single.
+  - introv Hab Hba.
+    asserts Hsink: (forall z, ancestor (graph_merge (C, P) p1 p2 h) h z -> z = h).
+    {
+      introv Hz. applys ancestor_no_out_edge Hz.
+      introv He. unfolds graph_merge, graph_edge. rew_set in He.
+      destruct~ He as [Heq | [Heq | HeP]].
+      forwards (Hin' & _): Hedge_wf HeP. applys commit_fresh_not_indom Hfresh Hin'.
+    }
+    destruct (classic (h1 = h)) as [-> | Hane].
+    + symmetry. applys Hsink Hab.
+    + destruct (classic (h2 = h)) as [-> | Hbne].
+      * applys Hsink Hba.
+      * asserts Hsink': (forall z, ancestor (C, P) h z -> z = h).
+        {
+          introv Hanc.
+          forwards*: ancestor_commit_fresh_eq.
+        }
+        forwards~ Hab': ancestor_graph_merge_inv Hab.
+        forwards~ Hba': ancestor_graph_merge_inv Hba.
+  - introv He. unfolds graph_merge, graph_edge, graph_indom.
+    rew_set in He.
+    destruct He as [Heq | [Heq | HeP]].
+    + inverts Heq. split.
+      * applys~ indom_update_of_indom. typeclass.
+      * applys indom_update_same. typeclass.
+    + inverts Heq. split.
+      * applys~ indom_update_of_indom. typeclass.
+      * applys indom_update_same. typeclass.
+    + forwards (Ha & Hb): Hedge_wf HeP.
+      split; applys~ indom_update_of_indom; typeclass.
+Qed.

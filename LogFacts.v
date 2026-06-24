@@ -692,3 +692,30 @@ Proof.
          ++ subst. exfalso. apply HP. reflexivity.
          ++ forwards Hle: Hmax' HNmm. nat_math.
 Qed.
+
+Example init_log_wf : wf_log init_log.
+Proof.
+  unfolds init_log. splits 10; rew_list.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+    rew_list in Heq. inverts* Heq.
+    simpls. introv -> _ contra. autos.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - intros. rew_listx. cases_if. constructor.
+  - introv Heq.
+    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
+  - introv contra.
+    inverts contra as Hmem.
+    inverts Hmem.
+Qed.

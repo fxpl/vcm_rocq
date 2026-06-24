@@ -230,3 +230,6 @@ Definition is_merge_event (e : event) : Prop :=
   | event_join _ _ => True
   | _ => False
   end.
+
+(* The log that describes the initial configuration *)
+Definition init_log := event_init t_root::nil.

@@ -16,52 +16,13 @@ Import LoggingBranching.
 Existing Instance inhab_val.
 Existing Instance inhab_exp.
 
-(* TODO: Move these to the right places *)
-Definition init_log := event_init t_root::nil.
 Definition init_cfg (e : exp) : cfg := (empty[t_root := (state_new, te_exp e, empty_staging_area, root_commit)], graph_root empty_graph root_commit, empty).
 
 (* Not sure why this isn't picked up... *)
 Instance thread_inhab : Inhab (thread_state * thread_exp).
 Proof. apply (Inhab_of_val (state_new, te_ret void)). Qed.
 
-Lemma single_eq_middle_inv :
-  forall A (x y : A) l1 l2,
-    x :: nil = l1 ++ y :: l2 ->
-    l1 = nil /\ x = y /\ l2 = nil.
-Proof.
-  introv Heq.
-  destruct l1; rew_list in *; inverts* Heq.
-  forwards: nil_eq_middle_inv y l1 l2; rew_list~.
-Qed.
-
-Example init_log_wf : wf_log init_log.
-Proof.
-  unfolds init_log. splits 10; rew_list.
-  - introv Heq.
-    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
-  - introv Heq.
-    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
-  - introv Heq.
-    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
-  - introv Heq.
-    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
-  - introv Heq.
-    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
-  - introv Heq.
-    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
-    rew_list in Heq. inverts* Heq.
-    simpls. introv -> _ contra. autos.
-  - introv Heq.
-    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
-  - intros. rew_listx. cases_if. constructor.
-  - introv Heq.
-    forwards* (-> & Heq' & ->): single_eq_middle_inv Heq.
-  - introv contra.
-    inverts contra as Hmem.
-    inverts Hmem.
-Qed.
-
-Example init_cfg_wf :
+Example init_log_describes_init_cfg :
   forall e,
     describes init_log (init_cfg e).
 Proof.
@@ -167,6 +128,42 @@ Proof.
   - exists* t_root.
 Qed.
 
+Example init_graph_wf :
+  wf_graph (graph_root empty_graph root_commit).
+Proof.
+  unfolds graph_root, empty_graph.
+  splits.
+  - unfolds finite. rewrite dom_update.
+    rewrite dom_empty.
+    apply LibSet.finite_union;
+      auto using LibSet.finite_empty, LibSet.finite_single.
+  - introv Hanc. inverts~ Hanc.
+    rew_set in *. false.
+  - introv He. inverts He.
+Qed.
+
+Example init_cfg_wf :
+  forall e,
+    wf_cfg (init_cfg e).
+Proof.
+  introv. unfolds init_cfg, graph_root, empty_graph.
+  splits.
+  - apply init_graph_wf.
+  - unfolds graph_indom.
+    introv Hbinds.
+    asserts ->: (t = t_root).
+    {
+      destruct* (classic (t = t_root)).
+      forwards~ Hbinds': binds_update_neq_inv Hbinds.
+      forwards*: binds_empty_false. typeclass.
+    }
+    forwards~ Heq: binds_update_same_inv Hbinds.
+    inverts Heq.
+    rew_dom. rew_set. auto.
+  - introv Hbinds.
+    forwards*: binds_empty_false. typeclass.
+Qed.
+
 Lemma get_uncommitted'_has_sync :
   forall log t acc,
     Exists is_sync_event log ->
@@ -247,6 +244,189 @@ Proof.
     + exists. applys* StepReadGlobal.
     + exists. applys* StepSpawn.
     + exists. applys* StepJoin.
+Qed.
+
+(* TODO: Move to GraphFacts.v *)
+Lemma graph_commit_indom :
+  forall G c c' c'' d,
+    graph_indom G c ->
+    graph_indom (graph_commit G c' c'' d) c.
+Proof.
+  introv Hdom. unfolds graph_indom, graph_commit.
+  destruct G as (C & P).
+  rew_dom. rew_set. auto.
+Qed.
+
+Hint Resolve graph_commit_indom : vcm.
+
+Lemma graph_commit_indom_same :
+  forall G c c' d,
+    graph_indom (graph_commit G c c' d) c'.
+Proof.
+  introv. unfolds graph_indom, graph_commit.
+  destruct G as (C & P).
+  rew_dom. rew_set. auto.
+Qed.
+
+Hint Resolve graph_commit_indom_same : vcm.
+
+Lemma graph_merge_indom :
+  forall G c c' c'' m,
+    graph_indom G c ->
+    graph_indom (graph_merge G c' c'' m) c.
+Proof.
+  introv Hdom. unfolds graph_indom, graph_merge.
+  destruct G as (C & P).
+  rew_dom. rew_set. auto.
+Qed.
+
+Hint Resolve graph_merge_indom : vcm.
+
+Lemma graph_merge_indom_same :
+  forall G c c' m,
+    graph_indom (graph_merge G c c' m) m.
+Proof.
+  introv. unfolds graph_indom, graph_merge.
+  destruct G as (C & P).
+  rew_dom. rew_set. auto.
+Qed.
+
+Hint Resolve graph_merge_indom_same : vcm.
+
+Theorem step_preserves_wf_cfg :
+  forall cfg cfg' log log',
+    wf_cfg cfg ->
+    step (cfg, log) (cfg', log') ->
+    wf_cfg cfg'.
+Proof.
+  destruct cfg as ((T & G) & L).
+  introv (Hwf & HdomT & HdomL) Hstep.
+  inverts Hstep.
+  - splits~.
+    introv Hbinds.
+    destruct (classic (t = t0)).
+    + subst.
+      forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts* Heq.
+    + forwards*: binds_update_neq_inv Hbinds.
+  - unfolds do_commit.
+    replace (T[t]) with (state_running, te_ret r, d, h) in H7 by forwards*: read_of_binds.
+    inverts H7.
+    splits*.
+    + apply* graph_commit_wf.
+    + introv Hbinds.
+      destruct (classic (t = t0)).
+      * subst.
+        forwards~ Heq: binds_update_same_inv Hbinds.
+        inverts~ Heq.
+      * forwards~ Hbinds': binds_update_neq_inv Hbinds.
+        forwards~ Hbinds'': binds_update_neq_inv Hbinds'.
+        asserts* Hdom': (graph_indom G c).
+        auto_star.
+  - splits~.
+    introv Hbinds.
+    destruct (classic (t = t0)).
+    + subst.
+      forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts* Heq.
+    + forwards*: binds_update_neq_inv Hbinds.
+  - splits~.
+    introv Hbinds.
+    destruct (classic (t = t0)).
+    + subst.
+      forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts* Heq.
+    + forwards*: binds_update_neq_inv Hbinds.
+  - splits~.
+    introv Hbinds.
+    destruct (classic (t = t0)).
+    + subst.
+      forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts* Heq.
+    + forwards*: binds_update_neq_inv Hbinds.
+  - unfolds push_thread, do_commit.
+    asserts* Hneq: (t <> t').
+    rewrite~ read_update_neq in H9.
+    rewrite~ read_update_same in H9.
+    rewrite~ read_update_neq in H9.
+    rewrite~ read_update_same in H9.
+    inverts H9. splits*.
+    + apply* graph_commit_wf.
+    + introv Hbinds.
+      destruct (classic (t' = t0)).
+      * subst.
+        forwards~ Heq: binds_update_same_inv Hbinds.
+        inverts* Heq.
+      * forwards~ Hbinds': binds_update_neq_inv Hbinds.
+        destruct (classic (t = t0)).
+        -- subst.
+           forwards~ Heq: binds_update_same_inv Hbinds'.
+           inverts* Heq.
+        -- forwards~ Hbinds'': binds_update_neq_inv Hbinds'.
+           forwards~ Hbinds''': binds_update_neq_inv Hbinds''.
+           forwards* Hbinds'''': binds_update_neq_inv Hbinds'''.
+  - unfolds pull_thread, do_merge.
+    replace (T[t']) with (state_terminated, te_ret r, empty_staging_area, h') in H10 by forwards*: read_of_binds t'.
+    replace (T[t]) with (state_running, te_exp e, d, h) in H10 by forwards*: read_of_binds T t.
+    inverts H10. splits*.
+    + apply* graph_merge_wf.
+    + introv Hbinds.
+      destruct (classic (t = t0)).
+      * subst.
+        forwards~ Heq: binds_update_same_inv Hbinds.
+        inverts* Heq.
+      * forwards~ Hbinds': binds_update_neq_inv Hbinds.
+        forwards* Hbinds'': binds_update_neq_inv Hbinds'.
+  - unfolds pull_lock, do_merge.
+    replace (L[l0]) with (ls_free, h') in H10 by forwards*: read_of_binds l0.
+    replace (T[t]) with (state_running, te_exp e, d, h) in H10 by forwards*: read_of_binds T t.
+    inverts H10. splits.
+    + apply* graph_merge_wf.
+    + introv Hbinds.
+      destruct (classic (t = t0)).
+      * subst.
+        forwards~ Heq: binds_update_same_inv Hbinds.
+        inverts* Heq.
+      * forwards~ Hbinds': binds_update_neq_inv Hbinds.
+        forwards* Hbinds'': binds_update_neq_inv Hbinds'.
+    + introv Hbinds.
+      destruct (classic (l = l0)).
+      * subst.
+        forwards~ Heq: binds_update_same_inv Hbinds.
+        inverts* Heq.
+      * forwards* Hbinds': binds_update_neq_inv Hbinds.
+  - splits~.
+    + introv Hbinds.
+      destruct (classic (t = t0)).
+      * subst.
+        forwards~ Heq: binds_update_same_inv Hbinds.
+        inverts* Heq.
+      * forwards*: binds_update_neq_inv Hbinds.
+    + introv Hbinds.
+      destruct (classic (l = l0)).
+      * subst.
+        forwards~ Heq: binds_update_same_inv Hbinds.
+        inverts* Heq.
+      * forwards* Hbinds': binds_update_neq_inv Hbinds.
+  - unfolds push_lock, do_commit.
+    replace (T[t]) with (state_running, te_exp e, d, h) in H9 by forwards*: read_of_binds T t.
+    replace (L[l0]) with (ls_held t, h') in H9 by forwards*: read_of_binds l0.
+    inverts H9. splits.
+    + apply* graph_commit_wf.
+    + introv Hbinds.
+      destruct (classic (t = t0)).
+      * subst.
+        forwards~ Heq: binds_update_same_inv Hbinds.
+        inverts* Heq.
+      * forwards~ Hbinds': binds_update_neq_inv Hbinds.
+        forwards* Hbinds'': binds_update_neq_inv Hbinds'.
+    + introv Hbinds.
+      destruct (classic (l = l0)).
+      * subst.
+        forwards~ Heq: binds_update_same_inv Hbinds.
+        inverts* Heq.
+      * forwards~ Hbinds': binds_update_neq_inv Hbinds.
+        forwards* Hbinds'': binds_update_neq_inv Hbinds'.
 Qed.
 
 Theorem step_preserves_wf_log :

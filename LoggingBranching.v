@@ -123,6 +123,7 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
           (exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log <-> t2 \indom T)
       /\
       (* Spawned threads that have not started are new *)
+      (* TODO: Order of exists variables are wrong *)
       (forall t2,
           ((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log) /\ ~mem (event_start t2) log <-> exists e h ts, binds T t2 (state_new, e, h, ts))
       /\
@@ -223,3 +224,11 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 .
 
 Hint Constructors step Branching.step : vcm.
+
+Definition wf_cfg (cfg : cfg) : Prop :=
+  match cfg with
+  | (T, G, L) =>
+      wf_graph G /\
+      (forall t ts e d c, binds T t (ts, e, d, c) -> graph_indom G c) /\
+      (forall l ls c, binds L l (ls, c) -> graph_indom G c)
+  end.

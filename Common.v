@@ -101,39 +101,13 @@ Ltac rew_dom :=
       [| solve[symmetry; apply dom_update] ]
   end.
 
-(*
-Module FMap.
-
-Inductive fmap (A B : Type) := make {
-  map_data :> map A B;
-  map_finite : finite map_data
-}.
-
-Lemma finite_update :
-  forall A B (M : map A B) k v, finite M -> finite (M[k := v]).
+(* No mechanisation is complete without custom list lemmas *)
+Lemma single_eq_middle_inv :
+  forall A (x y : A) l1 l2,
+    x :: nil = l1 ++ y :: l2 ->
+    l1 = nil /\ x = y /\ l2 = nil.
 Proof.
-  introv Hfin.
-    rewrite update_eq_union_single. apply~ finite_union.
-    apply finite_single.
+  introv Heq.
+  destruct l1; rew_list in *; inverts* Heq.
+  forwards: nil_eq_middle_inv y l1 l2; rew_list~.
 Qed.
-
-Instance fmap_binds_inst : forall A B, BagBinds A B (fmap A B).
-  constructor. rapply (@binds_impl A B).
-Defined.
-
-Instance fmap_update_inst : forall A B, BagUpdate A B (fmap A B).
-  constructor.
-  apply (fun M k v =>
-           make A B (map_data _ _ M)[k:=v]
-             (finite_update A B M k v (map_finite _ _ M))).
-Qed.
-
-Instance fmap_dom_inst : forall A B, BagDom (fmap A B) (set A).
-  constructor. rapply (@dom_impl A B).
-Defined.
-
-(* TODO: Do I need to mirror all of LibMap? rew_set and lemmas
-don't work on fmaps (of course). I could write the semantics so
-that they work on the underlying map instead. *)
-End FMap.
-*)
