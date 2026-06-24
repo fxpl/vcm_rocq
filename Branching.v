@@ -1,12 +1,12 @@
 From Vcm Require Import Common.
 From Vcm Require Import Graph.
 
-Definition thread := (thread_state * thread_exp * staging_area * commit)%type.
+Definition thread := (thread_state * thread_exp * diff * commit)%type.
 
 Instance inhab_thread : Inhab thread.
   forwards* Hexp: inhab_exp.
   destruct Hexp as [[e _]].
-  constructor. exists* (state_new, te_exp e, (empty : staging_area), 0).
+  constructor. exists* (state_new, te_exp e, (empty : diff), 0).
 Qed.
 
 Definition threads := map tid thread.

@@ -14,14 +14,14 @@ Import Log.
 Import LogFacts.
 
 (* TODO: This doesn't touch the heap or graph which leads to a
-bunch of shelved goals. Is threads_agree and locks_agree the right
+bunch of shelved goals. Is threads_agree and locks_agree a better
 abstraction? *)
 Definition same_expressions_and_locks (cfgSh : SharedMemory.cfg) (cfgB : Branching.cfg) :=
   match cfgSh, cfgB with
   | (TSh, _, LSh), (TB, _, LB) =>
       (forall t st e,
-        binds TSh t (st, e) <-> exists d h, binds TB t (st, e, d, h)) /\
-      (forall l ls, binds LSh l ls <-> exists h, binds LB l (ls, h))
+        binds TSh t (st, e) <-> exists d c, binds TB t (st, e, d, c)) /\
+      (forall l ls, binds LSh l ls <-> exists c, binds LB l (ls, c))
   end.
 
 Lemma same_expressions_same_domains :
@@ -37,32 +37,32 @@ Proof.
   - apply set_st_eq.
     intros t. splits.
     + introv ((st & e) & Hbinds).
-      apply Hexp in Hbinds as (d & h & Hbinds').
+      apply Hexp in Hbinds as (d & c & Hbinds').
       exists*.
-    + introv ((((st & e) & d ) & h) & Hbinds).
+    + introv ((((st & e) & d ) & c) & Hbinds).
       exists (st, e). apply* Hexp.
   - apply set_st_eq.
     intros l. splits.
     + introv (ls & Hbinds).
       apply Hexp in Hbinds as (ls' & Hbinds').
       exists*.
-    + introv ((ls & h) & Hbinds).
+    + introv ((ls & c) & Hbinds).
       exists ls. apply* Hexp.
 Qed.
 
 (* Updating one thread's (state, expression) on both sides preserves
    [same_expressions_and_locks]: the Branching side may additionally change the
-   staging area [d] and commit [h], but those are invisible to the relation. *)
+   staging area [d] and commit [c], but those are invisible to the relation. *)
 Lemma same_expr_thread_update :
-  forall TSh H H' LSh TB G G' LB t st e d h,
+  forall TSh H H' LSh TB G G' LB t st e d c,
     same_expressions_and_locks (TSh, H, LSh) (TB, G, LB) ->
-    same_expressions_and_locks (TSh[t := (st, e)], H', LSh) (TB[t := (st, e, d, h)], G', LB).
+    same_expressions_and_locks (TSh[t := (st, e)], H', LSh) (TB[t := (st, e, d, c)], G', LB).
 Proof.
   introv Hsame. destruct Hsame as (Hthr & Hlck). simpl. split; [| exact Hlck].
   introv. split.
   - introv Hb. destruct (classic (t0 = t)) as [-> | Hne].
     + forwards Heq: binds_update_same_inv Hb.
-      inverts Heq. exists d h. apply binds_update_same.
+      inverts Heq. exists d c. apply binds_update_same.
     + forwards Hb': binds_update_neq_inv Hb Hne.
       apply Hthr in Hb' as (d0 & h0 & Hb0).
       exists d0 h0. applys binds_update_neq Hne Hb0.
@@ -76,15 +76,15 @@ Qed.
 
 (* Likewise, updating one lock on both sides preserves the relation. *)
 Lemma same_expr_lock_update :
-  forall TSh H H' LSh TB G G' LB l ls h,
+  forall TSh H H' LSh TB G G' LB l ls c,
     same_expressions_and_locks (TSh, H, LSh) (TB, G, LB) ->
-    same_expressions_and_locks (TSh, H', LSh[l := ls]) (TB, G', LB[l := (ls, h)]).
+    same_expressions_and_locks (TSh, H', LSh[l := ls]) (TB, G', LB[l := (ls, c)]).
 Proof.
   introv Hsame. destruct Hsame as (Hthr & Hlck). simpl. split; [exact Hthr |].
   introv. split.
   - introv Hb. destruct (classic (l0 = l)) as [-> | Hne].
     + forwards Heq: binds_update_same_inv Hb.
-      inverts Heq. exists h. apply binds_update_same.
+      inverts Heq. exists c. apply binds_update_same.
     + forwards Hb': binds_update_neq_inv Hb Hne.
       apply Hlck in Hb' as (h0 & Hb0).
       exists h0. applys binds_update_neq Hne Hb0.
@@ -98,16 +98,16 @@ Qed.
 
 (* Two Branching thread maps "agree" when they bind every thread to the same
    (state, expression), ignoring the staging area and commit pointer. The
-   commit-graph operations ([do_commit], [do_merge], ...) only touch [d]/[h], so
+   commit-graph operations ([do_commit], [do_merge], ...) only touch [d]/[c], so
    they preserve this projection -- which is all [same_expressions_and_locks]
    cares about on the Branching side. *)
 Definition threads_agree (T1 T2 : Branching.threads) : Prop :=
   forall t st e,
-    (exists d h, binds T1 t (st, e, d, h)) <-> (exists d h, binds T2 t (st, e, d, h)).
+    (exists d c, binds T1 t (st, e, d, c)) <-> (exists d c, binds T2 t (st, e, d, c)).
 
 Definition locks_agree (L1 L2 : Branching.locks) : Prop :=
   forall l ls,
-    (exists h, binds L1 l (ls, h)) <-> (exists h, binds L2 l (ls, h)).
+    (exists c, binds L1 l (ls, c)) <-> (exists c, binds L2 l (ls, c)).
 
 Lemma threads_agree_trans :
   forall T1 T2 T3, threads_agree T1 T2 -> threads_agree T2 T3 -> threads_agree T1 T3.
@@ -120,8 +120,8 @@ Qed.
 (* Updating a thread to a value with the same (state, expression) preserves the
    projection. *)
 Lemma threads_agree_update :
-  forall (T : Branching.threads) t st e d h dn hn,
-    binds T t (st, e, d, h) ->
+  forall (T : Branching.threads) t st e d c dn hn,
+    binds T t (st, e, d, c) ->
     threads_agree T (T[t := (st, e, dn, hn)]).
 Proof.
   introv Hb. intros t0 sx ex. split.
@@ -131,13 +131,13 @@ Proof.
     + exists d0 h0. applys binds_update_neq Hne Hb0.
   - intros (d0 & h0 & Hb0). destruct (classic (t0 = t)) as [-> | Hne].
     + forwards Heq: binds_update_same_inv Hb0. inverts Heq.
-      exists d h. exact Hb.
+      exists d c. exact Hb.
     + forwards Hb0': binds_update_neq_inv Hb0 Hne. exists d0 h0. exact Hb0'.
 Qed.
 
 Lemma locks_agree_update :
-  forall (L : Branching.locks) l ls h hn,
-    binds L l (ls, h) ->
+  forall (L : Branching.locks) l ls c hn,
+    binds L l (ls, c) ->
     locks_agree L (L[l := (ls, hn)]).
 Proof.
   introv Hb. intros l0 ls0. split.
@@ -147,7 +147,7 @@ Proof.
     + exists h0. applys binds_update_neq Hne Hb0.
   - intros (h0 & Hb0). destruct (classic (l0 = l)) as [-> | Hne].
     + forwards Heq: binds_update_same_inv Hb0. inverts Heq.
-      exists h. exact Hb.
+      exists c. exact Hb.
     + forwards Hb0': binds_update_neq_inv Hb0 Hne. exists h0. exact Hb0'.
 Qed.
 
@@ -177,8 +177,8 @@ Qed.
 
 (* The commit-graph operations preserve the (state, expression) projection. *)
 Lemma do_commit_threads_agree :
-  forall t hn T G T' G' e d h,
-    binds T t (state_running, e, d, h) ->
+  forall t hn T G T' G' e d c,
+    binds T t (state_running, e, d, c) ->
     do_commit t hn T G = (T', G') ->
     threads_agree T T'.
 Proof.
@@ -191,8 +191,8 @@ Proof.
 Qed.
 
 Lemma do_merge_threads_agree :
-  forall t hsrc hn T G T' G' st e d h,
-    binds T t (st, e, d, h) ->
+  forall t hsrc hn T G T' G' st e d c,
+    binds T t (st, e, d, c) ->
     do_merge t hsrc hn T G = (T', G') ->
     threads_agree T T'.
 Proof.
@@ -205,28 +205,28 @@ Proof.
 Qed.
 
 Lemma pull_thread_threads_agree :
-  forall t t' hn T G T' G' st e d h,
-    binds T t (st, e, d, h) ->
+  forall t t' hn T G T' G' st e d c,
+    binds T t (st, e, d, c) ->
     pull_thread t t' hn T G = (T', G') ->
     threads_agree T T'.
 Proof.
   introv Hb Heq. unfold pull_thread in Heq.
-  destruct (T[t']) as [[[ts' e'] d'] h']. applys do_merge_threads_agree Hb Heq.
+  destruct (T[t']) as [[[ts' e'] d'] c']. applys do_merge_threads_agree Hb Heq.
 Qed.
 
 Lemma pull_lock_threads_agree :
-  forall t l hn T G L T' G' st e d h,
-    binds T t (st, e, d, h) ->
+  forall t l hn T G L T' G' st e d c,
+    binds T t (st, e, d, c) ->
     pull_lock t l hn T G L = (T', G') ->
     threads_agree T T'.
 Proof.
   introv Hb Heq. unfold pull_lock in Heq.
-  destruct (L[l]) as [ls h']. applys do_merge_threads_agree Hb Heq.
+  destruct (L[l]) as [ls c']. applys do_merge_threads_agree Hb Heq.
 Qed.
 
 Lemma push_lock_threads_agree :
-  forall t l hn T G L T' G' L' e d h,
-    binds T t (state_running, e, d, h) ->
+  forall t l hn T G L T' G' L' e d c,
+    binds T t (state_running, e, d, c) ->
     push_lock t l hn T G L = (T', G', L') ->
     threads_agree T T'.
 Proof.
@@ -237,8 +237,8 @@ Proof.
 Qed.
 
 Lemma push_lock_locks_agree :
-  forall t l hn T G L T' G' L' ls h,
-    binds L l (ls, h) ->
+  forall t l hn T G L T' G' L' ls c,
+    binds L l (ls, c) ->
     push_lock t l hn T G L = (T', G', L') ->
     locks_agree L L'.
 Proof.
@@ -252,16 +252,16 @@ Proof.
 Qed.
 
 Lemma push_thread_threads_agree :
-  forall t t' hn T G T' G' e d h st' e' d' h',
-    binds T t (state_running, e, d, h) ->
-    binds T t' (st', e', d', h') ->
+  forall t t' hn T G T' G' e d c st' e' d' c',
+    binds T t (state_running, e, d, c) ->
+    binds T t' (st', e', d', c') ->
     push_thread t t' hn T G = (T', G') ->
     threads_agree T T'.
 Proof.
   introv Hbt Hbt' Heq. unfold push_thread in Heq.
   destruct (do_commit t hn T G) as (T'' & G'') eqn:HC.
   forwards Hag1: do_commit_threads_agree Hbt HC.
-  forwards (d2 & h2 & Hbt''): (proj1 (Hag1 t' st' e')). { exists d' h'. exact Hbt'. }
+  forwards (d2 & h2 & Hbt''): (proj1 (Hag1 t' st' e')). { exists d' c'. exact Hbt'. }
   destruct (T''[t']) as [[[ts2 e2] d3] h3] eqn:HT'. inverts Heq.
   lets Hin'': (indom_of_binds Hbt'').
   forwards* Hbt2: binds_of_indom_read Hin'' HT'.
@@ -275,9 +275,7 @@ Qed.
 Theorem branching_complete :
   forall log log' cfgSh cfgB cfgSh',
     wf_log log ->
-    match cfgB with
-    | (_, G, _) => wf_graph G
-    end ->
+    wf_cfg cfgB ->
     LoggingSharedMemory.describes log cfgSh ->
     LoggingBranching.describes log cfgB ->
     same_expressions_and_locks cfgSh cfgB ->
@@ -287,25 +285,26 @@ Theorem branching_complete :
       LoggingBranching.step (cfgB, log) (cfgB', log') /\
       same_expressions_and_locks cfgSh' cfgB'.
 Proof.
-  introv Hwf HwfG HdescSh HdescB Hsame Hcf Hstep.
+  introv Hwf HwfB HdescSh HdescB Hsame Hcf Hstep.
   destruct cfgB as [(T & G) L].
+  destruct HwfB as (HwfG & _).
   forwards* HdescSh': LoggingSharedMemoryFacts.step_preserves_describes Hwf.
   inverts Hstep;
     match goal with
     | H: binds ?T ?t (?ts', ?e) |- _ =>
         assert (Ht := H);
-        apply (proj1 Hsame) in H as (d & h & Hbinds)
+        apply (proj1 Hsame) in H as (d & c & Hbinds)
     end.
   + (* StepStart *)
     eexists. split; [ constructors* |].
     applys same_expr_thread_update Hsame.
   + (* StepEnd *)
-    forwards (h' & Hfresh): exists_commit_fresh HwfG.
-    asserts (T' & G' & Hcommit): (exists T' G', do_commit t h' T G = (T', G')).
+    forwards (c' & Hfresh): exists_commit_fresh HwfG.
+    asserts (T' & G' & Hcommit): (exists T' G', do_commit t c' T G = (T', G')).
     {
       exists. unfolds do_commit.
       forwards Hread: read_of_binds Hbinds.
-      replace T[t] with (state_running, te_ret r, d, h).
+      replace T[t] with (state_running, te_ret r, d, c).
       reflexivity.
     }
     eexists. split; [ constructors* |].
@@ -364,11 +363,11 @@ Proof.
     eexists. split; [ constructors* |].
     applys same_expr_thread_update Hsame.
   + (* StepSpawn *)
-    forwards (h' & Hfresh): exists_commit_fresh HwfG.
+    forwards (c' & Hfresh): exists_commit_fresh HwfG.
     forwards* (Heq & _): same_expressions_same_domains.
     rewrite Heq in H6.
     asserts* Hneq: (t <> t').
-    asserts (T' & G' & Hpush): (exists T' G', push_thread t t' h' T[t:=(state_running, te_exp (K t'), d, h)][t':=(state_new, te_exp e', \{}, 0)] G = (T', G')).
+    asserts (T' & G' & Hpush): (exists T' G', push_thread t t' c' T[t:=(state_running, te_exp (K t'), d, c)][t':=(state_new, te_exp e', \{}, 0)] G = (T', G')).
     {
       exists. unfolds push_thread, do_commit.
       rewrite~ read_update_neq.
@@ -378,25 +377,25 @@ Proof.
       reflexivity.
     }
     eexists. split; [ constructors* |].
-    asserts HbiTt': (binds (T[t:=(state_running, te_exp (K t'), d, h)][t':=(state_new, te_exp e', \{}, 0)]) t' (state_new, te_exp e', \{}, 0)).
+    asserts HbiTt': (binds (T[t:=(state_running, te_exp (K t'), d, c)][t':=(state_new, te_exp e', \{}, 0)]) t' (state_new, te_exp e', \{}, 0)).
     { apply binds_update_same. }
-    asserts HbiTt: (binds (T[t:=(state_running, te_exp (K t'), d, h)][t':=(state_new, te_exp e', \{}, 0)]) t (state_running, te_exp (K t'), d, h)).
+    asserts HbiTt: (binds (T[t:=(state_running, te_exp (K t'), d, c)][t':=(state_new, te_exp e', \{}, 0)]) t (state_running, te_exp (K t'), d, c)).
     { applys binds_update_neq Hneq. apply binds_update_same. }
     forwards Hag: push_thread_threads_agree HbiTt HbiTt' Hpush.
     applys same_expr_threads_agree H G Hag.
     applys same_expr_thread_update H G.
     applys same_expr_thread_update Hsame.
   + (* StepJoin *)
-    forwards (h'' & Hfresh): exists_commit_fresh HwfG.
-    apply Hsame in H4 as (d' & h' & Hbinds').
-    asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_thread t t' h'' T G = (T', G') /\
-                                                         binds T' t (state_running, te_exp e, d', h'')).
+    forwards (c'' & Hfresh): exists_commit_fresh HwfG.
+    apply Hsame in H4 as (d' & c' & Hbinds').
+    asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_thread t t' c'' T G = (T', G') /\
+                                                         binds T' t (state_running, te_exp e, d', c'')).
     {
       exists. unfolds pull_thread, do_merge.
       forwards Hread: read_of_binds Hbinds.
-      replace T[t'] with (state_terminated, te_ret r, d, h).
+      replace T[t'] with (state_terminated, te_ret r, d, c).
       forwards Hread': read_of_binds Hbinds'.
-      replace T[t] with (state_running, te_exp e, d', h').
+      replace T[t] with (state_running, te_exp e, d', c').
       splits.
       - reflexivity.
       - apply binds_update_same.
@@ -412,16 +411,16 @@ Proof.
       inverts* Heq.
     }
     substs.
-    asserts Hmerge: (conflict_free_merge d' h' h G).
+    asserts Hmerge: (conflict_free_merge d' c' c G).
     {
       destruct HdescB as (_ & _ & _ & _ & _ & _ &
         (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2) & _).
       forwards Hcflog: conflict_free_last_inv Hcf.
-      (* joiner [t]: [D[t] = d'], [TC[t] = h']. *)
+      (* joiner [t]: [D[t] = d'], [TC[t] = c']. *)
       lets HtT: (indom_of_binds Hbinds').
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
       forwards* Heqt: binds_inj Hbinds' Hbdt. inverts Heqt.
-      (* joined [t']: [TC[t'] = h]. *)
+      (* joined [t']: [TC[t'] = c]. *)
       lets Ht'T: (indom_of_binds Hbinds).
       forwards (ts1 & e1 & Hbdt'): Hdelta Ht'T.
       forwards* Heqt': binds_inj Hbinds Hbdt'. inverts Heqt'.
@@ -435,18 +434,18 @@ Proof.
     applys same_expr_threads_agree Hsame Hag.
   + (* StepLock *)
     branches.
-    * forwards (h'' & Hfresh): exists_commit_fresh HwfG.
-      apply Hsame in H0 as (h' & Hlock).
-      asserts Hmerge: (conflict_free_merge d h h' G).
+    * forwards (c'' & Hfresh): exists_commit_fresh HwfG.
+      apply Hsame in H0 as (c' & Hlock).
+      asserts Hmerge: (conflict_free_merge d c c' G).
       {
         destruct HdescB as (_ & _ & _ & _ & _ & _ &
           (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2) & _).
         forwards Hcflog: conflict_free_last_inv Hcf.
-        (* locker [t]: [D[t] = d], [TC[t] = h]. *)
+        (* locker [t]: [D[t] = d], [TC[t] = c]. *)
         lets HtT: (indom_of_binds Hbinds).
         forwards (ts0 & e0 & Hbdt): Hdelta HtT.
         forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
-        (* lock [l0]: [LC[l0] = h']. *)
+        (* lock [l0]: [LC[l0] = c']. *)
         lets Hl0L: (indom_of_binds Hlock).
         forwards (ls0 & Hbdl): Hlocks Hl0L.
         forwards* Heql: binds_inj Hlock Hbdl. inverts Heql.
@@ -454,14 +453,14 @@ Proof.
         applys conflict_free_merge_holds Hwf Hcflog Hplay;
           [ applys HdomD HtT | applys HdomTC HtT | applys HLCdom; applys HdomLC Hl0L ].
       }
-      asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_lock t l0 h'' T G L = (T', G') /\
-                                                             binds T' t (state_running, te_exp e, d, h'')).
+      asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_lock t l0 c'' T G L = (T', G') /\
+                                                             binds T' t (state_running, te_exp e, d, c'')).
       {
         exists. unfolds pull_lock, do_merge.
         forwards Hread: read_of_binds Hlock.
-        replace L[l0] with (ls_free, h').
+        replace L[l0] with (ls_free, c').
         forwards Hread': read_of_binds Hbinds.
-        replace T[t] with (state_running, te_exp e, d, h).
+        replace T[t] with (state_running, te_exp e, d, c).
         splits.
         - reflexivity.
         - apply binds_update_same.
@@ -477,8 +476,8 @@ Proof.
       applys same_expr_lock_update H G.
       applys same_expr_thread_update Hsame.
   + (* StepRelease *)
-    forwards (h'' & Hfresh): exists_commit_fresh HwfG.
-    asserts (h' & HbindsL): (exists h', binds L l0 (ls_held t, h')).
+    forwards (c'' & Hfresh): exists_commit_fresh HwfG.
+    asserts (c' & HbindsL): (exists c', binds L l0 (ls_held t, c')).
     {
       destruct HdescSh as (_ & _ & _ & _ & Hlock & _).
       match goal with
@@ -487,13 +486,13 @@ Proof.
       destruct HdescB as (_ & _ & _ & _ & Hlock' & _).
       apply* Hlock'.
     }
-    asserts (T' & G' & L' & Hpush & Hbinds'): (exists T' G' L', push_lock t l0 h'' T G L = (T', G', L') /\ binds T' t (state_running, te_exp e, \{}, h'')).
+    asserts (T' & G' & L' & Hpush & Hbinds'): (exists T' G' L', push_lock t l0 c'' T G L = (T', G', L') /\ binds T' t (state_running, te_exp e, \{}, c'')).
     {
       exists. unfolds push_lock, do_commit.
       forwards Hread: read_of_binds Hbinds.
-      replace T[t] with (state_running, te_exp e, d, h).
+      replace T[t] with (state_running, te_exp e, d, c).
       forwards Hread': read_of_binds HbindsL.
-      replace L[l0] with (ls_held t, h').
+      replace L[l0] with (ls_held t, c').
       splits.
       - reflexivity.
       - apply binds_update_same.
@@ -514,9 +513,6 @@ Qed.
 Theorem branching_sound :
   forall log log' cfgSh cfgB cfgB',
     wf_log log ->
-    match cfgB with
-    | (_, G, _) => wf_graph G
-    end ->
     LoggingSharedMemory.describes log cfgSh ->
     LoggingBranching.describes log cfgB ->
     same_expressions_and_locks cfgSh cfgB ->
@@ -526,14 +522,14 @@ Theorem branching_sound :
       LoggingSharedMemory.step (cfgSh, log) (cfgSh', log') /\
       same_expressions_and_locks cfgSh' cfgB'.
 Proof.
-  introv Hwf HwfG HdescSh HdescB Hsame Hcf Hstep.
+  introv Hwf HdescSh HdescB Hsame Hcf Hstep.
   destruct cfgSh as ((Tsh & Hp) & Lsh).
   inverts Hstep;
     try
     match goal with
-    | H: binds ?T ?t (?ts, ?e, ?d, ?h) |- _ =>
-        asserts Hex: (exists d h, binds T t (ts, e, d, h));
-        [exists d; exists h; exact H|];
+    | H: binds ?T ?t (?ts, ?e, ?d, ?c) |- _ =>
+        asserts Hex: (exists d c, binds T t (ts, e, d, c));
+        [exists d; exists c; exact H|];
         apply Hsame in Hex as Hbinds; clear Hex
     end.
   + (* StepStart *)
@@ -567,7 +563,7 @@ Proof.
       asserts* ->: (d = D[t]).
       forwards* Heq: binds_inj Hbinds'.
       inverts Heq.
-      asserts* ->: (h = TC[t]).
+      asserts* ->: (c = TC[t]).
       apply Hwrite.
       asserts Hcfg: (conflict_free_graph G).
       { forwards Hcflog: conflict_free_last_inv Hcf.
@@ -590,7 +586,7 @@ Proof.
     asserts* Hneq: (t <> t').
     match goal with
     | Hp : push_thread t t' ?hn ?iT G = (?TT, ?GG) |- _ =>
-        asserts HbiTt: (binds iT t (state_running, te_exp (K t'), d, h));
+        asserts HbiTt: (binds iT t (state_running, te_exp (K t'), d, c));
         [ applys binds_update_neq; [ | apply binds_update_same ]; auto |];
         asserts HbiTt': (binds iT t' (state_new, te_exp e', \{}, 0));
         [ apply binds_update_same |];
@@ -600,7 +596,7 @@ Proof.
     applys same_expr_thread_update Hp G.
     applys same_expr_thread_update Hsame.
   + (* StepJoin *)
-    asserts* Hex: (exists d h, binds T t' (state_terminated, te_ret r, d, h)).
+    asserts* Hex: (exists d c, binds T t' (state_terminated, te_ret r, d, c)).
     apply Hsame in Hex.
     eexists. split; [ constructors* |].
     forwards* Hag: pull_thread_threads_agree H8.
@@ -648,9 +644,7 @@ Qed.
 Corollary branching_equiv :
   forall log log' cfgSh cfgB,
     wf_log log ->
-    match cfgB with
-    | (_, G, _) => wf_graph G
-    end ->
+    wf_cfg cfgB ->
     LoggingSharedMemory.describes log cfgSh ->
     LoggingBranching.describes log cfgB ->
     same_expressions_and_locks cfgSh cfgB ->
@@ -658,7 +652,7 @@ Corollary branching_equiv :
       (exists cfgSh', LoggingSharedMemory.step (cfgSh, log) (cfgSh', log')) <->
       (exists cfgB', LoggingBranching.step (cfgB, log) (cfgB', log')).
 Proof.
-  introv Hwf HwfG HdescSh HdescB Hsame Hcf. split.
+  introv Hwf HwfB HdescSh HdescB Hsame Hcf. split.
   - introv (cfgSh' & Hstep).
     forwards* (cfgB' & Hb & _): branching_complete.
   - introv (cfgB' & Hstep).

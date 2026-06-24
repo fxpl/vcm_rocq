@@ -1,60 +1,10 @@
 From Vcm Require Import Common.
 
-(* Import FMap. *)
-
 Definition thread := (thread_state * thread_exp)%type.
 
-(* TODO: Somewhere along the line, rew_set stopped working for
-updated threads (I think it used to work!?). Turning this from a
-Definition into a Notation seemed to work, but I don't like it...
-*)
 Definition threads := (map tid thread).
-
-(*
-Instance threads_dom_inst : BagDom threads (set tid) := @LibMap.dom_inst tid thread.
-
-Instance threads_union_inst : BagUnion threads := @union_inst tid thread.
-*)
-
-(* Needed for some reason (to let typeclass instantiation look
-inside the definition?) *)
-(*
-Instance in_inst : BagIn tid (set tid).
-  constructor. rapply (@in_impl tid).
-Defined.
-*)
-
-(*
-Instance threads_dom_inst : BagDom threads (set tid).
-  constructor. rapply (@dom_impl tid thread).
-Defined.
-*)
-
-(* Not sure why these are needed for fmap *)
-(*
-Instance threads_dom_inst : BagDom threads (set tid).
-  constructor. rapply (@dom_impl tid thread).
-Qed.
-
-Instance threads_binds_inst : BagBinds tid thread threads.
-  constructor. rapply (@binds_impl tid thread).
-Qed.
-*)
 Definition heap := map loc val.
-
-(*
-Instance heap_binds_inst : BagBinds loc val heap.
-  constructor. rapply (@binds_impl loc val).
-Qed.
-*)
 Definition locks := map lid lock_state.
-
-(*
-Instance locks_binds_inst : BagBinds lid lock_state locks.
-  constructor. rapply (@binds_impl lid lock_state).
-Qed.
-*)
-
 Definition cfg := (threads * heap * locks)%type.
 
 Inductive step : cfg -> cfg -> Prop :=
@@ -96,4 +46,3 @@ Inductive step : cfg -> cfg -> Prop :=
     binds L l (ls_held t) ->
     step (T, H, L) (T[t := (state_running, te_exp (K void))], H, L[l := ls_free])
 .
-

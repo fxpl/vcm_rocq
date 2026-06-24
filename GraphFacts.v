@@ -35,16 +35,16 @@ Qed.
 Hint Resolve ancestor_refl : vcm.
 
 Lemma ancestor_trans :
-  forall G h h' h'',
-    ancestor G h h' ->
-    ancestor G h' h'' ->
-    ancestor G h h''.
+  forall G c c' c'',
+    ancestor G c c' ->
+    ancestor G c' c'' ->
+    ancestor G c c''.
 Proof.
   introv Hanc1 Hanc2.
-  gen h.
+  gen c.
   induction~ Hanc2.
   introv Hanc1.
-  apply AncestorTrans with (h2 := h2); auto_star.
+  apply AncestorTrans with (c2 := c2); auto_star.
 Qed.
 
 Hint Resolve ancestor_trans : vcm.
@@ -69,7 +69,7 @@ Lemma ancestor_commit_fresh_eq :
 Proof.
   introv Hwf Hanc.
   destruct Hwf as (_ & _ & Hedge_wf).
-  induction Hanc as [h | h1 h2 h3 Hsub IH Hedge]; introv Hfresh.
+  induction Hanc as [c | c1 c2 c3 Hsub IH Hedge]; introv Hfresh.
   - reflexivity.
   - forwards ->: IH Hfresh.
     forwards (Hin & _): Hedge_wf Hedge.
@@ -85,7 +85,7 @@ Qed.
 Lemma exists_commit_fresh :
   forall G,
     wf_graph G ->
-    exists h, commit_fresh G h.
+    exists c, commit_fresh G c.
 Proof.
   introv [Hfin _]. destruct G as [C P].
   simpl in Hfin.
@@ -99,18 +99,18 @@ Proof.
 Qed.
 
 Lemma change_set_eq_empty :
-  forall G h,
-    change_set G h h = empty.
+  forall G c,
+    change_set G c c = empty.
 Proof.
   intros. apply is_empty_prove.
   introv Hmem. unfolds change_set.
   destruct G as (C & P).
-  destruct* Hmem as (h' & Hdom & Hanc & Hnanc).
+  destruct* Hmem as (c' & Hdom & Hanc & Hnanc).
 Qed.
 
 Example id_parent_merge :
-  forall G h,
-    conflict_free_merge empty h h G.
+  forall G c,
+    conflict_free_merge empty c c G.
 Proof.
   introv.
   unfolds conflict_free_merge. rew_set.
@@ -130,27 +130,27 @@ Qed.
 Hint Resolve graph_writes_to_indom : vcm.
 
 (* With the maximal-writer definition we can only expose the witnessing writer's
-   membership in the graph, not [h]'s (ancestry does not imply domain
+   membership in the graph, not [c]'s (ancestry does not imply domain
    membership). This is the fact the injectivity proof actually needs. *)
 Lemma is_latest_value_writer_indom :
-  forall G i v h,
-    is_latest_value G h i v ->
-    exists c, graph_writes G c i v /\ graph_indom G c /\ ancestor G c h.
+  forall G i v c,
+    is_latest_value G c i v ->
+    exists c, graph_writes G c i v /\ graph_indom G c /\ ancestor G c c.
 Proof.
-  introv (c & Hwrites & Hanc & _). exists c. splits*.
+  introv (c' & Hwrites & Hanc & _). exists c'. splits*.
 Qed.
 
 Hint Resolve is_latest_value_writer_indom : vcm.
 
 Lemma is_latest_value_inj :
-  forall G i v1 v2 h,
+  forall G i v1 v2 c,
     conflict_free_graph G ->
-    is_latest_value G h i v1 ->
-    is_latest_value G h i v2 ->
+    is_latest_value G c i v1 ->
+    is_latest_value G c i v2 ->
     v1 = v2.
 Proof.
   introv Hcf (c1 & Hw1 & Hanc1 & Hmax1) (c2 & Hw2 & Hanc2 & Hmax2).
-  (* Both [c1] and [c2] write [i] and are ancestors of [h]; show they are
+  (* Both [c1] and [c2] write [i] and are ancestors of [c]; show they are
      comparable, then maximality collapses them to a single writer. *)
   asserts Hcmp: (ancestor G c1 c2 \/ ancestor G c2 c1).
   { (* Otherwise [i] would lie in both [change_set G c1 c2] and
@@ -169,7 +169,7 @@ Proof.
     asserts Hin_c2c1: (i \in change_set G c2 c1).
     { destruct G as (C & P). unfold change_set. exists c1.
       forwards Hr: read_of_binds Hb1.
-      unfold commit_data, staging_area in *.
+      unfold commit_data, diff in *.
       splits.
       - rewrite Hr. applys indom_of_binds Hbd1. typeclass.
       - apply ancestor_refl.
@@ -179,7 +179,7 @@ Proof.
     asserts Hin_c1c2: (i \in change_set G c1 c2).
     { destruct G as (C & P). unfold change_set. exists c2.
       forwards Hr: read_of_binds Hb2.
-      unfold commit_data, staging_area in *.
+      unfold commit_data, diff in *.
       splits.
       - rewrite Hr. applys indom_of_binds Hbd2. typeclass.
       - apply ancestor_refl.
@@ -231,16 +231,16 @@ Proof.
   gen Hneq. induction Hanc; introv Hneq.
   - apply ancestor_refl.
   - rew_set in H. destruct H as [Heq | Hedge].
-    + (* edge is the new (c, c'): forces h3 = c', contradicting [Hneq] *)
+    + (* edge is the new (c, c'): forces c3 = c', contradicting [Hneq] *)
       inverts Heq. congruence.
-    + (* edge already in P; its source [h2] cannot be [c'] (else [Hsink] would
-         force h3 = c') *)
-      asserts Hh2: (h2 <> c').
-      { intro Heqh2. subst h2.
-        asserts Hanc_c': (ancestor (C, P) c' h3).
-        { apply AncestorTrans with (h2 := c'). apply ancestor_refl. exact Hedge. }
+    + (* edge already in P; its source [c2] cannot be [c'] (else [Hsink] would
+         force c3 = c') *)
+      asserts Hc2: (c2 <> c').
+      { intro Heqc2. subst c2.
+        asserts Hanc_c': (ancestor (C, P) c' c3).
+        { apply AncestorTrans with (c2 := c'). apply ancestor_refl. exact Hedge. }
         forwards: Hsink Hanc_c'. congruence. }
-      apply AncestorTrans with (h2 := h2).
+      apply AncestorTrans with (c2 := c2).
       * applys~ IHHanc.
       * exact Hedge.
 Qed.
@@ -269,8 +269,8 @@ Proof.
 Qed.
 
 (* Committing a fresh commit [c'] does not change the latest value visible at
-   any pre-existing commit [h <> c']. The [commit_fresh] hypothesis (no data) is
-   not enough on its own: a data-less [c'] sitting on a path to [h] would become
+   any pre-existing commit [c <> c']. The [commit_fresh] hypothesis (no data) is
+   not enough on its own: a data-less [c'] sitting on a path to [c] would become
    the maximal writer once given data [d]. In a well-formed graph this cannot
    happen — [wf_graph] forces [c'] to be a leaf (see [ancestor_commit_fresh_eq]). *)
 Lemma is_latest_value_commit_fresh :
@@ -334,9 +334,9 @@ Proof.
       asserts Hmid: (mid <> h).
       { intro Heqm. subst mid.
         asserts Hanc_h: (ancestor (C, P) h b).
-        { apply AncestorTrans with (h2 := h). apply ancestor_refl. exact HedgeP. }
+        { apply AncestorTrans with (c2 := h). apply ancestor_refl. exact HedgeP. }
         forwards: Hsink Hanc_h. congruence. }
-      apply AncestorTrans with (h2 := mid).
+      apply AncestorTrans with (c2 := mid).
       * applys~ IH.
       * exact HedgeP.
 Qed.
@@ -416,12 +416,12 @@ Proof.
   destruct G as (C & P). unfolds graph_root.
   gen Hneq. induction Hanc; introv Hneq.
   - apply ancestor_refl.
-  - asserts Hh2: (h2 <> c).
-    { intro Heqh2. subst h2.
-      asserts Hanc_c': (ancestor (C, P) c h3).
-      { apply AncestorTrans with (h2 := c); auto. apply ancestor_refl. }
+  - asserts Hc2: (c2 <> c).
+    { intro Heqc2. subst c2.
+      asserts Hanc_c': (ancestor (C, P) c c3).
+      { apply AncestorTrans with (c2 := c); auto. apply ancestor_refl. }
       forwards: Hsink Hanc_c'. congruence. }
-    apply AncestorTrans with (h2 := h2); auto.
+    apply AncestorTrans with (c2 := c2); auto.
 Qed.
 
 Lemma graph_writes_graph_root :
@@ -456,21 +456,21 @@ Lemma ancestor_graph_commit_edge :
   forall G c c' d, ancestor (graph_commit G c c' d) c c'.
 Proof.
   intros. destruct G as (C & P). unfold graph_commit.
-  apply AncestorTrans with (h2 := c). apply ancestor_refl. rew_set; auto_star.
+  apply AncestorTrans with (c2 := c). apply ancestor_refl. rew_set; auto_star.
 Qed.
 
 Lemma ancestor_graph_merge_edge_l :
   forall G c1 c2 c', ancestor (graph_merge G c1 c2 c') c2 c'.
 Proof.
   intros. destruct G as (C & P). unfold graph_merge.
-  apply AncestorTrans with (h2 := c2). apply ancestor_refl. rew_set; auto_star.
+  apply AncestorTrans with (c2 := c2). apply ancestor_refl. rew_set; auto_star.
 Qed.
 
 Lemma ancestor_graph_merge_edge_r :
   forall G c1 c2 c', ancestor (graph_merge G c1 c2 c') c1 c'.
 Proof.
   intros. destruct G as (C & P). unfold graph_merge.
-  apply AncestorTrans with (h2 := c1). apply ancestor_refl. rew_set; auto_star.
+  apply AncestorTrans with (c2 := c1). apply ancestor_refl. rew_set; auto_star.
 Qed.
 
 (* A binding in the empty map is impossible. *)
@@ -528,9 +528,9 @@ Lemma ancestor_no_out_edge :
     (forall y, ~ graph_edge G a y) ->
     z = a.
 Proof.
-  introv Hanc. induction Hanc as [h | h1 h2 h3 Hsub IH Hedge]; introv Hno.
+  introv Hanc. induction Hanc as [h | c1 c2 c3 Hsub IH Hedge]; introv Hno.
   - reflexivity.
-  - forwards Heq: IH Hno. subst h2. false. applys Hno. exact Hedge.
+  - forwards Heq: IH Hno. subst c2. false. applys Hno. exact Hedge.
 Qed.
 
 (* The commit a pointer-map binds lives in the graph domain, given that all the
@@ -553,12 +553,12 @@ Lemma ancestor_src_indom :
     ancestor G h k ->
     graph_indom G h \/ h = k.
 Proof.
-  introv Hedge Hanc. induction Hanc as [h | h1 h2 h3 Hsub IH Hstep].
+  introv Hedge Hanc. induction Hanc as [h | c1 c2 c3 Hsub IH Hstep].
   - right. reflexivity.
   - destruct IH as [Hin | Heq].
     + left. exact Hin.
-    + subst h2. left.
-      asserts Hed: (graph_edge G h1 h3). { destruct G as (C & P). exact Hstep. }
+    + subst c2. left.
+      asserts Hed: (graph_edge G c1 c3). { destruct G as (C & P). exact Hstep. }
       forwards (Ha & _): Hedge Hed. exact Ha.
 Qed.
 
@@ -606,9 +606,9 @@ Proof.
       forwards (Hin' & _): Hedge_wf HeP.
       applys commit_fresh_not_indom Hfresh Hin'.
     }
-    destruct (classic (h1 = c')) as [-> | Hane].
+    destruct (classic (c1 = c')) as [-> | Hane].
     + symmetry. applys Hsink Hab.
-    + destruct (classic (h2 = c')) as [-> | Hbne].
+    + destruct (classic (c2 = c')) as [-> | Hbne].
       * applys Hsink Hba.
       * asserts Hsink': (forall z, ancestor (C, P) c' z -> z = c').
         {
@@ -653,9 +653,9 @@ Proof.
       destruct~ He as [Heq | [Heq | HeP]].
       forwards (Hin' & _): Hedge_wf HeP. applys commit_fresh_not_indom Hfresh Hin'.
     }
-    destruct (classic (h1 = h)) as [-> | Hane].
+    destruct (classic (c1 = h)) as [-> | Hane].
     + symmetry. applys Hsink Hab.
-    + destruct (classic (h2 = h)) as [-> | Hbne].
+    + destruct (classic (c2 = h)) as [-> | Hbne].
       * applys Hsink Hba.
       * asserts Hsink': (forall z, ancestor (C, P) h z -> z = h).
         {
@@ -676,3 +676,49 @@ Proof.
     + forwards (Ha & Hb): Hedge_wf HeP.
       split; applys~ indom_update_of_indom; typeclass.
 Qed.
+
+Lemma graph_commit_indom :
+  forall G c c' c'' d,
+    graph_indom G c ->
+    graph_indom (graph_commit G c' c'' d) c.
+Proof.
+  introv Hdom. unfolds graph_indom, graph_commit.
+  destruct G as (C & P).
+  rew_dom. rew_set. auto.
+Qed.
+
+Hint Resolve graph_commit_indom : vcm.
+
+Lemma graph_commit_indom_same :
+  forall G c c' d,
+    graph_indom (graph_commit G c c' d) c'.
+Proof.
+  introv. unfolds graph_indom, graph_commit.
+  destruct G as (C & P).
+  rew_dom. rew_set. auto.
+Qed.
+
+Hint Resolve graph_commit_indom_same : vcm.
+
+Lemma graph_merge_indom :
+  forall G c c' c'' m,
+    graph_indom G c ->
+    graph_indom (graph_merge G c' c'' m) c.
+Proof.
+  introv Hdom. unfolds graph_indom, graph_merge.
+  destruct G as (C & P).
+  rew_dom. rew_set. auto.
+Qed.
+
+Hint Resolve graph_merge_indom : vcm.
+
+Lemma graph_merge_indom_same :
+  forall G c c' m,
+    graph_indom (graph_merge G c c' m) m.
+Proof.
+  introv. unfolds graph_indom, graph_merge.
+  destruct G as (C & P).
+  rew_dom. rew_set. auto.
+Qed.
+
+Hint Resolve graph_merge_indom_same : vcm.

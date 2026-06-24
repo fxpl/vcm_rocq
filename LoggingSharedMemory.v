@@ -8,8 +8,6 @@ Import SharedMemory.
 Import Log.
 Import LogFacts.
 
-(* TODO: Do we need something about reads? Is it enough to say
-that a location exists as soon as it has been written to? *)
 Definition describes (log : log) (cfg : cfg) : Prop :=
   match cfg with
   | (T, H, L) =>

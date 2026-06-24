@@ -54,38 +54,6 @@ Definition accesses_location (i : loc) (e : event) :=
 
 Definition log := list event.
 
-(*
-Inductive hb (log : log) : event -> event -> Prop :=
-| HbPo : forall l1 l2 t e1 e2,
-    (* Events are adjacent when projecting the program order of a thread *)
-    l1 ++ e1 :: e2 :: l2 = LibList.filter (fun e => get_thread e = t) log ->
-    hb log e1 e2
-| HbLock : forall l1 l2 t1 t2 l,
-    (* Events unlock l/lock l are adjacent when projecting the events of a lock *)
-    l1 ++ event_unlock t1 l :: event_lock t2 l :: l2 =
-      LibList.filter (fun e => touches_lock l e) log ->
-    hb log (event_unlock t1 l) (event_lock t2 l)
-| HbSpawn : forall l1 l2 t1 t2,
-    (* The spawn event of a thread is before its start event *)
-    (* TODO: No need to split list. Well-formedness will ensure they are ordered *)
-    log = l1 ++ l2 ->
-    mem (event_spawn t1 t2) l1 ->
-    mem (event_start t2) l2 ->
-    hb log (event_spawn t1 t2) (event_start t2)
-| HbJoin : forall l1 l2 t1 t2,
-    (* The end event of a thread is before its join event(s) *)
-    log = l1 ++ l2 ->
-    mem (event_end t2) l1 ->
-    mem (event_join t1 t2) l2 ->
-    hb log (event_end t2) (event_join t1 t2)
-| HbTrans: forall e1 e2 e3,
-    (* Transitivity *)
-    hb log e1 e2 ->
-    hb log e2 e3 ->
-    hb log e1 e3
-.
-*)
-
 Inductive hb (log : log) : nat -> nat -> Prop :=
 | HbPo : forall m n t e1 e2,
     (* Events are ordered within a thread *)
@@ -187,18 +155,6 @@ Definition wf_log (log : log) : Prop :=
   (* The root thread is never spawned *)
   (forall t1, ~ mem (event_spawn t1 t_root) log)
 .
-
-(*
-Definition conflict_free (log : log) : Prop :=
-  forall l1 l2 t1 t2 i v1 v2,
-    log = l1 ++ l2 ->
-    mem (event_write t1 i v1) l1 ->
-    mem (event_write t2 i v2) l2 ->
-    (* mem e l2 -> *)
-    (* (e = event_write t2 i v2 \/ e = event_read t2 i v2) -> *)
-    hb log (event_write t1 i v1) (event_write t2 i v2)
-.
-*)
 
 (* A write to [i] happens-before any later access (read or write) of [i]. This
    rules out both write-write and (stale) read-write races on a location. *)
