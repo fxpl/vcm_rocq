@@ -36,9 +36,9 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (forall l,
           (exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> binds L l ls_free)
       /\
-      (* The value of each location is its latest write *)
-      (forall i v,
-          (exists t log', LibList.filter (fun e => writes_location i e) log = log' & event_write t i v) <-> binds H i v)
+      (* The value of each variable is its latest write *)
+      (forall x v,
+          (exists t log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t x v) <-> binds H x v)
       /\
       (* The log has the initialisation event *)
       (exists t, mem (event_init t) log)
@@ -51,15 +51,15 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 | StepEnd : forall (T : threads) H L t r log,
     binds T t (state_running, te_ret r) ->
     step ((T, H, L), log) ((T[t := (state_terminated, te_ret r)], H, L), log & event_end t)
-| StepRead : forall (T : threads) H L t e K i v log,
+| StepRead : forall (T : threads) H L t e K x v log,
     binds T t (state_running, te_exp e) ->
-    step_ul e K (eff_read i) ->
-    binds H i v ->
-    step ((T, H, L), log) ((T[t := (state_running, te_exp (K (ret_val v)))], H, L), log & event_read t i v)
-| StepWrite : forall (T : threads) (H : heap) L t e K i v log,
+    step_ul e K (eff_read x) ->
+    binds H x v ->
+    step ((T, H, L), log) ((T[t := (state_running, te_exp (K (ret_val v)))], H, L), log & event_read t x v)
+| StepWrite : forall (T : threads) (H : heap) L t e K x v log,
     binds T t (state_running, te_exp e) ->
-    step_ul e K (eff_write i v) ->
-    step ((T, H, L), log) ((T[t := (state_running, te_exp (K void))], H[i := v], L), log & event_write t i v)
+    step_ul e K (eff_write x v) ->
+    step ((T, H, L), log) ((T[t := (state_running, te_exp (K void))], H[x := v], L), log & event_write t x v)
 | StepSpawn : forall (T : threads) H L t (t' : tid) e K e' log,
     binds T t (state_running, te_exp e) ->
     step_ul e K (eff_spawn e') ->

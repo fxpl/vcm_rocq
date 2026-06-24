@@ -199,37 +199,6 @@ Proof.
       * rewrite~ get_uncommitted'_no_sync. exists (@nil event). rew_list*.
 Qed.
 
-Lemma find_write_none :
-  forall log i,
-    LibList.filter (writes_location i) log = nil ->
-    find_write log i = None.
-Proof.
-  introv Hfilter.
-  induction log as [|a log IH]; simpls.
-  - reflexivity.
-  - rew_listx in Hfilter.
-    cases_if~.
-    simpls. rewrite~ IH.
-    destruct~ a. cases_if*.
-Qed.
-
-Lemma find_write_writes_location :
-  forall log log' i v t,
-    LibList.filter (writes_location i) log = log' & event_write t i v ->
-    find_write log i = Some v.
-Proof.
-  introv Hfilter.
-  gen log'. induction log as [|a log IH]; intros; simpls.
-  - rew_listx in Hfilter. false. apply* nil_eq_last_inv.
-  - rew_listx in Hfilter. cases_if.
-    + destruct a; simpls*. destruct log'; rew_list in Hfilter.
-      * inverts Hfilter. rewrite~ find_write_none. case_if*.
-      * inverts Hfilter.
-        rewrite* (IH log').
-    + rewrite* (IH log').
-      destruct* a.
-Qed.
-
 Theorem step_equiv :
   forall cfg cfg' log,
     (exists log', step (cfg, log) (cfg', log')) <-> Branching.step cfg cfg'.
@@ -480,7 +449,7 @@ Proof.
     + (* root is never spawned *)
       introv Hmem'.
       rew_listx in Hmem'. branches; auto_star.
-  - (* StepReadLocal: log' = log & event_read t i v *)
+  - (* StepReadLocal: log' = log & event_read t x v *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
@@ -521,7 +490,7 @@ Proof.
     + (* root is never spawned *)
       introv Hmem'.
       rew_listx in Hmem'. branches; auto_star.
-  - (* StepReadGlobal: log' = log & event_read t i v *)
+  - (* StepReadGlobal: log' = log & event_read t x v *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
@@ -562,7 +531,7 @@ Proof.
     + (* root is never spawned *)
       introv Hmem'.
       rew_listx in Hmem'. branches; auto_star.
-  - (* StepWrite: log' = log & event_write t i v *)
+  - (* StepWrite: log' = log & event_write t x v *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
     asserts (Hsmem & Hwnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
@@ -1083,7 +1052,7 @@ Proof.
         rew_set in Hmem. rew_set. branches; auto_star.
     + (* 8. Init event present *)
       exists t''. rew_listx*.
-  - (* StepReadLocal: log' = log & event_read t i v, T' = T[t := running K(v)] *)
+  - (* StepReadLocal: log' = log & event_read t x v, T' = T[t := running K(v)] *)
     destruct Hdesc as (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & (t'' & Hdinit)).
     splits.
     + (* 1. Spawned dom *)
@@ -1214,7 +1183,7 @@ Proof.
         branches; auto_star.
     + (* 8. Init event present *)
       exists t''. rew_listx*.
-  - (* StepReadGlobal: log' = log & event_read t i v, T' = T[t := running K(v)] *)
+  - (* StepReadGlobal: log' = log & event_read t x v, T' = T[t := running K(v)] *)
     destruct Hdesc as (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & (t'' & Hdinit)).
     splits.
     + (* 1. Spawned dom *)
@@ -1343,7 +1312,7 @@ Proof.
         rew_set in Hmem. branches; auto_star.
     + (* 8. Init event present *)
       exists t''. rew_listx*.
-  - (* StepWrite: log' = log & event_write t i v, T' = T[t := running K(void)] *)
+  - (* StepWrite: log' = log & event_write t x v, T' = T[t := running K(void)] *)
     destruct Hdesc as (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & (t'' & Hdinit)).
     splits.
     + (* 1. Spawned dom *)
@@ -1454,20 +1423,20 @@ Proof.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      exists (D[t := d[i := v]]) TC LC. eexists. splits*.
+      exists (D[t := d[x := v]]) TC LC. eexists. splits*.
       * applys PlaySnoc Hplay.
         apply (PlayWrite _ _ _ _ _ _ _ d).
         asserts* Hmem: (t \indom T).
         erewrite* binds_eq_indom_read.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
-        -- asserts Hd_new: ((D[t := d[i:=v]])[t] = d[i:=v]). { rew_map*. }
+        -- asserts Hd_new: ((D[t := d[x:=v]])[t] = d[x:=v]). { rew_map*. }
            rewrite Hd_new, Htc.
            exists state_running (te_exp (K void)). apply binds_update_same.
         -- forwards~ Hin': indom_update_inv Hin.
            destruct Hin' as [->|Hin']. { congruence. }
            forwards (ts' & e'' & Hbinds'): Hdelta t0 Hin'.
-           asserts Hd0: ((D[t := d[i:=v]])[t0] = D[t0]). { rew_map*. }
+           asserts Hd0: ((D[t := d[x:=v]])[t0] = D[t0]). { rew_map*. }
            rewrite Hd0.
            exists ts' e''. apply~ binds_update_neq.
       * introv Hmem.
@@ -2407,12 +2376,12 @@ Qed.
    This is the play-log analogue of "the delta is the uncommitted suffix",
    stated with the correct [is_commit_event] (flush) boundary. *)
 Lemma delta_is_uncommitted_write :
-  forall log D TC G LC CH t i v,
+  forall log D TC G LC CH t x v,
     play_log log (empty, empty, (empty, empty), empty) (D, TC, G, LC) CH ->
     t \indom D ->
-    binds D[t] i v ->
+    binds D[t] x v ->
     exists m,
-      LibList.Nth m log (event_write t i v) /\
+      LibList.Nth m log (event_write t x v) /\
       (forall p ep, m <= p -> LibList.Nth p log ep -> get_thread ep = t -> ~ is_commit_event ep).
 Proof.
   introv Hplay Hdom Hbinds.
@@ -2426,12 +2395,12 @@ Proof.
       exists wm. split;
         [ applys* Nth_app_l wHN
         | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
-    + (* PlayWrite (event_write t0 i0 v0) *)
+    + (* PlayWrite (event_write t0 x0 v0) *)
       destruct (classic (t = t0)) as [Het | Hneq].
       { subst t. rewrite read_update_same in Hbinds.
-        destruct (classic (i = i0)) as [Hei | Hnei].
-        { (* same location: the new event is the witness *)
-          subst i. forwards ->: binds_update_same_inv Hbinds.
+        destruct (classic (x = x0)) as [Hei | Hnei].
+        { (* same variable: the new event is the witness *)
+          subst x. forwards ->: binds_update_same_inv Hbinds.
           match goal with |- exists m, LibList.Nth m (?lg & _) _ /\ _ => exists (length lg) end.
           split.
           - applys* Nth_app_r'.
@@ -2439,10 +2408,10 @@ Proof.
             forwards [HN' | (Hpe & Hee)]: Nth_last_inv HN.
             + forwards Hib: Nth_inbound HN'. exfalso. nat_math.
             + subst ep. simpl. auto. }
-        { (* different location: carry the older write forward *)
+        { (* different variable: carry the older write forward *)
           forwards Hbd: binds_update_neq_inv Hbinds Hnei.
           lets Hin: (indom_of_binds H2).
-          asserts Hb': (binds (D'[t0]) i v). { forwards: read_of_binds H2. subst*. }
+          asserts Hb': (binds (D'[t0]) x v). { forwards: read_of_binds H2. subst*. }
           forwards* (wm & wHN & wHns): IHHplay.
           exists wm. split;
             [ applys* Nth_app_l wHN
@@ -2530,12 +2499,12 @@ Proof.
 Qed.
 
 Lemma conflict_free_last_local_write :
-  forall log D TC G LC CH t i v,
+  forall log D TC G LC CH t x v,
     conflict_free log ->
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
     t \indom D ->
-    binds D[t] i v ->
-    exists log', LibList.filter (fun e => writes_location i e) log = log' & event_write t i v.
+    binds D[t] x v ->
+    exists log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t x v.
 Proof.
   introv Hcf Hplay Hdom Hdelta.
   hint conflict_free_last_inv.
@@ -2549,12 +2518,12 @@ Proof.
     + (* PlayWrite *)
       destruct (classic (t = t0)).
       * subst. rewrite read_update_same in Hdelta.
-        destruct (classic (i = i0)).
+        destruct (classic (x = x0)).
         -- subst.
            forwards ->: binds_update_same_inv Hdelta.
            exists. rew_listx*. cases_if*.
         -- forwards~ Hdelta': binds_update_neq_inv Hdelta.
-           asserts Hbinds: (binds D'[t0] i v).
+           asserts Hbinds: (binds D'[t0] x v).
            {
              forwards : read_of_binds H2.
              subst*.
@@ -2569,14 +2538,14 @@ Proof.
         exists log'.
         rew_listx. cases_if as Hwrites.
         -- simpl in Hwrites. subst. false.
-           (* There is at least one write by t to i0 in log (by Hfilter).
+           (* There is at least one write by t to x0 in log (by Hfilter).
               This write is in the delta of t (by Hdelta), so it has not been committed.
-              The log is conflict free (by Hcf) so the write by t to i0
-              happens before the write by t0 to i0.
+              The log is conflict free (by Hcf) so the write by t to x0
+              happens before the write by t0 to x0.
               But since t <> t0 and the write is uncommitted, the happens before
               relation is a contradiction.
             *)
-           (* The write [event_write t i0 v] is still in [t]'s delta, hence
+           (* The write [event_write t x0 v] is still in [t]'s delta, hence
               uncommitted: [t] performs no commit event after it. So it cannot
               happen-before the final write by [t0 <> t] (a cross-thread hb edge
               would need a commit event of [t]). But conflict-freedom forces such
@@ -2584,19 +2553,19 @@ Proof.
            forwards (m0 & HN0 & Hns0): delta_is_uncommitted_write Hplay Hdom' Hdelta.
            forwards Hlt0: Nth_inbound HN0.
            asserts HN0f:
-             (LibList.Nth m0 (log & event_write t0 i0 v0) (event_write t i0 v)).
+             (LibList.Nth m0 (log & event_write t0 x0 v0) (event_write t x0 v)).
            { applys* Nth_app_l. }
            asserts Hnth:
-             (LibList.Nth (length log) (log & event_write t0 i0 v0) (event_write t0 i0 v0)).
+             (LibList.Nth (length log) (log & event_write t0 x0 v0) (event_write t0 x0 v0)).
            { applys* Nth_app_r'. }
-           asserts Hacc: (accesses_location i0 (event_write t0 i0 v0)). { reflexivity. }
+           asserts Hacc: (accesses_variable x0 (event_write t0 x0 v0)). { reflexivity. }
            forwards Hhb: Hcf HN0f Hnth Hacc Hlt0.
            asserts Hns0f:
              (forall p ep, m0 <= p ->
-                LibList.Nth p (log & event_write t0 i0 v0) ep ->
+                LibList.Nth p (log & event_write t0 x0 v0) ep ->
                 get_thread ep = t -> ~ is_commit_event ep).
            { applys no_commit_event_snoc Hns0. intros _; simpl; auto. }
-           asserts Hem: (get_thread (event_write t i0 v) = t). { reflexivity. }
+           asserts Hem: (get_thread (event_write t x0 v) = t). { reflexivity. }
            forwards Hgt0: hb_preserves_thread Hhb HN0f Hem Hns0f Hnth.
            simpl in Hgt0. congruence.
         -- rew_list*.
@@ -2708,7 +2677,7 @@ Lemma play_event_TC_advance :
     ancestor G'' (TC'[t]) (TC''[t]).
 Proof.
   introv Hpe Hspawn Hinit.
-  destruct E as [t1 t2 | t1 t2 | t0 i v | t0 i v | t0 ll | t0 ll | t0 | t0 | t0];
+  destruct E as [t1 t2 | t1 t2 | t0 x v | t0 x v | t0 ll | t0 ll | t0 | t0 | t0];
     inverts Hpe as Hb Hf Hbd; try apply ancestor_refl.
   - (* spawn t1 t2 *)
     forwards Hnt2: Hspawn (eq_refl : event_spawn t1 t2 = event_spawn t1 t2).
@@ -3238,23 +3207,23 @@ Proof.
 Qed.
 
 (* hb -> ancestry: the bridge between the log's happens-before order and the
-   commit graph. If [m] is the LAST write to [i] in the log, that write is
+   commit graph. If [m] is the LAST write to [x] in the log, that write is
    committed (no longer in [tm]'s delta), and [m] happens-before some event [n],
-   then [vm] is exactly the latest value of [i] visible at [n]'s thread's commit.
+   then [vm] is exactly the latest value of [x] visible at [n]'s thread's commit.
    (Being the last write pins the committed value to [vm]; the [hb] edge forces
    [n]'s thread to actually see it — no stale read.) This is the core soundness
    lemma; proved separately via [hb -> commit-pointer ancestry]. *)
 
-(* Every commit that writes [i = v] in a played graph corresponds to a log write
-   event of [i = v]: commits are created only by flushing a thread's delta, whose
-   [i = v] binding comes (via [delta_is_uncommitted_write]) from a write event. *)
+(* Every commit that writes [x = v] in a played graph corresponds to a log write
+   event of [x = v]: commits are created only by flushing a thread's delta, whose
+   [x = v] binding comes (via [delta_is_uncommitted_write]) from a write event. *)
 Lemma graph_writes_log_write :
-  forall log D TC G LC CH cx i v,
+  forall log D TC G LC CH cx x v,
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
-    graph_writes G cx i v ->
-    exists tw m, LibList.Nth m log (event_write tw i v).
+    graph_writes G cx x v ->
+    exists tw m, LibList.Nth m log (event_write tw x v).
 Proof.
-  introv Hplay. gen cx i v. inductions Hplay; introv Hgw.
+  introv Hplay. gen cx x v. inductions Hplay; introv Hgw.
   - destruct Hgw as (dd & Hgb & Hbd). simpls. exfalso. applys binds_empty_false Hgb; typeclass.
   - rename H into Hpe.
     inverts Hpe.
@@ -3349,10 +3318,10 @@ Qed.
 (* A play step preserves every pre-existing committed write (the new commit is
    fresh, so distinct from any existing writer). *)
 Lemma play_event_graph_writes_mono :
-  forall E D' TC' G' LC' D'' TC'' G'' LC'' cs i v,
+  forall E D' TC' G' LC' D'' TC'' G'' LC'' cs x v,
     play_event E (D', TC', G', LC') (D'', TC'', G'', LC'') ->
-    graph_writes G' cs i v ->
-    graph_writes G'' cs i v.
+    graph_writes G' cs x v ->
+    graph_writes G'' cs x v.
 Proof.
   introv Hpe Hgw. forwards Hin: graph_writes_to_indom Hgw.
   inverts Hpe; try assumption;
@@ -3367,27 +3336,27 @@ Proof.
     match goal with Hf : commit_fresh _ _ |- _ => applys commit_fresh_not_indom Hf Hin end.
 Qed.
 
-(* The last write of [i] is either still in [tm]'s delta (with value [vm]), or it
-   has been flushed into a commit [cs] holding [i = vm] that is an ancestor of
+(* The last write of [x] is either still in [tm]'s delta (with value [vm]), or it
+   has been flushed into a commit [cs] holding [x = vm] that is an ancestor of
    [tm]'s current commit. By induction on [play_log]: the write enters [tm]'s
    delta, stays there until a commit event of [tm] flushes it into a new commit
-   (being the last i-write, the value is still [vm] at flush time). *)
+   (being the last x-write, the value is still [vm] at flush time). *)
 Lemma last_write_committed_or_delta :
-  forall log s0 D TC G LC CH m tm i vm,
+  forall log s0 D TC G LC CH m tm x vm,
     wf_log log ->
     play_log log s0 (D, TC, G, LC) CH ->
-    LibList.Nth m log (event_write tm i vm) ->
-    (forall k tk vk, LibList.Nth k log (event_write tk i vk) -> k <= m) ->
-    ((i \indom (D[tm]) /\ (D[tm])[i] = vm) /\
+    LibList.Nth m log (event_write tm x vm) ->
+    (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
+    ((x \indom (D[tm]) /\ (D[tm])[x] = vm) /\
        (forall g eg, m <= g -> LibList.Nth g log eg -> get_thread eg = tm ->
                      ~ is_commit_event eg)) \/
     (exists f ef cs,
        m <= f /\ LibList.Nth f log ef /\ get_thread ef = tm /\ is_commit_event ef /\
-       LibList.Nth f CH cs /\ graph_writes G cs i vm /\
+       LibList.Nth f CH cs /\ graph_writes G cs x vm /\
        (forall g eg, m <= g -> g < f -> LibList.Nth g log eg -> get_thread eg = tm ->
                      ~ is_commit_event eg)).
 Proof.
-  introv Hwf Hplay. gen m tm i vm.
+  introv Hwf Hplay. gen m tm x vm.
   inductions Hplay; introv HNlog Hlast.
   - inverts HNlog.
   - forwards Hwf0: wf_log_last_inv Hwf.
@@ -3395,7 +3364,7 @@ Proof.
     forwards [HN0 | (HmN & HemE)]: Nth_last_inv HNlog.
     + (* write in the prefix *)
       forwards Hib: Nth_inbound HN0.
-      asserts Hlast0: (forall k tk vk, LibList.Nth k log (event_write tk i vk) -> k <= m).
+      asserts Hlast0: (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m).
       { introv HNk. applys Hlast. applys Nth_app_l HNk. }
       forwards IHdisj:
         (>> IHHplay Hwf0 (eq_refl : (D', TC', G', LC') = (D', TC', G', LC')) HN0 Hlast0).
@@ -3414,7 +3383,7 @@ Proof.
           forwards [HNg0 | (HgN & _)]: Nth_last_inv HNg.
           + applys Hncf Hg Hgflt HNg0 Hgg.
           + forwards Hfin: Nth_inbound HNf. nat_math. }
-      (* LEFT: [i] still in [tm]'s delta in the prefix; maintain the no-commit clause *)
+      (* LEFT: [x] still in [tm]'s delta in the prefix; maintain the no-commit clause *)
       destruct E as [s1 s2 | jt1 jt2 | rt rj rw | wt wj ww | lt ll | ut ul | stt | ett | t0];
         inverts H.
       * (* spawn s1 s2: flush of the spawner s1 *)
@@ -3456,9 +3425,9 @@ Proof.
       * (* write wt wj ww *)
         destruct (classic (wt = tm)) as [Hwt | Hwt].
         -- subst wt.
-           destruct (classic (wj = i)) as [Hwj | Hwj].
+           destruct (classic (wj = x)) as [Hwj | Hwj].
            ++ subst wj. exfalso.
-              asserts HNE: (LibList.Nth (length log) (log & event_write tm i ww) (event_write tm i ww)).
+              asserts HNE: (LibList.Nth (length log) (log & event_write tm x ww) (event_write tm x ww)).
               { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
               forwards Hle: Hlast HNE. nat_math.
            ++ left; split.
@@ -3539,7 +3508,7 @@ Proof.
            ++ introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
               { applys Hnc Hg HNg0 Hgg. } { subst eg; simpls; congruence. }
       * (* init t0: by wf_log the init event must be first, so [log = nil],
-           contradicting the prefix write of [i] *)
+           contradicting the prefix write of [x] *)
         destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & _ & Hinit & _).
         asserts Heq: ((log & event_init t0) = log ++ event_init t0 :: nil).
         { rew_list~. }
@@ -3616,8 +3585,8 @@ Definition play_graph_wf (TC : commits) (G : graph) (LC : lcommits) : Prop :=
 (* Conversion-tolerant membership inversion for an updated pointer map (the
    [Inhab] instance in [indom_update_eq] makes a bare [rewrite] miss the subterm). *)
 Lemma indom_update_cases :
-  forall (M : map nat commit) i j v,
-    j \indom (M[i := v]) -> j = i \/ j \indom M.
+  forall (M : map nat commit) x j v,
+    j \indom (M[x := v]) -> j = x \/ j \indom M.
 Proof. introv H. applys indom_update_inv H; typeclass. Qed.
 
 Lemma play_log_graph_wf :
@@ -3768,38 +3737,38 @@ Proof.
   Unshelve. all: typeclass.
 Qed.
 
-(* Every graph i-writer [cx] is the commit produced by some flush at position [f']
+(* Every graph x-writer [cx] is the commit produced by some flush at position [f']
    (so [cx = CH[f']], a commit event of its thread [tw']), and the flushed value
-   came from an i-write at some earlier position [kw'] that was still uncommitted
+   came from an x-write at some earlier position [kw'] that was still uncommitted
    at [f'] -- no commit event of [tw'] occurs in [[kw', f')]. This is the inverse
    of [last_write_committed_or_delta], obtained by carrying the [delta_is_uncommitted_write]
    witness through the same case analysis as [graph_writes_log_write] while keeping
    the flush position. *)
 Lemma graph_writes_flush :
-  forall log D TC G LC CH cx i v,
+  forall log D TC G LC CH cx x v,
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
-    graph_writes G cx i v ->
+    graph_writes G cx x v ->
     exists f' ef' tw' kw',
       LibList.Nth f' CH cx /\ LibList.Nth f' log ef' /\ get_thread ef' = tw' /\
-      is_commit_event ef' /\ kw' < f' /\ LibList.Nth kw' log (event_write tw' i v) /\
+      is_commit_event ef' /\ kw' < f' /\ LibList.Nth kw' log (event_write tw' x v) /\
       (forall p ep, kw' <= p -> p < f' -> LibList.Nth p log ep -> get_thread ep = tw' ->
                     ~ is_commit_event ep).
 Proof.
-  introv Hplay. gen cx i v. inductions Hplay; introv Hgw.
+  introv Hplay. gen cx x v. inductions Hplay; introv Hgw.
   - destruct Hgw as (dd & Hgb & Hbd). simpls. exfalso. applys binds_empty_false Hgb; typeclass.
   - rename H into Hpe.
     (* common tail: lift a prefix witness across the appended event [Ex]/commit [chx] *)
     assert (Hlift : forall (chx : commit) (Ex : event),
               (exists f' ef' tw' kw',
                  LibList.Nth f' CH cx /\ LibList.Nth f' log ef' /\ get_thread ef' = tw' /\
-                 is_commit_event ef' /\ kw' < f' /\ LibList.Nth kw' log (event_write tw' i v) /\
+                 is_commit_event ef' /\ kw' < f' /\ LibList.Nth kw' log (event_write tw' x v) /\
                  (forall p ep, kw' <= p -> p < f' -> LibList.Nth p log ep -> get_thread ep = tw' ->
                                ~ is_commit_event ep)) ->
               exists f' ef' tw' kw',
                 LibList.Nth f' (CH & chx) cx /\
                 LibList.Nth f' (log & Ex) ef' /\ get_thread ef' = tw' /\
                 is_commit_event ef' /\ kw' < f' /\
-                LibList.Nth kw' (log & Ex) (event_write tw' i v) /\
+                LibList.Nth kw' (log & Ex) (event_write tw' x v) /\
                 (forall p ep, kw' <= p -> p < f' -> LibList.Nth p (log & Ex) ep ->
                               get_thread ep = tw' -> ~ is_commit_event ep)).
     { clear Hgw. introv (f' & ef' & tw' & kw' & HNfCH0 & HNflog0 & Hgt0 & Hcom0 & Hkwlt0 & HNkw0 & Hcl0).
@@ -4057,31 +4026,31 @@ Proof.
       * forwards Hib: Nth_inbound HNcha. rew_list in Hib. nat_math.
 Qed.
 
-(* Maximality: the commit [cs = CH[f]] of [tm]'s flush [f] of the LAST i-write is
-   the maximal i-writer in the graph -- no strict graph-descendant of [cs] writes
-   [i].  Suppose [c' <> cs] is an i-writer below [cs].  By [graph_writes_flush] it
-   is a flush at [f'] of some thread [tw'] fed by an i-write at [kw' <= m] with no
+(* Maximality: the commit [cs = CH[f]] of [tm]'s flush [f] of the LAST x-write is
+   the maximal x-writer in the graph -- no strict graph-descendant of [cs] writes
+   [x].  Suppose [c' <> cs] is an x-writer below [cs].  By [graph_writes_flush] it
+   is a flush at [f'] of some thread [tw'] fed by an x-write at [kw' <= m] with no
    [tw']-commit in [[kw', f')].  If [tw' = tm]: [c'] is a proper descendant of [cs]
    so (by [ancestor_creation_order]) [f < f'], but [f] is itself a [tm]-commit in
-   [[kw', f')] -- contradiction.  If [tw' <> tm]: [conflict_free] orders the i-write
+   [[kw', f')] -- contradiction.  If [tw' <> tm]: [conflict_free] orders the x-write
    at [kw' < m] before the one at [m] ([hb kw' m]); being cross-thread,
    [hb_cross_thread_flush] yields a [tw']-commit [f''] with [kw' <= f'' < m <= f < f'],
    again inside [[kw', f')] -- contradiction. *)
 Lemma last_write_maximal :
-  forall log D TC G LC CH m tm i vm f ef cs,
+  forall log D TC G LC CH m tm x vm f ef cs,
     conflict_free log ->
     wf_log log ->
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
-    LibList.Nth m log (event_write tm i vm) ->
-    (forall k tk vk, LibList.Nth k log (event_write tk i vk) -> k <= m) ->
+    LibList.Nth m log (event_write tm x vm) ->
+    (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
     LibList.Nth f log ef -> get_thread ef = tm -> is_commit_event ef -> m <= f ->
     LibList.Nth f CH cs ->
     (forall g eg, m <= g -> g < f -> LibList.Nth g log eg -> get_thread eg = tm ->
                   ~ is_commit_event eg) ->
-    graph_writes G cs i vm ->
-    forall c' v', graph_writes G c' i v' -> ancestor G cs c' -> c' = cs.
+    graph_writes G cs x vm ->
+    forall c' v', graph_writes G c' x v' -> ancestor G cs c' -> c' = cs.
 Proof.
-  intros log D TC G LC CH m tm i vm f ef cs.
+  intros log D TC G LC CH m tm x vm f ef cs.
   intros Hcf Hwf Hplay HNm Hlast HNf Hgf Hcfe Hmf HNchf Hncf Hcsw c' v' Hc'w Hanc.
   destruct (classic (c' = cs)) as [Heq | Hne]; [ exact Heq | exfalso ].
   forwards (f' & ef' & tw' & kw' & HNfCH & HNflog & Hgtf' & Hcef' & Hkwlt & HNkw & Hncl):
@@ -4099,10 +4068,10 @@ Proof.
     { destruct (classic (kw' = m)) as [He | Hlt].
       - subst kw'. forwards Heqw: Nth_functional HNkw HNm. inverts Heqw. false.
       - nat_math. }
-    asserts Hacc: (accesses_location i (event_write tm i vm)). { simpl. reflexivity. }
+    asserts Hacc: (accesses_variable x (event_write tm x vm)). { simpl. reflexivity. }
     forwards Hhb: (>> Hcf HNkw HNm Hacc Hkwltm).
-    asserts Hgtw: (get_thread (event_write tw' i v') = tw'). { reflexivity. }
-    asserts Hgtmne: (get_thread (event_write tm i vm) <> tw'). { simpl. auto. }
+    asserts Hgtw: (get_thread (event_write tw' x v') = tw'). { reflexivity. }
+    asserts Hgtmne: (get_thread (event_write tm x vm) <> tw'). { simpl. auto. }
     forwards (f'' & ef'' & Hkwf'' & HNf'' & Hgf'' & Hcef'' & Hhbf''):
       (>> hb_cross_thread_flush Hhb HNkw Hgtw HNm Hgtmne).
     forwards Hf''lt: hb_lt Hhbf''.
@@ -4111,28 +4080,28 @@ Proof.
     apply Hni. exact Hcef''.
 Qed.
 
-(* Existence + maximality: the last write of [i] is visible as the latest value at
-   [n]'s thread's commit. [i \notindom D[tm]] gives the committed flush [cs = CH[f]]
+(* Existence + maximality: the last write of [x] is visible as the latest value at
+   [n]'s thread's commit. [x \notindom D[tm]] gives the committed flush [cs = CH[f]]
    (via [last_write_committed_or_delta]); its ancestry to [TC[get_thread en]] uses
    [hb_cross_thread_flush] for the cross-thread case; its maximality is
    [last_write_maximal]. *)
 Lemma last_write_visible_commit :
-  forall log D TC G LC CH m n tm i vm en,
+  forall log D TC G LC CH m n tm x vm en,
     wf_log log ->
     conflict_free log ->
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
-    LibList.Nth m log (event_write tm i vm) ->
-    (forall k tk vk, LibList.Nth k log (event_write tk i vk) -> k <= m) ->
-    i \notindom (D[tm]) ->
+    LibList.Nth m log (event_write tm x vm) ->
+    (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
+    x \notindom (D[tm]) ->
     LibList.Nth n log en ->
     hb log m n ->
-    is_latest_value G (TC[get_thread en]) i vm.
+    is_latest_value G (TC[get_thread en]) x vm.
 Proof.
   introv Hwf Hcf Hplay HNm Hlast Hndom HNn Hhb.
   forwards [((Hidom & _) & _) |
             (f & ef & cs & Hmf & HNf & Hgf & Hcfe & HNchf & Hcsw & Hncf)]:
     (>> last_write_committed_or_delta Hwf Hplay HNm Hlast).
-  - (* still in the delta: contradicts [i \notindom D[tm]] *)
+  - (* still in the delta: contradicts [x \notindom D[tm]] *)
     false. applys Hndom Hidom.
   - (* committed witness [cs = CH[f]] *)
     exists cs. splits.
@@ -4144,7 +4113,7 @@ Proof.
       * (* cross-thread: place the flush on the hb chain to [n] *)
         forwards (f' & ef' & Hmf' & HNf' & Hgf' & Hcf' & Hhbf'):
           (>> hb_cross_thread_flush Hhb HNm
-              (eq_refl : get_thread (event_write tm i vm) = tm) HNn Hgt).
+              (eq_refl : get_thread (event_write tm x vm) = tm) HNn Hgt).
         asserts Hff': (f <= f').
         { destruct (classic (f <= f')) as [Hle | Hgt2]; auto. exfalso.
           asserts Hlt: (f' < f). { nat_math. }
@@ -4165,51 +4134,51 @@ Proof.
         applys ancestor_trans Hanc1 Hanc2.
     + (* maximality *)
       introv Hc'w Hanc1 Hanc2.
-      assert (Hmax: forall c'' v'', graph_writes G c'' i v'' -> ancestor G cs c'' -> c'' = cs).
+      assert (Hmax: forall c'' v'', graph_writes G c'' x v'' -> ancestor G cs c'' -> c'' = cs).
       { applys (>> last_write_maximal Hcf Hwf Hplay HNm Hlast HNf Hgf Hcfe Hmf
                    HNchf Hncf Hcsw). }
       applys Hmax Hc'w Hanc1.
 Qed.
 
 Lemma hb_last_write_visible :
-  forall log D TC G LC CH m n tm i vm en,
+  forall log D TC G LC CH m n tm x vm en,
     wf_log log ->
     conflict_free log ->
     conflict_free_graph G ->
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
-    LibList.Nth m log (event_write tm i vm) ->
-    (forall k tk vk, LibList.Nth k log (event_write tk i vk) -> k <= m) ->
-    i \notindom (D[tm]) ->
+    LibList.Nth m log (event_write tm x vm) ->
+    (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
+    x \notindom (D[tm]) ->
     LibList.Nth n log en ->
     hb log m n ->
-    is_latest_value G (TC[get_thread en]) i vm.
+    is_latest_value G (TC[get_thread en]) x vm.
 Proof.
   introv Hwf Hcf Hcfg Hplay HNm Hlast Hndom HNn Hhb.
   applys (>> last_write_visible_commit Hwf Hcf Hplay HNm Hlast Hndom HNn Hhb).
 Qed.
 
-(* [is_latest_value] guarantees a committed i-write exists, hence the i-write
+(* [is_latest_value] guarantees a committed x-write exists, hence the x-write
    filter of the log is non-empty. *)
 Lemma is_latest_value_log_write :
-  forall log D TC G LC CH c i v,
+  forall log D TC G LC CH c x v,
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
-    is_latest_value G c i v ->
+    is_latest_value G c x v ->
     exists lw tw vw,
-      LibList.filter (fun e => writes_location i e) log = lw & event_write tw i vw.
+      LibList.filter (fun e => writes_variable x e) log = lw & event_write tw x vw.
 Proof.
   introv Hplay Hval.
   destruct Hval as (c' & Hgw & _).
   forwards (tw & m & HN): graph_writes_log_write Hplay Hgw.
   asserts Hmemf:
-    (mem (event_write tw i v) (LibList.filter (fun e => writes_location i e) log)).
+    (mem (event_write tw x v) (LibList.filter (fun e => writes_variable x e) log)).
   { applys mem_filter; [ applys Nth_mem HN | reflexivity ]. }
-  destruct (last_case (LibList.filter (fun e => writes_location i e) log))
-    as [Hnil | (x & lw & Hsnoc)].
+  destruct (last_case (LibList.filter (fun e => writes_variable x e) log))
+    as [Hnil | (e & lw & Hsnoc)].
   - rewrite Hnil in Hmemf. rewrite mem_nil_eq in Hmemf. destruct Hmemf.
-  - asserts Hmx: (mem x (LibList.filter (fun e => writes_location i e) log)).
+  - asserts Hmx: (mem e (LibList.filter (fun e => writes_variable x e) log)).
     { rewrite Hsnoc. rewrite mem_last_eq. right. reflexivity. }
     forwards (Hmemx & Hwx): mem_filter_inv Hmx.
-    destruct x as [s1 s2 | j1 j2 | rt ri rv | tt jj ww | lt ll | ut ul | stt | ett | t0];
+    destruct e as [s1 s2 | j1 j2 | rt ri rv | tt jj ww | lt ll | ut ul | stt | ett | t0];
       simpls; tryfalse.
     subst jj. exists lw tt ww. exact Hsnoc.
 Qed.
@@ -4231,12 +4200,12 @@ Qed.
 
 (* A thread that performs a write event is in the delta map. *)
 Lemma write_thread_in_delta :
-  forall log s0 D TC G LC CH m tm i vm,
+  forall log s0 D TC G LC CH m tm x vm,
     play_log log s0 (D, TC, G, LC) CH ->
-    LibList.Nth m log (event_write tm i vm) ->
+    LibList.Nth m log (event_write tm x vm) ->
     tm \indom D.
 Proof.
-  introv Hplay. gen m tm i vm. inductions Hplay; introv HNlog.
+  introv Hplay. gen m tm x vm. inductions Hplay; introv HNlog.
   - inverts HNlog.
   - forwards [HN0 | (HmN & HemE)]: Nth_last_inv HNlog.
     + forwards Hin: (>> IHHplay (eq_refl : (D', TC', G', LC') = (D', TC', G', LC')) HN0).
@@ -4244,21 +4213,21 @@ Proof.
     + subst E. inverts H. apply indom_update_same; typeclass.
 Qed.
 
-(* The last writer of [i] has flushed it: its write happens-before an event of a
+(* The last writer of [x] has flushed it: its write happens-before an event of a
    different thread, so it must have committed (cf. [hb_preserves_thread]). *)
 Lemma last_writer_not_in_delta :
-  forall log D TC G LC CH m tm i vm n en,
+  forall log D TC G LC CH m tm x vm n en,
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
-    LibList.Nth m log (event_write tm i vm) ->
-    (forall k tk vk, LibList.Nth k log (event_write tk i vk) -> k <= m) ->
+    LibList.Nth m log (event_write tm x vm) ->
+    (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
     LibList.Nth n log en ->
     get_thread en <> tm ->
     hb log m n ->
-    i \notindom (D[tm]).
+    x \notindom (D[tm]).
 Proof.
   introv Hplay HNm Hlast HNn Hgne Hhb. intro Hidom.
   forwards HtmD: write_thread_in_delta Hplay HNm.
-  asserts Hbv: (binds (D[tm]) i (D[tm][i])).
+  asserts Hbv: (binds (D[tm]) x (D[tm][x])).
   { applys binds_of_indom_read Hidom; (reflexivity || typeclass). }
   forwards Hdu: (>> delta_is_uncommitted_write Hplay HtmD Hbv).
   destruct Hdu as (m' & HNm' & Hnc).
@@ -4272,46 +4241,46 @@ Proof.
   apply Hgne. exact Hgteq.
 Qed.
 
-(* Global counterpart of [conflict_free_last_local_write]: when [t] reads [i]
+(* Global counterpart of [conflict_free_last_local_write]: when [t] reads [x]
    globally (it is not in [t]'s delta), the value [t] sees ([is_latest_value]) is
-   the last write to [i] in the log. The read of [i=v] by [t] is included in the
-   (tightened) conflict-free log, so it happens-after every i-write; combined with
+   the last write to [x] in the log. The read of [x=v] by [t] is included in the
+   (tightened) conflict-free log, so it happens-after every x-write; combined with
    [hb_last_write_visible] this forces the last write's value to equal [v]. *)
 Lemma conflict_free_last_global_write :
-  forall log D TC G LC CH t i v c,
-    conflict_free (log & event_read t i v) ->
-    wf_log (log & event_read t i v) ->
+  forall log D TC G LC CH t x v c,
+    conflict_free (log & event_read t x v) ->
+    wf_log (log & event_read t x v) ->
     conflict_free_graph G ->
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
-    i \notindom (D[t]) ->
+    x \notindom (D[t]) ->
     t \indom TC ->
     TC[t] = c ->
-    is_latest_value G c i v ->
-    exists t' log', LibList.filter (fun e => writes_location i e) log = log' & event_write t' i v.
+    is_latest_value G c x v ->
+    exists t' log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v.
 Proof.
   introv Hcf Hwf Hcfg Hplay Hndom Hdom HTC Hval.
-  (* [is_latest_value] ensures there is an i-write; take the last one. *)
+  (* [is_latest_value] ensures there is an x-write; take the last one. *)
   forwards (lw & tL & vL & Hfilter): is_latest_value_log_write Hplay Hval.
   forwards (L & HNL & Hlast): last_write_position Hfilter.
   forwards HLlt: Nth_inbound HNL.
   (* Play the read as a no-op, and place the write and the read in [log & read]. *)
-  asserts Hplayf: (exists CHf, play_log (log & event_read t i v) (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CHf).
+  asserts Hplayf: (exists CHf, play_log (log & event_read t x v) (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CHf).
   { eexists. applys PlaySnoc Hplay. apply PlayRead. }
   destruct Hplayf as (CHf & Hplayf).
-  asserts HNLf: (LibList.Nth L (log & event_read t i v) (event_write tL i vL)).
+  asserts HNLf: (LibList.Nth L (log & event_read t x v) (event_write tL x vL)).
   { applys* Nth_app_l. }
-  asserts HNread: (LibList.Nth (length log) (log & event_read t i v) (event_read t i v)).
+  asserts HNread: (LibList.Nth (length log) (log & event_read t x v) (event_read t x v)).
   { applys* Nth_app_r'. }
   asserts Hlastf:
-    (forall k tk vk, LibList.Nth k (log & event_read t i v) (event_write tk i vk) -> k <= L).
+    (forall k tk vk, LibList.Nth k (log & event_read t x v) (event_write tk x vk) -> k <= L).
   { introv HNk. forwards [HN' | (Hpe & Hee)]: Nth_last_inv HNk.
     - applys Hlast HN'.
     - inverts Hee. }
   (* conflict-freedom: the last write happens-before the read. *)
-  asserts Hacc: (accesses_location i (event_read t i v)). { reflexivity. }
+  asserts Hacc: (accesses_variable x (event_read t x v)). { reflexivity. }
   forwards Hhb: Hcf HNLf HNread Hacc HLlt.
-  (* the last writer has flushed [i]. *)
-  asserts HndomL: (i \notindom (D[tL])).
+  (* the last writer has flushed [x]. *)
+  asserts HndomL: (x \notindom (D[tL])).
   { destruct (classic (tL = t)) as [-> | Hne].
     - exact Hndom.
     - applys last_writer_not_in_delta Hplayf HNLf Hlastf HNread Hhb.
@@ -4330,25 +4299,25 @@ Qed.
    from [hb_cross_thread_flush] lands at or after [fa] and reaches [kb], and
    [CH_thread_monotone] carries [ha] down to it and [kb] up to [hbb]. *)
 Lemma write_hb_flush_ancestor :
-  forall log D TC G LC CH ta tb i va vb ka fa ea ha kb fb eb hbb,
+  forall log D TC G LC CH ta tb x va vb ka fa ea ha kb fb eb hbb,
     wf_log log ->
     play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
-    (LibList.Nth ka log (event_write ta i va) /\ LibList.Nth fa CH ha /\
+    (LibList.Nth ka log (event_write ta x va) /\ LibList.Nth fa CH ha /\
        LibList.Nth fa log ea /\ get_thread ea = ta /\ is_commit_event ea /\ ka < fa /\
        (forall p ep, ka <= p -> p < fa -> LibList.Nth p log ep -> get_thread ep = ta ->
                      ~ is_commit_event ep)) ->
-    (LibList.Nth kb log (event_write tb i vb) /\ LibList.Nth fb CH hbb /\
+    (LibList.Nth kb log (event_write tb x vb) /\ LibList.Nth fb CH hbb /\
        LibList.Nth fb log eb /\ get_thread eb = tb /\ is_commit_event eb /\ kb < fb) ->
     ta <> tb ->
     hb log ka kb ->
     ancestor G ha hbb.
 Proof.
-  intros log D TC G LC CH ta tb i va vb ka fa ea ha kb fb eb hbb.
+  intros log D TC G LC CH ta tb x va vb ka fa ea ha kb fb eb hbb.
   intros Hwf Hplay HA HB Htne Hhb.
   destruct HA as (HNka & HNfaCH & HNfalog & Hgta & Hcea & Hkalt & Hncla).
   destruct HB as (HNkb & HNfbCH & HNfblog & Hgtb & Hceb & Hkblt).
-  asserts Hgtwa: (get_thread (event_write ta i va) = ta). reflexivity.
-  asserts Hnet: (get_thread (event_write tb i vb) <> ta). { simpl. auto. }
+  asserts Hgtwa: (get_thread (event_write ta x va) = ta). reflexivity.
+  asserts Hnet: (get_thread (event_write tb x vb) <> ta). { simpl. auto. }
   forwards (f' & ef' & Hkaf' & HNf'log & Hgtf' & Hcef' & Hhbf'):
     hb_cross_thread_flush Hhb HNka Hgtwa HNkb Hnet.
   asserts Hfaf': (fa <= f').
@@ -4361,7 +4330,7 @@ Proof.
   forwards Hkblen: Nth_inbound HNkb.
   asserts HkbltCH: (kb < length CH). nat_math.
   forwards (cb & HNkbCH): Nth_inbound_inv HkbltCH.
-  asserts Hgtwb: (get_thread (event_write tb i vb) = tb). reflexivity.
+  asserts Hgtwb: (get_thread (event_write tb x vb) = tb). reflexivity.
   asserts Hkbfb: (kb <= fb). nat_math.
   forwards Hanc1: (>> CH_thread_monotone Hwf Hplay HNfalog Hgta HNf'log Hgtf' Hfaf' HNfaCH HNf'CH).
   forwards Hanc2: (>> hb_pointer_ancestor Hwf Hplay Hhbf' HNf'CH HNkbCH).
@@ -4370,7 +4339,7 @@ Proof.
 Qed.
 
 (* A data-race-free log replays to a conflict-free commit graph.
-   Two incomparable i-writers in the graph would each have a feeding log write
+   Two incomparable x-writers in the graph would each have a feeding log write
    ([graph_writes_flush]); [conflict_free] orders those writes by [hb], and
    [write_hb_flush_ancestor] then forces the two writer commits to be
    ancestor-comparable -- contradiction. *)
@@ -4384,7 +4353,7 @@ Proof.
   introv Hwf Hcf Hplay.
   forwards Hpgwf: play_log_graph_wf Hplay.
   intros h1 h2 Hd1 Hd2.
-  unfold conflict_free_merge. rew_set. intros i Hmem1 Hmem2.
+  unfold conflict_free_merge. rew_set. intros x Hmem1 Hmem2.
   rew_set in Hmem1. destruct Hmem1 as [Hde | Hcs1].
   { applys indom_empty_inv Hde. }
   destruct G as (C & P). destruct Hpgwf as (Hedge & _ & _).
@@ -4395,11 +4364,11 @@ Proof.
   { forwards [Hin | Heq]: ancestor_src_indom Hedge Hanca1; [ exact Hin | subst ha; exact Hd1 ]. }
   asserts Hdomhb: (graph_indom (C, P) hbb).
   { forwards [Hin | Heq]: ancestor_src_indom Hedge Hancb2; [ exact Hin | subst hbb; exact Hd2 ]. }
-  asserts Hgwa: (graph_writes (C, P) ha i (C[ha][i])).
+  asserts Hgwa: (graph_writes (C, P) ha x (C[ha][x])).
   { exists (C[ha]). split.
     - unfold graph_binds. applys binds_of_indom_read Hdomha; (reflexivity || typeclass).
     - applys binds_of_indom_read Hidoma; (reflexivity || typeclass). }
-  asserts Hgwb: (graph_writes (C, P) hbb i (C[hbb][i])).
+  asserts Hgwb: (graph_writes (C, P) hbb x (C[hbb][x])).
   { exists (C[hbb]). split.
     - unfold graph_binds. applys binds_of_indom_read Hdomhb; (reflexivity || typeclass).
     - applys binds_of_indom_read Hidomb; (reflexivity || typeclass). }
@@ -4418,7 +4387,7 @@ Proof.
       { intros Heq. subst kb. forwards Heqw: Nth_functional HNka HNkb.
         applys Htne. congruence. }
       destruct (classic (ka < kb)) as [Hlt | Hge].
-      + asserts Hacc: (accesses_location i (event_write tb i (C[hbb][i]))). reflexivity.
+      + asserts Hacc: (accesses_variable x (event_write tb x (C[hbb][x]))). reflexivity.
         forwards Hhbab: (>> Hcf HNka HNkb Hacc Hlt).
         left.
         applys (>> write_hb_flush_ancestor Hwf Hplay
@@ -4426,7 +4395,7 @@ Proof.
           (conj HNkb (conj HNfbCH (conj HNfblog (conj Hgtb (conj Hceb Hkblt)))))
           Htne Hhbab).
       + asserts Hltba: (kb < ka). nat_math.
-        asserts Hacc: (accesses_location i (event_write ta i (C[ha][i]))). reflexivity.
+        asserts Hacc: (accesses_variable x (event_write ta x (C[ha][x]))). reflexivity.
         forwards Hhbba: (>> Hcf HNkb HNka Hacc Hltba).
         right. asserts Htne2: (tb <> ta). { intros HH. apply Htne. symmetry. exact HH. }
         applys (>> write_hb_flush_ancestor Hwf Hplay
@@ -4438,9 +4407,9 @@ Proof.
   - applys Hnancb1. applys ancestor_trans Hc Hanca1.
 Qed.
 
-(* A graph commit [c] that writes a location [j] still uncommitted by a thread [t]
+(* A graph commit [c] that writes a variable [j] still uncommitted by a thread [t]
    must be an ancestor of [t]'s commit [TC[t]].  Otherwise [t]'s pending write to
-   [j] and [c]'s committed write to [j] would be two writes to the same location
+   [j] and [c]'s committed write to [j] would be two writes to the same variable
    that are not happens-before related -- a data race, which [conflict_free]
    forbids.  (Structurally this mirrors [write_hb_flush_ancestor], but the [t]
    side of the race is a pending delta write rather than a flushed one.) *)
@@ -4477,7 +4446,7 @@ Proof.
     destruct (classic (kt < kc)) as [Hlt | Hge].
     + (* [kt < kc]: the cross-thread [hb] forces a [t]-commit at or after [kt]. *)
       exfalso.
-      asserts Hacc: (accesses_location j (event_write tc j vc)). reflexivity.
+      asserts Hacc: (accesses_variable j (event_write tc j vc)). reflexivity.
       forwards Hhb: (>> Hcf HNkt HNkc Hacc Hlt).
       asserts Hgtcne: (get_thread (event_write tc j vc) <> t). { simpl. exact Htne. }
       forwards (f'' & ef'' & Hktf'' & HNf'' & Hgf'' & Hcef'' & Hhbf''):
@@ -4485,7 +4454,7 @@ Proof.
       applys Hns Hktf'' HNf'' Hgf'' Hcef''.
     + (* [kc < kt]: [tc]'s flush is below [TC[t]], so is its earlier commit [c]. *)
       asserts Hltba: (kc < kt). nat_math.
-      asserts Hacc: (accesses_location j (event_write t j vt)). reflexivity.
+      asserts Hacc: (accesses_variable j (event_write t j vt)). reflexivity.
       forwards Hhb: (>> Hcf HNkc HNkt Hacc Hltba).
       asserts Hgtc2: (get_thread (event_write tc j vc) = tc). reflexivity.
       asserts Hgtne: (get_thread (event_write t j vt) <> tc).

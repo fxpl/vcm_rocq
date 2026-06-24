@@ -3,7 +3,7 @@ From Vcm Require Import Common.
 Definition thread := (thread_state * thread_exp)%type.
 
 Definition threads := (map tid thread).
-Definition heap := map loc val.
+Definition heap := map var val.
 Definition locks := map lid lock_state.
 Definition cfg := (threads * heap * locks)%type.
 
@@ -14,15 +14,15 @@ Inductive step : cfg -> cfg -> Prop :=
 | StepEnd : forall (T : threads) H L t r,
     binds T t (state_running, te_ret r) ->
     step (T, H, L) (T[t := (state_terminated, te_ret r)], H, L)
-| StepRead : forall (T : threads) H L t e K i v,
+| StepRead : forall (T : threads) H L t e K x v,
     binds T t (state_running, te_exp e) ->
-    step_ul e K (eff_read i) ->
-    binds H i v ->
+    step_ul e K (eff_read x) ->
+    binds H x v ->
     step (T, H, L) (T[t := (state_running, te_exp (K (ret_val v)))], H, L)
-| StepWrite : forall (T : threads) (H : heap) L t e K i v,
+| StepWrite : forall (T : threads) (H : heap) L t e K x v,
     binds T t (state_running, te_exp e) ->
-    step_ul e K (eff_write i v) ->
-    step (T, H, L) (T[t := (state_running, te_exp (K void))], H[i := v], L)
+    step_ul e K (eff_write x v) ->
+    step (T, H, L) (T[t := (state_running, te_exp (K void))], H[x := v], L)
 | StepSpawn : forall (T : threads) H L (t t' : tid) e K e',
     binds T t (state_running, te_exp e) ->
     step_ul e K (eff_spawn e') ->

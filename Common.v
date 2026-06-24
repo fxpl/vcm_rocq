@@ -35,8 +35,8 @@ Parameter t_root : tid.
 (* lock id *)
 Definition lid := nat.
 
-(* location *)
-Definition loc := nat.
+(* variable *)
+Definition var := nat.
 
 Inductive ret : Type :=
 | ret_val (v : val)
@@ -52,8 +52,8 @@ Coercion ret_tid : tid >-> ret.
 Inductive eff :=
 | eff_spawn (e : exp)
 | eff_join (t : tid)
-| eff_read (i : loc)
-| eff_write (i : loc) (v : val)
+| eff_read (x : var)
+| eff_write (x : var) (v : val)
 | eff_lock (l : lid)
 | eff_unlock (l : lid)
 .

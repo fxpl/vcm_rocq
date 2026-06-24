@@ -7,7 +7,7 @@ Definition root_commit := 0.
 Hint Unfold commit : vcm.
 Hint Extern 1 => unfolds commit : vcm.
 
-Definition diff := map loc val.
+Definition diff := map var val.
 
 Definition empty_diff : diff := empty.
 
@@ -67,23 +67,26 @@ Inductive ancestor (G : graph) : commit -> commit -> Prop :=
 .
 
 Definition wf_graph (G : graph) :=
+  (* Graphs are finite *)
   (let '(C, _) := G in LibMap.finite C) /\
+  (* Ancestry is anti-symmetric *)
   (forall c1 c2,
     ancestor G c1 c2 ->
     ancestor G c2 c1 ->
     c1 = c2) /\
-  (* Every commit appearing in the ancestry relation has data (possibly empty).
-     This ties the ancestry component [P] to the data component [C]: a commit
-     that is fresh in the data is genuinely new and cannot already be an edge
-     endpoint. *)
+  (* Every commit appearing in the ancestry relation has data (possibly empty). *)
   (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b).
 
-Definition change_set (G : graph) (c1 c2 : commit) : set loc :=
-  fun i =>
+Definition graph_writes (G : graph) (c : commit) (x : var) (v : val) : Prop :=
+  exists d, graph_binds G c d /\ binds d x v.
+
+(* Which changes can be seen from c2 but not c1 *)
+Definition change_set (G : graph) (c1 c2 : commit) : set var :=
+  fun x =>
   match G with
   | (C, _) =>
       exists c,
-        i \indom C[c] /\
+        x \indom C[c] /\
         ancestor G c c2 /\ ~ancestor G c c1
   end.
 
@@ -116,22 +119,18 @@ Definition graph_merge (G : graph) (c1 c2 c : commit) :=
   end
 .
 
-
-Definition graph_writes (G : graph) (c : commit) (i : loc) (v : val) : Prop :=
-  exists d, graph_binds G c d /\ binds d i v.
-
 (* The latest value of [i] visible at commit [c] is the value written by some
    commit [c] that is an ancestor of [c] and is *maximal* among the i-writing
    ancestors of [c] (no other i-writer sits strictly between [c] and [c]).
    The maximality clause is what makes this single-valued; dropping it (as the
    previous inductive formulation did) makes the relation multivalued at
    conflict-free "inherit vs. overwrite" merges. *)
-Definition is_latest_value (G : graph) (c : commit) (i : loc) (v : val) : Prop :=
+Definition is_latest_value (G : graph) (c : commit) (x : var) (v : val) : Prop :=
   exists c',
-    graph_writes G c' i v /\
+    graph_writes G c' x v /\
     ancestor G c' c /\
     (forall c'' v',
-       graph_writes G c'' i v' ->
+       graph_writes G c'' x v' ->
        ancestor G c' c'' ->
        ancestor G c'' c ->
        c'' = c').

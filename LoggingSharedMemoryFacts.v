@@ -254,7 +254,7 @@ Proof.
       apply* Hinit.
     + introv Hmem'.
       rew_listx in Hmem'. branches; auto_star.
-  - (* StepRead: log' = log & event_read t i v *)
+  - (* StepRead: log' = log & event_read t x v *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
@@ -300,7 +300,7 @@ Proof.
       apply* Hinit.
     + introv Hmem'.
       rew_listx in Hmem'. branches; auto_star.
-  - (* StepWrite: log' = log & event_write t i v *)
+  - (* StepWrite: log' = log & event_write t x v *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
     asserts (Hsmem & Hwnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
@@ -339,7 +339,7 @@ Proof.
       rew_listx. splits.
       * apply~ Hend.
       * simpl. intros ->. apply Hwnmem. rew_listx*.
-    + (* Lock filter unchanged: touches_lock l (event_write t i v) = False *)
+    + (* Lock filter unchanged: touches_lock l (event_write t x v) = False *)
       introv. rew_listx.
       cases_if~. rew_list~.
     + introv Heq.
@@ -789,10 +789,10 @@ Proof.
     + (* Unlocked: L unchanged, filter unchanged *)
       intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, filter unchanged *)
-      intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
+      intros x v. rew_listx. cases_if~. rew_list. apply Hdwrite.
     + (* Init event still present *)
       exists t''. rew_listx*.
-  - (* StepRead: log' = log & event_read t i v, T' = T[t := running K(v)] *)
+  - (* StepRead: log' = log & event_read t x v, T' = T[t := running K(v)] *)
     destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & (t'' & Hdinit)).
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
@@ -894,10 +894,10 @@ Proof.
     + (* Unlocked: L unchanged, filter unchanged *)
       intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, event_read not a write *)
-      intros i0 v0. rew_listx. cases_if~. rew_list. apply Hdwrite.
+      intros y v0. rew_listx. cases_if~. rew_list. apply Hdwrite.
     + (* Init event still present *)
       exists t''. rew_listx*.
-  - (* StepWrite: log' = log & event_write t i v, T' = T[t := running K(void)], H' = H[i := v] *)
+  - (* StepWrite: log' = log & event_write t x v, T' = T[t := running K(void)], H' = H[x := v] *)
     destruct Hdesc as (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & (t'' & Hdinit)).
     asserts (Hsmem & Hwnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
@@ -998,19 +998,19 @@ Proof.
       intros t0 l. rew_listx. cases_if~. rew_list. apply Hdlock.
     + (* Unlocked: L unchanged, filter unchanged *)
       intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
-    + (* Writes: H[i := v], filter gains event_write t i v *)
-      intros i0 v0. rew_listx. cases_if as Hcase.
-      * (* i0 = i: filter grows by event_write t i v *)
-        unfold writes_location in Hcase. subst. rew_list. splits.
+    + (* Writes: H[x := v], filter gains event_write t x v *)
+      intros y v0. rew_listx. cases_if as Hcase.
+      * (* y = x: filter grows by event_write t x v *)
+        unfold writes_variable in Hcase. subst. rew_list. splits.
         -- introv (t0 & log' & Hfilt).
            apply last_eq_last_inv in Hfilt as [_ Heq].
            inverts Heq. apply binds_update_same.
         -- introv Hbinds.
            apply binds_update_same_inv in Hbinds. subst.
-           exists t (LibList.filter (fun e0 => writes_location i e0) log).
+           exists t (LibList.filter (fun e0 => writes_variable x e0) log).
            rew_list~.
-      * (* i0 ≠ i: filter unchanged *)
-        unfold writes_location in Hcase. rew_list. splits.
+      * (* y ≠ x: filter unchanged *)
+        unfold writes_variable in Hcase. rew_list. splits.
         -- introv (t0 & log' & Hfilt).
            apply~ binds_update_neq.
            apply Hdwrite. exists t0 log'. exact Hfilt.
@@ -1152,7 +1152,7 @@ Proof.
     + (* Unlocked: L unchanged, filter unchanged *)
       intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, event_spawn not a write *)
-      intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
+      intros x v. rew_listx. cases_if~. rew_list. apply Hdwrite.
     + (* Init event still present *)
       exists t''. rew_listx*.
   - (* StepJoin: log' = log & event_join t t', T' = T[t := running K(r)] *)
@@ -1257,7 +1257,7 @@ Proof.
     + (* Unlocked: L unchanged, filter unchanged *)
       intros l. rew_listx. cases_if~. rew_list. apply Hdunlock.
     + (* Writes: H unchanged, event_join not a write *)
-      intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
+      intros x v. rew_listx. cases_if~. rew_list. apply Hdwrite.
     + (* Init event still present *)
       exists t''. rew_listx*.
   - (* StepLock: log' = log & event_lock t l, T' = T[t := ...], L' = L[l := ls_held t] *)
@@ -1393,7 +1393,7 @@ Proof.
            forwards Hbinds': binds_update_neq_inv Hbinds Hcase.
            apply Hdunlock in Hbinds'. exact Hbinds'.
     + (* Writes: H unchanged, event_lock not a write *)
-      intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
+      intros x v. rew_listx. cases_if~. rew_list. apply Hdwrite.
     + (* Init event still present *)
       exists t''. rew_listx*.
   - (* StepRelease: log' = log & event_unlock t l, T' = T[t := ...], L' = L[l := ls_free] *)
@@ -1526,7 +1526,7 @@ Proof.
            forwards Hbinds': binds_update_neq_inv Hbinds Hcase.
            apply Hdunlock in Hbinds'. exact Hbinds'.
     + (* Writes: H unchanged, event_unlock not a write *)
-      intros i v. rew_listx. cases_if~. rew_list. apply Hdwrite.
+      intros x v. rew_listx. cases_if~. rew_list. apply Hdwrite.
     + (* Init event still present *)
       exists t''. rew_listx*.
 Qed.

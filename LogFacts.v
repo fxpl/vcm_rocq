@@ -295,7 +295,7 @@ Proof.
   introv Hcf.
   introv Hnth1 Hnth2 Hacc Hlt.
   hint Nth_app_l.
-  asserts* Hnth1': (LibList.Nth m (lg & e) (event_write t1 i v1)).
+  asserts* Hnth1': (LibList.Nth m (lg & e) (event_write t1 x v1)).
   asserts* Hnth2': (LibList.Nth n (lg & e) e2).
   forwards* Hhb: Hcf Hnth1' Hnth2' Hacc.
   applys* hb_app_inv.
@@ -647,18 +647,18 @@ Qed.
 (* The last element of the i-write filter is the last i-write in the log, as a
    position with the maximality property. *)
 Lemma last_write_position :
-  forall log i lw tw vw,
-    LibList.filter (fun e => writes_location i e) log = lw & event_write tw i vw ->
-    exists m, LibList.Nth m log (event_write tw i vw) /\
-              (forall k tk vk, LibList.Nth k log (event_write tk i vk) -> k <= m).
+  forall log x lw tw vw,
+    LibList.filter (fun e => writes_variable x e) log = lw & event_write tw x vw ->
+    exists m, LibList.Nth m log (event_write tw x vw) /\
+              (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m).
 Proof.
   induction log as [ | e log' IH ]; introv Hfilter.
   - rew_listx in Hfilter. false. applys nil_eq_last_inv Hfilter.
   - rew_listx in Hfilter. cases_if as HP.
-    + (* writes_location i e *)
-      destruct (last_case (LibList.filter (fun e0 => writes_location i e0) log'))
+    + (* writes_variable x e *)
+      destruct (last_case (LibList.filter (fun e0 => writes_variable x e0) log'))
         as [Hnil | (x' & lw' & Hsnoc')].
-      * (* no i-write in log': e is the last i-write, at index 0 *)
+      * (* no x-write in log': e is the last x-write, at index 0 *)
         rewrite Hnil in Hfilter.
         change (e :: nil) with (nil & e) in Hfilter.
         forwards (Hlweq & Hex): last_eq_last_inv Hfilter.
@@ -668,12 +668,12 @@ Proof.
            ++ subst. nat_math.
            ++ exfalso.
               asserts Hmemf:
-                (mem (event_write tk i vk) (LibList.filter (fun e0 => writes_location i e0) log')).
+                (mem (event_write tk x vk) (LibList.filter (fun e0 => writes_variable x e0) log')).
               { applys mem_filter; [ applys Nth_mem HNmm | reflexivity ]. }
               rewrite Hnil in Hmemf. rewrite mem_nil_eq in Hmemf. exact Hmemf.
-      * (* filter log' nonempty; its last element is event_write tw i vw *)
+      * (* filter log' nonempty; its last element is event_write tw x vw *)
         asserts Hsnoc2:
-          (LibList.filter (fun e0 => writes_location i e0) log' = lw' & event_write tw i vw).
+          (LibList.filter (fun e0 => writes_variable x e0) log' = lw' & event_write tw x vw).
         { rewrite Hsnoc' in Hfilter.
           change (e :: (lw' & x')) with ((e :: lw') & x') in Hfilter.
           forwards (Hlweq & Hxeq): last_eq_last_inv Hfilter.
@@ -684,7 +684,7 @@ Proof.
         -- introv HNk. forwards [(Hk0 & Hxe) | (mm & Hkm & HNmm)]: Nth_cons_inv HNk.
            ++ subst. nat_math.
            ++ forwards Hle: Hmax' HNmm. nat_math.
-    + (* ~ writes_location i e *)
+    + (* ~ writes_variable x e *)
       forwards (m' & HNm' & Hmax'): IH Hfilter.
       exists (S m'). split.
       -- apply Nth_succ. exact HNm'.

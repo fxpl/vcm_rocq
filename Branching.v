@@ -68,21 +68,21 @@ Inductive step : cfg -> cfg -> Prop :=
     commit_fresh G h' ->
     do_commit t h' T G = (T', G') ->
     step (T, G, L) (T'[t := (state_terminated, te_ret r, empty, h')], G', L)
-| StepReadLocal : forall T G L t e d h K i v,
+| StepReadLocal : forall T G L t e d h K x v,
     binds T t (state_running, te_exp e, d, h) ->
-    step_ul e K (eff_read i) ->
-    binds d i v ->
+    step_ul e K (eff_read x) ->
+    binds d x v ->
     step (T, G, L) (T[t := (state_running, te_exp (K (ret_val v)), d, h)], G, L)
-| StepReadGlobal : forall T G L t e d h K i v,
+| StepReadGlobal : forall T G L t e d h K x v,
     binds T t (state_running, te_exp e, d, h) ->
-    step_ul e K (eff_read i) ->
-    i \notindom d ->
-    is_latest_value G h i v ->
+    step_ul e K (eff_read x) ->
+    x \notindom d ->
+    is_latest_value G h x v ->
     step (T, G, L) (T[t := (state_running, te_exp (K (ret_val v)), d, h)], G, L)
-| StepWrite : forall T G L t e d h K i v,
+| StepWrite : forall T G L t e d h K x v,
     binds T t (state_running, te_exp e, d, h) ->
-    step_ul e K (eff_write i v) ->
-    step (T, G, L) (T[t := (state_running, te_exp (K void), d[i := v], h)], G, L)
+    step_ul e K (eff_write x v) ->
+    step (T, G, L) (T[t := (state_running, te_exp (K void), d[x := v], h)], G, L)
  | StepSpawn : forall T T' G G' L t (t' : tid) e d h h' K e',
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_spawn e') ->

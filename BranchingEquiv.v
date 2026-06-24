@@ -319,38 +319,38 @@ Proof.
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
     forwards Hcflog: conflict_free_last_inv Hcf.
-    destruct (classic (i \indom (D[t]))) as [Hin | Hnin].
-    * (* local (uncommitted) read: [i] is in [t]'s delta *)
+    destruct (classic (x \indom (D[t]))) as [Hin | Hnin].
+    * (* local (uncommitted) read: [x] is in [t]'s delta *)
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
-      asserts Hbdi: (binds (D[t]) i (D[t][i])).
+      asserts Hbdi: (binds (D[t]) x (D[t][x])).
       { applys binds_of_indom_read Hin; (reflexivity || typeclass). }
       forwards (log'' & Hfilt2): conflict_free_last_local_write Hcflog Hplay Hdt Hbdi.
       rewrite Hfilter in Hfilt2.
       forwards (_ & Heqw): last_eq_last_inv Hfilt2. inverts Heqw.
       eexists. split; [ applys StepReadLocal Hbinds; [ eassumption | exact Hbdi ] |].
       applys same_expr_thread_update Hsame.
-    * (* global (committed) read: [i] is visible as the latest committed value *)
+    * (* global (committed) read: [x] is visible as the latest committed value *)
       forwards Hcfg: conflict_free_log_describes_conflict_free_graph Hwf Hcflog Hplay.
       lets [_ Hback]: Hrun t. forwards (Hms & Hmne): Hback. { do 3 eexists. exact Hbinds. }
-      asserts Hwfr: (wf_log (log & event_read t i v)). { applys wf_log_read_last Hms Hmne Hwf. }
-      destruct (last_write_position log i log'0 t' v Hfilter) as (mw & HNL & Hlast).
+      asserts Hwfr: (wf_log (log & event_read t x v)). { applys wf_log_read_last Hms Hmne Hwf. }
+      destruct (last_write_position log x log'0 t' v Hfilter) as (mw & HNL & Hlast).
       forwards HLlt: Nth_inbound HNL.
       asserts Hplayf: (exists CHf,
-        play_log (log & event_read t i v) (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CHf).
+        play_log (log & event_read t x v) (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CHf).
       { eexists. applys PlaySnoc Hplay. apply PlayRead. }
       destruct Hplayf as (CHf & Hplayf).
-      asserts HNLf: (LibList.Nth mw (log & event_read t i v) (event_write t' i v)).
+      asserts HNLf: (LibList.Nth mw (log & event_read t x v) (event_write t' x v)).
       { applys* Nth_app_l. }
-      asserts HNread: (LibList.Nth (length log) (log & event_read t i v) (event_read t i v)).
+      asserts HNread: (LibList.Nth (length log) (log & event_read t x v) (event_read t x v)).
       { applys* Nth_app_r'. }
       asserts Hlastf:
-        (forall k tk vk, LibList.Nth k (log & event_read t i v) (event_write tk i vk) -> k <= mw).
+        (forall k tk vk, LibList.Nth k (log & event_read t x v) (event_write tk x vk) -> k <= mw).
       { introv HNk. forwards [HN' | (Hpe & Hee)]: Nth_last_inv HNk.
         - applys Hlast HN'.
         - inverts Hee. }
-      asserts Hacc: (accesses_location i (event_read t i v)). { reflexivity. }
+      asserts Hacc: (accesses_variable x (event_read t x v)). { reflexivity. }
       forwards Hhb: Hcf HNLf HNread Hacc HLlt.
-      asserts HndomL: (i \notindom (D[t'])).
+      asserts HndomL: (x \notindom (D[t'])).
       { destruct (classic (t' = t)) as [-> | Hne].
         - exact Hnin.
         - applys last_writer_not_in_delta Hplayf HNLf Hlastf HNread Hhb. simpl. congruence. }
@@ -568,7 +568,7 @@ Proof.
       asserts Hcfg: (conflict_free_graph G).
       { forwards Hcflog: conflict_free_last_inv Hcf.
         applys conflict_free_log_describes_conflict_free_graph Hwf Hcflog Hplay. }
-      asserts Hwfr: (wf_log (log & event_read t i v)).
+      asserts Hwfr: (wf_log (log & event_read t x v)).
       { lets [_ Hback]: Hrun t.
         forwards (Hms & Hmne): Hback.
         { do 3 eexists. eassumption. }

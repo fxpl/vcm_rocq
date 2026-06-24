@@ -17,12 +17,12 @@ Definition lcommits := map lid commit.
 
 Inductive play_event : event -> (deltas * commits * graph * lcommits) -> (deltas * commits * graph * lcommits) -> Prop :=
 | PlayRead :
-  forall D TC G LC t i v,
-    play_event (event_read t i v) (D, TC, G, LC) (D, TC, G, LC)
+  forall D TC G LC t x v,
+    play_event (event_read t x v) (D, TC, G, LC) (D, TC, G, LC)
 | PlayWrite :
-  forall D TC G LC t i v d,
+  forall D TC G LC t x v d,
     binds D t d ->
-    play_event (event_write t i v) (D, TC, G, LC) (D[t := d[i := v]], TC, G, LC)
+    play_event (event_write t x v) (D, TC, G, LC) (D[t := d[x := v]], TC, G, LC)
 | PlayStart :
   forall D TC G LC t,
     play_event (event_start t) (D, TC, G, LC) (D, TC, G, LC)
@@ -104,17 +104,6 @@ Fixpoint get_uncommitted' (t : tid) (l : log) (acc : log) :=
 Definition get_uncommitted (t : tid) (log : log) :=
   get_uncommitted' t log nil.
 
-Fixpoint find_write (log : log) (i : loc) : option val :=
-  match log with
-  | nil => None
-  | event_write t j v :: log' =>
-      match find_write log' i with
-      | None => If i = j then Some v else None
-      | Some v' => Some v'
-      end
-  | _ :: log' => find_write log' i
-  end.
-
 Definition describes (log : log) (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, L) =>
@@ -166,21 +155,21 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
     commit_fresh G c' ->
     do_commit t c' T G = (T', G') ->
     step ((T, G, L), log) ((T'[t := (state_terminated, te_ret r, empty, c')], G', L), log & event_end t)
-| StepReadLocal : forall T G L t e d c K i v log,
+| StepReadLocal : forall T G L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
-    step_ul e K (eff_read i) ->
-    binds d i v ->
-    step ((T, G, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, L), log & event_read t i v)
-| StepReadGlobal : forall T G L t e d c K i v log,
+    step_ul e K (eff_read x) ->
+    binds d x v ->
+    step ((T, G, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, L), log & event_read t x v)
+| StepReadGlobal : forall T G L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
-    step_ul e K (eff_read i) ->
-    i \notindom d ->
-    is_latest_value G c i v ->
-    step ((T, G, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, L), log & event_read t i v)
-| StepWrite : forall T G L t e d c K i v log,
+    step_ul e K (eff_read x) ->
+    x \notindom d ->
+    is_latest_value G c x v ->
+    step ((T, G, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, L), log & event_read t x v)
+| StepWrite : forall T G L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
-    step_ul e K (eff_write i v) ->
-    step ((T, G, L), log) ((T[t := (state_running, te_exp (K void), d[i := v], c)], G, L), log & event_write t i v)
+    step_ul e K (eff_write x v) ->
+    step ((T, G, L), log) ((T[t := (state_running, te_exp (K void), d[x := v], c)], G, L), log & event_write t x v)
 | StepSpawn : forall T T' G G' L t (t' : tid) e d c c' K e' log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_spawn e') ->

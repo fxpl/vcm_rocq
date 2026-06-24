@@ -3,8 +3,8 @@ From Vcm Require Import Common.
 Inductive event :=
 | event_spawn (t1 t2 : tid)
 | event_join (t1 t2 : tid)
-| event_read (t : tid) (i : loc) (v : val)
-| event_write (t : tid) (i : loc) (v : val)
+| event_read (t : tid) (x : var) (v : val)
+| event_write (t : tid) (x : var) (v : val)
 | event_lock (t : tid) (l : lid)
 | event_unlock (t : tid) (l : lid)
 | event_start (t : tid)
@@ -32,9 +32,9 @@ Definition touches_lock (l : lid) (e : event) :=
   | _ => False
   end.
 
-Definition writes_location (i : loc) (e : event) :=
+Definition writes_variable (x : var) (e : event) :=
   match e with
-  | event_write _ j _ => i = j
+  | event_write _ y _ => x = y
   | _ => False
   end.
 
@@ -44,11 +44,11 @@ Definition is_write (e : event) :=
   | _ => False
   end.
 
-(* An event reads or writes location [i]. *)
-Definition accesses_location (i : loc) (e : event) :=
+(* An event reads or writes a variable. *)
+Definition accesses_variable (x : var) (e : event) :=
   match e with
-  | event_read _ j _
-  | event_write _ j _ => i = j
+  | event_read _ y _
+  | event_write _ y _ => x = y
   | _ => False
   end.
 
@@ -156,13 +156,13 @@ Definition wf_log (log : log) : Prop :=
   (forall t1, ~ mem (event_spawn t1 t_root) log)
 .
 
-(* A write to [i] happens-before any later access (read or write) of [i]. This
-   rules out both write-write and (stale) read-write races on a location. *)
+(* A write to [x] happens-before any later access (read or write) of [x]. This
+   rules out both write-write and (stale) read-write races on a variable. *)
 Definition conflict_free (log : log) : Prop :=
-  forall m n t1 i v1 e2,
-    LibList.Nth m log (event_write t1 i v1) ->
+  forall m n t1 x v1 e2,
+    LibList.Nth m log (event_write t1 x v1) ->
     LibList.Nth n log e2 ->
-    accesses_location i e2 ->
+    accesses_variable x e2 ->
     m < n ->
     hb log m n
 .

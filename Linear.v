@@ -6,7 +6,7 @@ Definition timestamp := nat.
 Hint Unfold timestamp : vcm.
 Hint Extern 1 => unfolds timestamp : vcm.
 
-Definition staging_area := map loc val.
+Definition staging_area := map var val.
 
 Definition thread := (thread_state * thread_exp * staging_area * timestamp)%type.
 
@@ -112,9 +112,9 @@ Proof.
 Admitted.
 *)
 
-Definition heap := map loc version_history.
+Definition heap := map var version_history.
 
-Definition is_latest_value (H : heap) (i : loc) (v : val) :=
+Definition is_latest_value (H : heap) (i : var) (v : val) :=
   exists vh,
     binds H i vh /\
     exists ts, (v, ts) \in vh /\
@@ -409,7 +409,7 @@ Proof.
   - introv IH Hfins (i & vh & Hbinds & Hneq).
     rename v into vh'.
     simpl in Hfins.
-    destruct (classic ((exists (i : loc) (vh : version_history), binds M' i vh /\ vh <> \{}))).
+    destruct (classic ((exists (i : var) (vh : version_history), binds M' i vh /\ vh <> \{}))).
     + forwards~ (ts & Hmax): IH.
       forwards~ (v & ts' & Hin & Hle): ex_latest vh'.
       all: admit. (* Proof idea: ts is max of M'. There is some maximum timestamp of vh'. The maximum of M'[k:=vh'] is the maximum of ts and the maximum timestamp of vh'. *)
@@ -548,4 +548,3 @@ Inductive step : cfg -> cfg -> Prop :=
     binds T' t (state_running, te_exp e, empty, ts') ->
     step (T, H, L) (T[t := (state_running, te_exp (K void), empty, ts')], H', L[l := ls_free])
 .
-
