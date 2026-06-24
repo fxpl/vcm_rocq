@@ -124,7 +124,7 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       /\
       (* Spawned threads that have not started are new *)
       (forall t2,
-          (((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log) /\ ~mem (event_start t2) log) <-> exists e h ts, binds T t2 (state_new, e, h, ts))
+          ((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log) /\ ~mem (event_start t2) log <-> exists e h ts, binds T t2 (state_new, e, h, ts))
       /\
       (* Ended threads are ended, with empty staging areas *)
       (forall t,
@@ -152,11 +152,9 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
             (forall t, t \indom T -> t \indom TC) /\
             (forall l, l \indom L -> l \indom LC) /\
             (forall l, l \indom LC -> l \indom L))
-
-(*      (* Deltas are uncommitted writes *)
-      (forall t ts e d h,
-          binds T t (ts, e, d, h) -> d = find_write (get_uncommitted t log)
-      )*)
+      /\
+      (* The log has the initialisation event *)
+      (exists t, mem (event_init t) log)
   end.
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=

@@ -405,6 +405,48 @@ Proof.
   - applys AncestorTrans IHHanc. rew_set; auto_star.
 Qed.
 
+Lemma ancestor_graph_root_inv :
+  forall G c x y,
+    (forall z, ancestor G c z -> z = c) ->
+    y <> c ->
+    ancestor (graph_root G c ) x y ->
+    ancestor G x y.
+Proof.
+  introv Hsink Hneq Hanc.
+  destruct G as (C & P). unfolds graph_root.
+  gen Hneq. induction Hanc; introv Hneq.
+  - apply ancestor_refl.
+  - asserts Hh2: (h2 <> c).
+    { intro Heqh2. subst h2.
+      asserts Hanc_c': (ancestor (C, P) c h3).
+      { apply AncestorTrans with (h2 := c); auto. apply ancestor_refl. }
+      forwards: Hsink Hanc_c'. congruence. }
+    apply AncestorTrans with (h2 := h2); auto.
+Qed.
+
+Lemma graph_writes_graph_root :
+  forall G c x i v,
+    x <> c ->
+    graph_writes G x i v ->
+    graph_writes (graph_root G c) x i v.
+Proof.
+  introv Hneq (dd & Hb & Hbd). destruct G as (C & P).
+  unfolds graph_binds, graph_writes, graph_commit.
+  exists dd. split~. applys~ binds_update_neq.
+Qed.
+
+Lemma graph_writes_graph_root_inv :
+  forall G c x i v,
+    x <> c ->
+    graph_writes (graph_root G c) x i v ->
+    graph_writes G x i v.
+Proof.
+  introv Hneq (dd & Hb & Hbd). destruct G as (C & P).
+  unfolds graph_binds, graph_writes, graph_commit.
+  exists dd. split~. applys~ binds_update_neq_inv Hb.
+Qed.
+
+
 (* ---------------------------------------------------------------------- *)
 (* Lemmas relocated here from BranchingEquiv.v (organization pass).          *)
 (* ---------------------------------------------------------------------- *)
@@ -466,6 +508,17 @@ Lemma graph_writes_graph_commit_new :
 Proof.
   introv Hbd. exists d. split; [ | exact Hbd ].
   destruct G as (C & P). unfold graph_commit, graph_binds. apply binds_update_same.
+Qed.
+
+Lemma graph_writes_graph_root_same_false :
+  forall G c i v,
+    graph_writes (graph_root G c) c i v -> False.
+Proof.
+  introv (dd & Hgb & Hbd). destruct G as (C & P).
+  unfolds graph_root, graph_binds.
+  forwards: binds_update_same_inv Hgb.
+  subst.
+  applys binds_empty_false Hbd; typeclass.
 Qed.
 
 (* A commit with no outgoing edge has no proper descendants. *)
