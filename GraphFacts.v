@@ -1,6 +1,20 @@
 From Vcm Require Import Common.
 From Vcm Require Import Graph.
 
+Theorem init_graph_wf :
+  wf_graph (graph_root empty_graph root_commit).
+Proof.
+  unfolds graph_root, empty_graph.
+  splits.
+  - unfolds finite. rewrite dom_update.
+    rewrite dom_empty.
+    apply LibSet.finite_union;
+      auto using LibSet.finite_empty, LibSet.finite_single.
+  - introv Hanc. inverts~ Hanc.
+    rew_set in *. false.
+  - introv He. inverts He.
+Qed.
+
 Lemma graph_binds_inj :
   forall G h d1 d2,
     graph_binds G h d1 ->

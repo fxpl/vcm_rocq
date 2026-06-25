@@ -19,6 +19,7 @@ Qed.
 
 Definition cfg : Type := threads * graph * locks.
 
+(* TODO: change h_new to c_new *)
 Definition do_commit (t : tid) (h_new : commit)
     (T : threads) (G : graph)
     : threads * graph :=

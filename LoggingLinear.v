@@ -1,4 +1,5 @@
 From Vcm Require Import Common.
+From Vcm Require Import Graph.
 From Vcm Require Import Linear.
 From Vcm Require Import Log.
 From Vcm Require Import LogFacts.
@@ -7,126 +8,188 @@ Import Linear.
 Import Log.
 Import LogFacts.
 
+(* Replaying the log reconstructs the single-branch commit graph.  Compared with
+   LoggingBranching's [play_event], the play state carries the GLOBAL HEAD [g] (a
+   commit) in place of the per-lock commits [LC]:
+     - pushes (end / spawn / unlock) commit the actor's diff *onto [g]*, producing
+       a fresh commit [g'] that becomes the new head and the actor's commit;
+     - pulls (start / join / lock) fast-forward the actor's commit to [g] and
+       leave the graph (and head) unchanged -- there is no merge;
+     - lock events need no special handling for the graph (locks carry no commit),
+       so a single [PlayLock] rule covers both [StepLock] and [StepLockFresh]. *)
+
+Definition deltas := map tid diff.
+Definition commits := map tid commit.
+
+Inductive play_event :
+  event -> (deltas * commits * graph * commit) -> (deltas * commits * graph * commit) -> Prop :=
+| PlayRead : forall D TC G g t x v,
+    play_event (event_read t x v) (D, TC, G, g) (D, TC, G, g)
+| PlayWrite : forall D TC G g t x v d,
+    binds D t d ->
+    play_event (event_write t x v) (D, TC, G, g) (D[t := d[x := v]], TC, G, g)
+| PlayStart : forall D TC G g t,
+    play_event (event_start t) (D, TC, G, g) (D, TC[t := g], G, g)
+| PlayEnd : forall D TC G g g' t d,
+    binds D t d ->
+    commit_fresh G g' ->
+    play_event (event_end t) (D, TC, G, g) (D[t := empty], TC[t := g'], graph_commit G g g' d, g')
+| PlaySpawn : forall D TC G g g' t1 t2 d,
+    binds D t1 d ->
+    commit_fresh G g' ->
+    play_event (event_spawn t1 t2) (D, TC, G, g)
+      (D[t1 := empty][t2 := empty], TC[t1 := g'][t2 := g'], graph_commit G g g' d, g')
+| PlayJoin : forall D TC G g t1 t2,
+    play_event (event_join t1 t2) (D, TC, G, g) (D, TC[t1 := g], G, g)
+| PlayLock : forall D TC G g t l,
+    play_event (event_lock t l) (D, TC, G, g) (D, TC[t := g], G, g)
+| PlayUnlock : forall D TC G g g' t l d,
+    binds D t d ->
+    commit_fresh G g' ->
+    play_event (event_unlock t l) (D, TC, G, g) (D[t := empty], TC[t := g'], graph_commit G g g' d, g')
+| PlayInit : forall D TC G g t,
+    commit_fresh G root_commit ->
+    play_event (event_init t) (D, TC, G, g)
+      (D[t := empty], TC[t := root_commit], graph_root G root_commit, root_commit)
+.
+
+(* As in LoggingBranching, [CH] is a list parallel to the log: [CH[k]] is the
+   commit pointer of the thread acting at event [k] right after it, which links
+   the log's happens-before order to the graph's ancestry. *)
+Inductive play_log :
+  log -> (deltas * commits * graph * commit) -> (deltas * commits * graph * commit) -> list commit -> Prop :=
+| PlayNil : forall D TC G g,
+    play_log nil (D, TC, G, g) (D, TC, G, g) nil
+| PlaySnoc : forall E log D D' D'' TC TC' TC'' G G' G'' g g' g'' CH,
+    play_log log (D, TC, G, g) (D', TC', G', g') CH ->
+    play_event E (D', TC', G', g') (D'', TC'', G'', g'') ->
+    play_log (log & E) (D, TC, G, g) (D'', TC'', G'', g'') (CH & TC''[get_thread E])
+.
+
 Definition describes (log : log) (cfg : cfg) : Prop :=
   match cfg with
-  | (T, H, L) =>
-      (* Spawned threads exist *)
+  | (T, G, g, L) =>
+      (* Spawned and inited threads exist *)
       (forall t2,
-          (exists t1, mem (event_spawn t1 t2) log) <-> t2 \indom T)
+          (exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log <-> t2 \indom T)
       /\
-      (* Spawned threads that have not started are new *)
+      (* Spawned/inited threads that have not started are new *)
       (forall t2,
-          (exists t1, mem (event_spawn t1 t2) log /\ ~mem (event_start t2) log) <-> exists e h ts, binds T t2 (state_new, e, h, ts))
+          ((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log) /\ ~mem (event_start t2) log <-> exists e d c, binds T t2 (state_new, e, d, c))
       /\
-      (* Ended threads are ended *)
+      (* Ended threads are ended, with empty diffs *)
       (forall t,
-          mem (event_end t) log <-> exists e h ts, binds T t ((state_terminated, e, h, ts)))
+          mem (event_end t) log <-> exists e c, binds T t (state_terminated, e, empty_diff, c))
       /\
       (* Started threads that are not ended are running *)
       (forall t,
-          mem (event_start t) log /\ ~mem (event_end t) log <-> exists e h ts, binds T t (state_running, e, h, ts))
+          mem (event_start t) log /\ ~mem (event_end t) log <-> exists e d c, binds T t (state_running, e, d, c))
       /\
       (* Locked locks are locked *)
       (forall t l,
           (exists log', LibList.filter (fun e => touches_lock l e) log = log' & event_lock t l) <-> binds L l (ls_held t))
       /\
-      (* Unlocked locks are unlocked or untouched *)
+      (* A lock is free exactly when its last touch is an unlock.  A never-touched
+         lock is absent from [L] (so [StepLockFresh] introduces it). *)
       (forall l,
-          (log = nil \/ exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> binds L l ls_free)
+          (exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> binds L l ls_free)
       /\
-      (* TODO: Each location in the heap consists of pushed values *)
-      (* TODO: Do we need timestamps in the events or can we reconstruct them? We should probably define play_event like for branching and "run it backwards" to see what the latest value is *)
-      True
+      (* Replaying the log produces the commit graph [G] and the global head [g];
+         each thread's diff and commit are the replayed [D[t]] and [TC[t]]. *)
+      (exists D TC CH,
+          play_log log (empty, empty, empty_graph, root_commit) (D, TC, G, g) CH /\
+            (forall t, t \indom T -> exists st e, binds T t (st, e, D[t], TC[t])) /\
+            (forall t, t \indom T -> t \indom D) /\
+            (forall t, t \indom T -> t \indom TC))
       /\
-      (* TODO: Each staging area contains unpushed writes *)
-      True
+      (* The log has the initialisation event *)
+      (exists t, mem (event_init t) log)
   end.
 
-(* TODO: Do we need something about timestamps? *)
+(* The single-branch well-formedness of a configuration, transferred from
+   LoggingBranching's [wf_cfg] and strengthened with the linear-history property:
+     - the commit graph is well-formed and TOTALLY ORDERED (a single chain);
+     - the global head [g] is in the graph and is its maximum (every commit is an
+       ancestor of [g]), so any thread can fast-forward to it;
+     - every thread's commit lives in the graph.
+   Locks no longer carry a commit, so (unlike Branching) there is no lock clause. *)
+Definition wf_cfg (cfg : cfg) : Prop :=
+  match cfg with
+  | (T, G, g, L) =>
+      wf_graph G /\
+      total_order G /\
+      graph_indom G g /\
+      (forall c, graph_indom G c -> ancestor G c g) /\
+      (forall t st e d c, binds T t (st, e, d, c) -> graph_indom G c)
+  end.
+
+(* The initial configuration: a single new root thread whose commit is the graph
+   root, an empty single-commit graph whose head is that root, and no locks. *)
+Definition init_cfg (e : exp) : cfg :=
+  (empty[t_root := (state_new, te_exp e, empty_diff, root_commit)],
+   graph_root empty_graph root_commit,
+   root_commit,
+   empty).
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
-| StepStart : forall T T' H L L' t e h ts log,
-    binds T t (state_new, e, empty, 0) ->
-    pull t (T, H, L) (T', H, L') ->
-    binds T' t (state_new, e, h, ts) ->
-    step ((T, H, L), log) ((T'[t := (state_running, e, h, ts)], H, L), log & event_start t)
-| StepEnd : forall T T' H H' L t r h ts ts' log,
-    binds T t (state_running, te_ret r, h, ts) ->
-    push t (T, H, L) (T', H', L) ->
-    binds T' t (state_running, te_ret r, empty, ts') ->
-    step ((T, H, L), log) ((T[t := (state_terminated, te_ret r, empty, ts')], H, L), log & event_end t)
-| StepReadLocal : forall T H L t e h ts K i v log,
-    binds T t (state_running, te_exp e, h, ts) ->
+| StepStart : forall T G g L t e d c log,
+    binds T t (state_new, e, d, c) ->
+    step ((T, G, g, L), log) ((T[t := (state_running, e, d, g)], G, g, L), log & event_start t)
+| StepEnd : forall T T' G G' g g' L t r d c log,
+    binds T t (state_running, te_ret r, d, c) ->
+    lin_conflict_free d c g G ->
+    commit_fresh G g' ->
+    global_commit t g g' T G = (T', G') ->
+    step ((T, G, g, L), log) ((T'[t := (state_terminated, te_ret r, empty, g')], G', g', L), log & event_end t)
+| StepReadLocal : forall T G g L t e d c K i v log,
+    binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read i) ->
-    binds h i v ->
-    step ((T, H, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), h, ts)], H, L), log & event_read t i v)
-| StepReadGlobal : forall T H L t e h ts K i v log,
-    binds T t (state_running, te_exp e, h, ts) ->
+    binds d i v ->
+    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, g, L), log & event_read t i v)
+| StepReadGlobal : forall T G g L t e d c K i v log,
+    binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read i) ->
-    i \notindom h ->
-    is_latest_value H i v ->
-    step ((T, H, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), h, ts)], H, L), log & event_read t i v)
-| StepWrite : forall T H L t e h ts K i v log,
-    binds T t (state_running, te_exp e, h, ts) ->
+    i \notindom d ->
+    is_latest_value G c i v ->
+    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, g, L), log & event_read t i v)
+| StepWrite : forall T G g L t e d c K i v log,
+    binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_write i v) ->
-    step ((T, H, L), log) ((T[t := (state_running, te_exp (K void), h[i := v], ts)], H, L), log & event_write t i v)
-| StepSpawn : forall T T' H H' L t (t' : tid) e h ts ts' K e' log,
-    binds T t (state_running, te_exp e, h, ts) ->
+    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K void), d[i := v], c)], G, g, L), log & event_write t i v)
+| StepSpawn : forall T T' G G' g g' L t (t' : tid) e d c K e' log,
+    binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_spawn e') ->
-    push t (T, H, L) (T', H', L) ->
-    t' \notindom T' ->
-    binds T' t (state_running, te_exp e, empty, ts') ->
-    step ((T, H, L), log) ((T[t := (state_running, te_exp (K t'), empty, ts')][t' := (state_new, te_exp e', empty, 0)], H', L), log & event_spawn t t')
-| StepJoin : forall T T' H L t t' e h h' ts ts' ts'' K r log,
-    binds T t (state_running, te_exp e, h, ts) ->
+    t' \notindom T ->
+    lin_conflict_free d c g G ->
+    commit_fresh G g' ->
+    push_thread t t' g g' (T[t := (state_running, te_exp (K t'), d, c)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G') ->
+    step ((T, G, g, L), log) ((T', G', g', L), log & event_spawn t t')
+| StepJoin : forall T G g L t t' e d c c' K r log,
+    binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_join t') ->
-    binds T t' (state_terminated, te_ret r, h', ts') ->
-    pull t (T, H, L) (T', H, L) ->
-    binds T' t (state_running, te_exp e, h, ts'') ->
-    step ((T, H, L), log) ((T[t := (state_running, te_exp (K r), h, ts'')], H, L), log & event_join t t')
-| StepLock : forall T T' H L t e h ts ts' K l log,
-    binds T t (state_running, te_exp e, h, ts) ->
+    binds T t' (state_terminated, te_ret r, empty, c') ->
+    lin_conflict_free d c g G ->
+    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K r), d, g)], G, g, L), log & event_join t t')
+| StepLock : forall T G g L t e d c K l log,
+    binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_lock l) ->
     binds L l ls_free ->
-    pull t (T, H, L) (T', H, L) ->
-    binds T' t (state_running, te_exp e, h, ts') ->
-    step ((T, H, L), log) ((T[t := (state_running, te_exp (K void), h, ts')], H, L[l := ls_held t]), log & event_lock t l)
-| StepRelease : forall T T' H H' (L : locks) t e h ts ts' K l log,
-    binds T t (state_running, te_exp e, h, ts) ->
+    lin_conflict_free d c g G ->
+    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K void), d, g)], G, g, L[l := ls_held t]), log & event_lock t l)
+| StepLockFresh : forall T G g L t e d c K l log,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_lock l) ->
+    l \notindom L ->
+    lin_conflict_free d c g G ->
+    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K void), d, g)], G, g, L[l := ls_held t]), log & event_lock t l)
+| StepRelease : forall T T' G G' g g' (L : locks) t e d c K l log,
+    binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_unlock l) ->
     binds L l (ls_held t) ->
-    push t (T, H, L) (T', H', L) ->
-    binds T' t (state_running, te_exp e, empty, ts') ->
-    step ((T, H, L), log) ((T[t := (state_running, te_exp (K void), empty, ts')], H', L[l := ls_free]), log & event_unlock t l)
+    lin_conflict_free d c g G ->
+    commit_fresh G g' ->
+    global_commit t g g' T G = (T', G') ->
+    step ((T, G, g, L), log) ((T'[t := (state_running, te_exp (K void), empty, g')], G', g', L[l := ls_free]), log & event_unlock t l)
 .
 
-Hint Constructors step Linear.step : vcm.
-
-Theorem step_equiv :
-  forall cfg cfg' log,
-    (exists log', step (cfg, log) (cfg', log')) <-> Linear.step cfg cfg'.
-Proof.
-  introv. split; introv Hstep.
-  - destruct Hstep as (log' & Hstep). inverts* Hstep.
-  - inverts* Hstep.
-    + exists. applys* StepReadLocal.
-    + exists. applys* StepReadGlobal.
-    + exists. applys* StepJoin.
-Qed.
-
-Theorem step_preserves_wf_log :
-  forall cfg cfg' log log',
-    wf_log log ->
-    describes log cfg ->
-    step (cfg, log) (cfg', log') ->
-    wf_log log'.
-Admitted.
-
-Theorem step_preserves_describes :
-  forall cfg cfg' log log',
-    wf_log log ->
-    describes log cfg ->
-    step (cfg, log) (cfg', log') ->
-    describes log' cfg'.
-Admitted.
-
+Hint Constructors step LoggingLinear.step : vcm.

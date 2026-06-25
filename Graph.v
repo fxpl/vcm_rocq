@@ -77,6 +77,17 @@ Definition wf_graph (G : graph) :=
   (* Every commit appearing in the ancestry relation has data (possibly empty). *)
   (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b).
 
+(* The graph is a single chain: any two commits are comparable.  This is the
+   structural invariant that distinguishes the Linear model (one global branch)
+   from the Branching model (a genuine partial order).  It is a property of the
+   graph alone -- it does not mention threads, locks or the log -- and is meant to
+   be carried by [wf_cfg]. *)
+Definition total_order (G : graph) : Prop :=
+  forall a b,
+    graph_indom G a ->
+    graph_indom G b ->
+    ancestor G a b \/ ancestor G b a.
+
 Definition graph_writes (G : graph) (c : commit) (x : var) (v : val) : Prop :=
   exists d, graph_binds G c d /\ binds d x v.
 

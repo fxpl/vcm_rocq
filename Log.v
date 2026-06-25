@@ -105,19 +105,11 @@ Definition wf_log (log : log) : Prop :=
   (forall l1 l2 t1 t2,
       log = l1 ++ event_spawn t1 t2 :: l2 ->
       (~exists t1', mem (event_spawn t1' t2) (l1 ++ l2)))
-
-  (* Alternative formulation based on length*)
-  (* forall t2, length (LibList.filter (fun e => exists t1, e = event_spawn t1 t2) log) <= 1 x*)
   /\
   (* Unique starts *)
   (forall l1 l2 t,
       log = l1 ++ event_start t :: l2 ->
       (~mem (event_start t) (l1 ++ l2)))
-  /\
-  (* Unique ends *)
-  (forall l1 l2 t,
-      log = l1 ++ event_end t :: l2 ->
-      (~mem (event_end t) (l1 ++ l2)))
   /\
   (* Threads start after spawning, or are initialised (the root) *)
   (forall l1 l2 t2,

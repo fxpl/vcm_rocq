@@ -19,7 +19,7 @@ Existing Instance inhab_exp.
 (* ===================== *)
 (* Initial configuration *)
 (* ===================== *)
-Example init_log_describes_init_cfg :
+Theorem init_log_describes_init_cfg :
   forall e,
     describes init_log (init_cfg e).
 Proof.
@@ -125,21 +125,7 @@ Proof.
   - exists* t_root.
 Qed.
 
-Example init_graph_wf :
-  wf_graph (graph_root empty_graph root_commit).
-Proof.
-  unfolds graph_root, empty_graph.
-  splits.
-  - unfolds finite. rewrite dom_update.
-    rewrite dom_empty.
-    apply LibSet.finite_union;
-      auto using LibSet.finite_empty, LibSet.finite_single.
-  - introv Hanc. inverts~ Hanc.
-    rew_set in *. false.
-  - introv He. inverts He.
-Qed.
-
-Example init_cfg_wf :
+Theorem init_cfg_wf :
   forall e,
     wf_cfg (init_cfg e).
 Proof.
@@ -356,13 +342,13 @@ Theorem step_preserves_wf_log :
     wf_log log'.
 Proof.
   introv Hwf Hdesc Hstep.
-  destruct Hwf as (Huspawn & Hustart & Huend & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
   inversion Hstep; substs; clear Hstep.
   - (* StepStart: log' = log & event_start t *)
     destruct Hdesc as (_ & Hdstart & _).
     asserts (Hsrc & Hnmem): (((exists t1, mem (event_spawn t1 t) log) \/ mem (event_init t) log) /\ ~mem (event_start t) log).
     { apply* Hdstart. }
-    splits 10.
+    splits 9.
     + introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros (t1' & Hmem'). apply~ Huspawn.
@@ -376,11 +362,6 @@ Proof.
         rew_listx. rew_listx in contra.
         branches; autos. inverts H0.
         false Hnmem. rew_listx~.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Huend l1 l2' t0).
-      rew_listx. rew_listx in contra.
-      branches; autos.
     + introv Heq.
       forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
       inverts* contra.
@@ -407,7 +388,7 @@ Proof.
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
     asserts (Hsmem & Henmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
-    splits 10.
+    splits 9.
     + introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
@@ -416,14 +397,6 @@ Proof.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros contra. apply~ (Hustart l1 l2' t0).
       rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. rew_list. exact Henmem.
-      * intros contra. apply~ (Huend l1 l2' t0).
-        rew_listx. rew_listx in contra.
-        branches; autos.
-        inverts H.
-        false Henmem. rew_listx*.
     + introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       apply* Hspawn.
@@ -453,7 +426,7 @@ Proof.
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
-    splits 10.
+    splits 9.
     + introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
@@ -462,11 +435,7 @@ Proof.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros contra. apply~ (Hustart l1 l2' t0).
       rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Huend l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
+    +introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       apply* Hspawn.
     + introv Heq.
@@ -494,7 +463,7 @@ Proof.
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
-    splits 10.
+    splits 9.
     + introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
@@ -503,11 +472,7 @@ Proof.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros contra. apply~ (Hustart l1 l2' t0).
       rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Huend l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
+    +introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       apply* Hspawn.
     + introv Heq.
@@ -535,7 +500,7 @@ Proof.
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
     asserts (Hsmem & Hwnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
-    splits 10.
+    splits 9.
     + introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
@@ -544,11 +509,7 @@ Proof.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros contra. apply~ (Hustart l1 l2' t0).
       rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Huend l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
+    +introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       apply* Hspawn.
     + introv Heq.
@@ -584,7 +545,7 @@ Proof.
     { intros (t1 & Hmem').
       match goal with Hni : t' \notindom T |- _ => apply Hni end.
       apply (Hdspawned t'). left. exists t1. exact Hmem'. }
-    splits 10.
+    splits 9.
     + introv Heq.
       forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
       * inverts Hmem'. rew_listx~.
@@ -597,11 +558,7 @@ Proof.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros contra. apply~ (Hustart l1 l2' t0).
       rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Huend l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
+    +introv Heq.
       forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       apply* Hspawn.
     + introv Heq.
@@ -631,7 +588,7 @@ Proof.
     { apply (Hdrunning t). eauto. }
     asserts Htended: (mem (event_end t') log).
     { apply (Hdend t'). eauto. }
-    splits 10.
+    splits 9.
     + (* Unique spawns: event_join is not a spawn *)
       introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
@@ -641,11 +598,6 @@ Proof.
       introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros contra. apply~ (Hustart l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    + (* Unique ends: event_join is not an end *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Huend l1 l2' t0).
       rew_listx. rew_listx in contra. branches; autos.
     + (* Spawn before start: event_join is not a start *)
       introv Heq.
@@ -681,7 +633,7 @@ Proof.
     destruct Hdesc as (_ & _ & _ & Hdrunning & _ & Hdunlock & _).
     asserts (Hsmem & Hlnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). eauto. }
-    asserts Hwflog: (wf_log log). { splits 10; assumption. }
+    asserts Hwflog: (wf_log log). { splits 9; assumption. }
     applys wf_log_snoc_lock Hwflog Hsmem Hlnmem.
     right. apply (proj2 (Hdunlock l)).
     match goal with Hbf : binds L l (ls_free, ?hh) |- _ => exists hh; exact Hbf end.
@@ -689,7 +641,7 @@ Proof.
     destruct Hdesc as (_ & _ & _ & Hdrunning & Hdlock & Hdunlock & _).
     asserts (Hsmem & Hlnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). eauto. }
-    asserts Hwflog: (wf_log log). { splits 10; assumption. }
+    asserts Hwflog: (wf_log log). { splits 9; assumption. }
     applys wf_log_snoc_lock Hwflog Hsmem Hlnmem.
     left. destruct (last_case (LibList.filter (fun e => touches_lock l e) log)) as [Hnil | (x & xs' & Heqf)].
     + exact Hnil.
@@ -710,7 +662,7 @@ Proof.
     { apply (Hdrunning t). eauto. }
     asserts (log'' & Hlheld): (exists log'', LibList.filter (fun e => touches_lock l e) log = log'' & event_lock t l).
     { apply (Hdlock t l). eauto. }
-    splits 10.
+    splits 9.
     + introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
@@ -719,11 +671,7 @@ Proof.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       intros contra. apply~ (Hustart l1 l2' t0).
       rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Huend l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    + introv Heq.
+    +introv Heq.
       forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
       apply* Hspawn.
     + introv Heq.
@@ -769,7 +717,7 @@ Theorem step_preserves_describes :
     describes log' cfg'.
 Proof.
   introv Hwf Hdesc Hstep.
-  destruct Hwf as (Huspawn & Hustart & Huend & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
   inversion Hstep; substs; clear Hstep.
   - (* StepStart: log' = log & event_start t, T' = T[t := running] *)
     destruct Hdesc as (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & (t'' & Hdinit)).
@@ -2740,7 +2688,7 @@ Proof.
            forwards Hne: spawned_thread_no_prior_event Hwf HN0.
            congruence.
         -- introv Heq. subst E.
-           destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & _ & Hinit & _).
+           destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & Hinit & _).
            forwards* (-> & ->): Hinit log (@nil event) t1.
            forwards*: Nth_nil_inv.
     + (* last event = E *)
@@ -2961,7 +2909,7 @@ Proof.
               forwards Hng: spawned_thread_no_prior_event Hwf Hklock.
               cbn [get_thread] in Hng. exact Hng.
            ++ introv Heqinit. rewrite Heqinit in Hwf.
-              destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & _ & Hinit & _).
+              destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & Hinit & _).
               forwards* (-> & ->): Hinit log (@nil event) t1.
               forwards*: Nth_nil_inv.
 Qed.
@@ -3509,7 +3457,7 @@ Proof.
               { applys Hnc Hg HNg0 Hgg. } { subst eg; simpls; congruence. }
       * (* init t0: by wf_log the init event must be first, so [log = nil],
            contradicting the prefix write of [x] *)
-        destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & _ & Hinit & _).
+        destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & Hinit & _).
         asserts Heq: ((log & event_init t0) = log ++ event_init t0 :: nil).
         { rew_list~. }
         forwards (Heqt & Hnil): Hinit Heq.

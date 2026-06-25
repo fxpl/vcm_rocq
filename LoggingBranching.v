@@ -15,6 +15,8 @@ Definition deltas := map tid diff.
 Definition commits := map tid commit.
 Definition lcommits := map lid commit.
 
+(* TODO: Try getting rid of the init event and start play_log from
+initial play cfg *)
 Inductive play_event : event -> (deltas * commits * graph * lcommits) -> (deltas * commits * graph * lcommits) -> Prop :=
 | PlayRead :
   forall D TC G LC t x v,
@@ -84,6 +86,7 @@ Inductive play_log : log -> (deltas * commits * graph * lcommits) -> (deltas * c
     play_log (log & E) (D, TC, G, LC) (D'', TC'', G'', LC'') (CH & TC''[get_thread E])
 .
 
+(* TODO: Move to Log.v *)
 Definition is_sync_event (E : event) :=
   match E with
   | event_spawn t _
@@ -139,6 +142,7 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
             (forall l, l \indom L -> exists ls, binds L l (ls, LC[l])) /\
             (forall t, t \indom T -> t \indom D) /\
             (forall t, t \indom T -> t \indom TC) /\
+            (* TODO: Merge into iff *)
             (forall l, l \indom L -> l \indom LC) /\
             (forall l, l \indom LC -> l \indom L))
       /\

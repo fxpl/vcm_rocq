@@ -288,7 +288,6 @@ Proof.
   introv Hwf HwfB HdescSh HdescB Hsame Hcf Hstep.
   destruct cfgB as [(T & G) L].
   destruct HwfB as (HwfG & _).
-  forwards* HdescSh': LoggingSharedMemoryFacts.step_preserves_describes Hwf.
   inverts Hstep;
     match goal with
     | H: binds ?T ?t (?ts', ?e) |- _ =>
