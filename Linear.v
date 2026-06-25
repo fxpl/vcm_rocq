@@ -110,15 +110,7 @@ Inductive step : cfg -> cfg -> Prop :=
 | StepLock : forall T G g L t e d c K l,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_lock l) ->
-    binds L l ls_free ->
-    lin_conflict_free d c g G ->
-    step (T, G, g, L) (T[t := (state_running, te_exp (K void), d, g)], G, g, L[l := ls_held t])
-| StepLockFresh : forall T G g L t e d c K l,
-    (* acquiring a never-touched lock: like StepLock but the lock is absent from
-       [L] rather than free.  The thread still fast-forwards to the global head. *)
-    binds T t (state_running, te_exp e, d, c) ->
-    step_ul e K (eff_lock l) ->
-    l \notindom L ->
+    binds L l ls_free \/ l \notindom L ->
     lin_conflict_free d c g G ->
     step (T, G, g, L) (T[t := (state_running, te_exp (K void), d, g)], G, g, L[l := ls_held t])
 | StepRelease : forall T T' G G' g g' L t e d c K l,

@@ -12,6 +12,7 @@ LoggingSharedMemoryFacts.v
 Linear.v
 LoggingLinear.v
 LoggingLinearFacts.v
+LinearEquivLemmas.v
 LinearEquiv.v
 Graph.v
 GraphFacts.v

@@ -141,21 +141,21 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
     commit_fresh G g' ->
     global_commit t g g' T G = (T', G') ->
     step ((T, G, g, L), log) ((T'[t := (state_terminated, te_ret r, empty, g')], G', g', L), log & event_end t)
-| StepReadLocal : forall T G g L t e d c K i v log,
+| StepReadLocal : forall T G g L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
-    step_ul e K (eff_read i) ->
-    binds d i v ->
-    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, g, L), log & event_read t i v)
-| StepReadGlobal : forall T G g L t e d c K i v log,
+    step_ul e K (eff_read x) ->
+    binds d x v ->
+    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, g, L), log & event_read t x v)
+| StepReadGlobal : forall T G g L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
-    step_ul e K (eff_read i) ->
-    i \notindom d ->
-    is_latest_value G c i v ->
-    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, g, L), log & event_read t i v)
-| StepWrite : forall T G g L t e d c K i v log,
+    step_ul e K (eff_read x) ->
+    x \notindom d ->
+    is_latest_value G c x v ->
+    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, g, L), log & event_read t x v)
+| StepWrite : forall T G g L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
-    step_ul e K (eff_write i v) ->
-    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K void), d[i := v], c)], G, g, L), log & event_write t i v)
+    step_ul e K (eff_write x v) ->
+    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K void), d[x := v], c)], G, g, L), log & event_write t x v)
 | StepSpawn : forall T T' G G' g g' L t (t' : tid) e d c K e' log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_spawn e') ->
@@ -173,13 +173,7 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 | StepLock : forall T G g L t e d c K l log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_lock l) ->
-    binds L l ls_free ->
-    lin_conflict_free d c g G ->
-    step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K void), d, g)], G, g, L[l := ls_held t]), log & event_lock t l)
-| StepLockFresh : forall T G g L t e d c K l log,
-    binds T t (state_running, te_exp e, d, c) ->
-    step_ul e K (eff_lock l) ->
-    l \notindom L ->
+    binds L l ls_free \/ l \notindom L ->
     lin_conflict_free d c g G ->
     step ((T, G, g, L), log) ((T[t := (state_running, te_exp (K void), d, g)], G, g, L[l := ls_held t]), log & event_lock t l)
 | StepRelease : forall T T' G G' g g' (L : locks) t e d c K l log,
