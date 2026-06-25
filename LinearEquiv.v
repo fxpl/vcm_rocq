@@ -402,7 +402,7 @@ Proof.
   + (* StepRelease *)
     asserts* Hdom: (t \indom Tsh).
     exists. split; [ constructors* | simpls*].
-Admitted.
+Qed.
 
 Theorem linear_equiv :
   forall log log' cfgSh cfgL,

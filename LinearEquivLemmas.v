@@ -747,7 +747,36 @@ Lemma last_write_maximal :
                   ~ is_commit_event ep) ->
     graph_writes G cs x vm ->
     forall c' v', graph_writes G c' x v' -> ancestor G cs c' -> c' = cs.
-Admitted.
+Proof.
+  intros log D TC G LC CH m tm x vm f ef cs.
+  intros Hcf Hwf Hplay HNm Hlast HNf Hgf Hcfe Hmf HNchf Hncf Hcsw c' v' Hc'w Hanc.
+  destruct (classic (c' = cs)) as [Heq | Hne]; [ exact Heq | exfalso ].
+  forwards (f' & ef' & tw' & kw' & HNfCH & HNflog & Hgtf' & Hcef' & Hkwlt & HNkw & Hncl):
+    graph_writes_flush Hplay Hc'w.
+  forwards Hkwm: Hlast HNkw.
+  asserts Hne2: (cs <> c'). { intros HH. apply Hne. symmetry. exact HH. }
+  forwards Hflt: (>> ancestor_creation_order Hplay HNchf HNf Hcfe HNfCH HNflog Hcef' Hanc Hne2).
+  destruct (classic (tw' = tm)) as [Htw | Htw].
+  - (* same thread: [f] is a [tm]-commit strictly inside [[kw', f')] *)
+    asserts Hni: (~ is_commit_event ef).
+    { applys Hncl f ef; [ nat_math | exact Hflt | exact HNf | (rewrite Htw; exact Hgf) ]. }
+    apply Hni. exact Hcfe.
+  - (* other thread: a crossing flush of [tw'] sits inside [[kw', f')] *)
+    asserts Hkwltm: (kw' < m).
+    { destruct (classic (kw' = m)) as [He | Hlt].
+      - subst kw'. forwards Heqw: Nth_functional HNkw HNm. inverts Heqw. false.
+      - nat_math. }
+    asserts Hacc: (accesses_variable x (event_write tm x vm)). { simpl. reflexivity. }
+    forwards Hhb: (>> Hcf HNkw HNm Hacc Hkwltm).
+    asserts Hgtw: (get_thread (event_write tw' x v') = tw'). { reflexivity. }
+    asserts Hgtmne: (get_thread (event_write tm x vm) <> tw'). { simpl. auto. }
+    forwards (f'' & ef'' & Hkwf'' & HNf'' & Hgf'' & Hcef'' & Hhbf''):
+      (>> hb_cross_thread_flush Hhb HNkw Hgtw HNm Hgtmne).
+    forwards Hf''lt: hb_lt Hhbf''.
+    asserts Hni: (~ is_commit_event ef'').
+    { applys Hncl f'' ef''; [ exact Hkwf'' | nat_math | exact HNf'' | exact Hgf'' ]. }
+    apply Hni. exact Hcef''.
+Qed.
 
 (* A play step preserves every pre-existing committed write (the new commit is
    fresh, so distinct from any existing writer). *)
