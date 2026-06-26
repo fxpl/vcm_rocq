@@ -715,6 +715,16 @@ Qed.
 
 Hint Resolve graph_commit_indom_same : vcm.
 
+Lemma graph_commit_indom_inv :
+  forall G c c' c'' d,
+    graph_indom (graph_commit G c' c'' d) c ->
+    graph_indom G c \/ c = c''.
+Proof.
+  introv Hdom. unfolds graph_indom, graph_commit.
+  destruct G as (C & P).
+  rew_dom. rew_set in Hdom. auto.
+Qed.
+
 Lemma graph_merge_indom :
   forall G c c' c'' m,
     graph_indom G c ->
@@ -747,3 +757,48 @@ Proof.
 Qed.
 
 Hint Resolve graph_merge_indom_same : vcm.
+
+Lemma total_order_commit :
+  forall G g g' d,
+    total_order G ->
+    (forall c, graph_indom G c -> ancestor G c g) ->
+    commit_fresh G g' ->
+    total_order (graph_commit G g g' d).
+Proof.
+  introv Htot Hmax Hfresh.
+  destruct G as (C & P).
+  introv Hdoma Hdomb.
+  forwards Hdisja: graph_commit_indom_inv Hdoma.
+  forwards Hdisjb: graph_commit_indom_inv Hdomb.
+  destruct Hdisja as [Hdoma' | ->];
+  destruct Hdisjb as [Hdomb' | ->].
+  - forwards Hanc: Htot Hdoma' Hdomb'.
+    branches; auto using ancestor_graph_commit.
+  - forwards Hanc: Hmax Hdoma'.
+    left. apply ancestor_trans with (c' := g);
+      auto using ancestor_graph_commit, ancestor_graph_commit_edge.
+  - forwards Hanc: Hmax Hdomb'.
+    right. apply ancestor_trans with (c' := g);
+      auto using ancestor_graph_commit, ancestor_graph_commit_edge.
+  - right. apply ancestor_refl.
+Qed.
+
+Hint Resolve total_order_commit : vcm.
+
+Lemma max_ancestor_commit :
+  forall G g g' c d,
+    (forall c, graph_indom G c -> ancestor G c g) ->
+    commit_fresh G g' ->
+    graph_indom (graph_commit G g g' d) c ->
+    ancestor (graph_commit G g g' d) c g'.
+Proof.
+  introv Hmax Hfresh Hdom.
+  forwards Hdomc: graph_commit_indom_inv Hdom.
+  branches.
+  - forwards~ Hanc: Hmax c.
+    apply ancestor_trans with (c' := g);
+      auto using ancestor_graph_commit, ancestor_graph_commit_edge.
+  - subst. apply ancestor_refl.
+Qed.
+
+Hint Resolve max_ancestor_commit : vcm.
