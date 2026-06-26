@@ -14,9 +14,9 @@ Import LogFacts.
 Definition deltas := map tid diff.
 Definition commits := map tid commit.
 Definition lcommits := map lid commit.
+Definition init_play_cfg : deltas * commits * graph * lcommits :=
+  (empty[t_root := empty], empty[t_root := root_commit], graph_root root_commit, empty).
 
-(* TODO: Try getting rid of the init event and start play_log from
-initial play cfg *)
 Inductive play_event : event -> (deltas * commits * graph * lcommits) -> (deltas * commits * graph * lcommits) -> Prop :=
 | PlayRead :
   forall D TC G LC t x v,
@@ -65,10 +65,6 @@ Inductive play_event : event -> (deltas * commits * graph * lcommits) -> (deltas
     t \indom TC ->
     l \notindom LC ->
     play_event (event_lock t l) (D, TC, G, LC) (D, TC, G, LC[l := TC[t]])
-| PlayInit :
-  forall D TC G LC t,
-    commit_fresh G root_commit ->
-    play_event (event_init t) (D, TC, G, LC) (D[t := empty], TC[t := root_commit], graph_root G root_commit, LC)
 .
 
 (* [play_log] additionally produces a commit history [CH], a list parallel to the
@@ -112,11 +108,11 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
   | (T, G, L) =>
       (* Spawned threads exist *)
       (forall t2,
-          (exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log <-> t2 \indom T)
+          (exists t1, mem (event_spawn t1 t2) log) \/ t2 = t_root <-> t2 \indom T)
       /\
       (* Spawned threads that have not started are new *)
       (forall t2,
-          ((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log) /\ ~mem (event_start t2) log <-> exists e d c, binds T t2 (state_new, e, d, c))
+          ((exists t1, mem (event_spawn t1 t2) log) \/ t2 = t_root) /\ ~mem (event_start t2) log <-> exists e d c, binds T t2 (state_new, e, d, c))
       /\
       (* Ended threads are ended, with empty staging areas *)
       (forall t,
@@ -137,17 +133,16 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       /\
       (* Replaying the log produces the commit graph, staging areas and lock/thread commits *)
       (exists D TC LC CH,
-          play_log log (empty, empty, empty_graph, empty) (D, TC, G, LC) CH /\
+          play_log log init_play_cfg (D, TC, G, LC) CH /\
             (forall t, t \indom T -> exists ts e, binds T t (ts, e, D[t], TC[t])) /\
             (forall l, l \indom L -> exists ls, binds L l (ls, LC[l])) /\
             (forall t, t \indom T -> t \indom D) /\
             (forall t, t \indom T -> t \indom TC) /\
             (* TODO: Merge into iff *)
-            (forall l, l \indom L -> l \indom LC) /\
-            (forall l, l \indom LC -> l \indom L))
+            (forall l, l \indom L <-> l \indom LC))
       /\
-      (* The log has the initialisation event *)
-      (exists t, mem (event_init t) log)
+      (* A non-empty log has the initialisation event *)
+      (log <> nil -> mem (event_start t_root) log)
   end.
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
@@ -229,5 +224,5 @@ Definition wf_cfg (cfg : cfg) : Prop :=
 arbitrary expression *)
 Definition init_cfg (e : exp) : cfg :=
   (empty[t_root := (state_new, te_exp e, empty_diff, root_commit)],
-   graph_root empty_graph root_commit,
+   graph_root root_commit,
    empty).

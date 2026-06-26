@@ -2,9 +2,9 @@ From Vcm Require Import Common.
 From Vcm Require Import Graph.
 
 Theorem init_graph_wf :
-  wf_graph (graph_root empty_graph root_commit).
+  wf_graph (graph_root root_commit).
 Proof.
-  unfolds graph_root, empty_graph.
+  unfolds graph_root.
   splits.
   - unfolds finite. rewrite dom_update.
     rewrite dom_empty.
@@ -407,11 +407,12 @@ Proof.
   - applys~ ancestor_graph_merge.
 Qed.
 
+(* TODO: These don't make sense?
 Lemma ancestor_graph_root :
   forall G c x y,
     ancestor G x y ->
     commit_fresh G c ->
-    ancestor (graph_root G c) x y.
+    ancestor (graph_root c) x y.
 Proof.
   introv Hanc Hfresh. destruct G as (C & P). unfold graph_root.
   induction Hanc.
@@ -459,7 +460,7 @@ Proof.
   unfolds graph_binds, graph_writes, graph_commit.
   exists dd. split~. applys~ binds_update_neq_inv Hb.
 Qed.
-
+*)
 
 (* ---------------------------------------------------------------------- *)
 (* Lemmas relocated here from BranchingEquiv.v (organization pass).          *)
@@ -525,10 +526,10 @@ Proof.
 Qed.
 
 Lemma graph_writes_graph_root_same_false :
-  forall G c i v,
-    graph_writes (graph_root G c) c i v -> False.
+  forall c i v,
+    graph_writes (graph_root c) c i v -> False.
 Proof.
-  introv (dd & Hgb & Hbd). destruct G as (C & P).
+  introv (dd & Hgb & Hbd).
   unfolds graph_root, graph_binds.
   forwards: binds_update_same_inv Hgb.
   subst.
@@ -732,6 +733,16 @@ Lemma graph_merge_indom_same :
 Proof.
   introv. unfolds graph_indom, graph_merge.
   destruct G as (C & P).
+  rew_dom. rew_set. auto.
+Qed.
+
+Hint Resolve graph_merge_indom_same : vcm.
+
+Lemma graph_root_indom_same :
+  forall c,
+    graph_indom (graph_root c) c.
+Proof.
+  introv. unfolds graph_indom, graph_root.
   rew_dom. rew_set. auto.
 Qed.
 

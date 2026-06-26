@@ -20,6 +20,8 @@ Import LogFacts.
 
 Definition deltas := map tid diff.
 Definition commits := map tid commit.
+Definition init_play_cfg : deltas * commits * graph * commit :=
+  (empty[t_root := empty], empty[t_root := root_commit], graph_root root_commit, root_commit).
 
 Inductive play_event :
   event -> (deltas * commits * graph * commit) -> (deltas * commits * graph * commit) -> Prop :=
@@ -47,10 +49,6 @@ Inductive play_event :
     binds D t d ->
     commit_fresh G g' ->
     play_event (event_unlock t l) (D, TC, G, g) (D[t := empty], TC[t := g'], graph_commit G g g' d, g')
-| PlayInit : forall D TC G g t,
-    commit_fresh G root_commit ->
-    play_event (event_init t) (D, TC, G, g)
-      (D[t := empty], TC[t := root_commit], graph_root G root_commit, root_commit)
 .
 
 (* As in LoggingBranching, [CH] is a list parallel to the log: [CH[k]] is the
@@ -71,11 +69,11 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
   | (T, G, g, L) =>
       (* Spawned and inited threads exist *)
       (forall t2,
-          (exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log <-> t2 \indom T)
+          (exists t1, mem (event_spawn t1 t2) log) \/ t2 = t_root <-> t2 \indom T)
       /\
       (* Spawned/inited threads that have not started are new *)
       (forall t2,
-          ((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log) /\ ~mem (event_start t2) log <-> exists e d c, binds T t2 (state_new, e, d, c))
+          ((exists t1, mem (event_spawn t1 t2) log) \/ t2 = t_root) /\ ~mem (event_start t2) log <-> exists e d c, binds T t2 (state_new, e, d, c))
       /\
       (* Ended threads are ended, with empty diffs *)
       (forall t,
@@ -97,13 +95,13 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (* Replaying the log produces the commit graph [G] and the global head [g];
          each thread's diff and commit are the replayed [D[t]] and [TC[t]]. *)
       (exists D TC CH,
-          play_log log (empty, empty, empty_graph, root_commit) (D, TC, G, g) CH /\
+          play_log log init_play_cfg (D, TC, G, g) CH /\
             (forall t, t \indom T -> exists st e, binds T t (st, e, D[t], TC[t])) /\
             (forall t, t \indom T -> t \indom D) /\
             (forall t, t \indom T -> t \indom TC))
       /\
-      (* The log has the initialisation event *)
-      (exists t, mem (event_init t) log)
+      (* A non-empty log has the initialisation event *)
+      (log <> nil -> mem (event_start t_root) log)
   end.
 
 (* The single-branch well-formedness of a configuration, transferred from
@@ -127,7 +125,7 @@ Definition wf_cfg (cfg : cfg) : Prop :=
    root, an empty single-commit graph whose head is that root, and no locks. *)
 Definition init_cfg (e : exp) : cfg :=
   (empty[t_root := (state_new, te_exp e, empty_diff, root_commit)],
-   graph_root empty_graph root_commit,
+   graph_root root_commit,
    root_commit,
    empty).
 

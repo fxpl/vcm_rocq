@@ -208,6 +208,7 @@ Proof.
         apply Hsame in H as (d & c & Hbinds)
     end.
   - (* StepStart *)
+    clears HdescSh HdescL.
     exists. splits; [ constructors* | simpls*].
   - (* StepEnd *)
     forwards (g' & Hfresh): exists_commit_fresh HwfG.
@@ -230,6 +231,7 @@ Proof.
       applys* lin_conflict_free_holds.
     }
     asserts* Hdom: (t \indom T0).
+    clears HdescSh HdescL.
     exists. splits; [ constructors* | simpls*].
   - (* StepRead *)
     (* TODO: Cases on global vs. local read. Connect to play_log
@@ -259,7 +261,7 @@ Proof.
       destruct (last_write_position log x log'0 t' v Hfilter) as (mw & HNL & Hlast).
       forwards HLlt: Nth_inbound HNL.
       asserts Hplayf: (exists CHf,
-        play_log (log & event_read t x v) (\{}, \{}, empty_graph, root_commit) (D, TC, G, g) CHf).
+        play_log (log & event_read t x v) init_play_cfg (D, TC, G, g) CHf).
       { exists. applys PlaySnoc Hplay. apply PlayRead. }
       destruct Hplayf as (CHf & Hplayf).
       asserts HNLf: (LibList.Nth mw (log & event_read t x v) (event_write t' x v)).
@@ -284,6 +286,7 @@ Proof.
       exists. split; [ applys StepReadGlobal Hbinds; [ eassumption | exact Hnin | exact Hlv ] |].
       simpls*.
   - (* StepWrite *)
+    clears HdescSh HdescL.
     exists. splits; [ constructors* | simpls*].
   - (* StepSpawn *)
     forwards (g' & Hfresh): exists_commit_fresh HwfG.
@@ -323,6 +326,7 @@ Proof.
       rew_dom. rew_set. autos.
     }
     asserts* Hneq: (t <> t').
+    clears HdescSh HdescL.
     exists. splits; [ constructors* | simpls*].
   - (* StepJoin *)
     apply Hsame in H4 as (d' & c' & Hbinds').
@@ -348,6 +352,7 @@ Proof.
       destruct Hpgwf as (_ & HTCdom).
       forwards*: lin_conflict_free_holds.
     }
+    clears HdescSh HdescL.
     exists. splits; [ constructors* | simpls*].
   - (* StepLock *)
     asserts Hcf': (lin_conflict_free d c g G).
@@ -361,6 +366,7 @@ Proof.
       destruct Hpgwf as (_ & HTCdom).
       applys* lin_conflict_free_holds.
     }
+    clears HdescSh HdescL.
     exists. splits; [ constructors* | simpls*].
   - forwards (g' & Hfresh): exists_commit_fresh HwfG.
     asserts (T' & G' & Heq): (exists T' G', global_commit t g g' T G = (T', G')).
@@ -382,6 +388,7 @@ Proof.
       applys* lin_conflict_free_holds.
     }
     asserts* Hdom: (t \indom T0).
+    clears HdescSh HdescL.
     exists. splits; [ constructors* | simpls*].
 Qed.
 
@@ -413,9 +420,11 @@ Proof.
         apply Hsame in Hex as Hbinds; clear Hex
     end.
   + (* StepStart *)
+    clears HdescSh HdescL.
     exists. split; [ constructors* | simpls*].
   + (* StepEnd *)
     asserts* Hdom: (t \indom Tsh).
+    clears HdescSh HdescL.
     eexists. split; [ constructors* | simpls*].
   + (* StepReadLocal *)
     exists. splits.
@@ -429,7 +438,8 @@ Proof.
       forwards* Hbinds'': HdomD t.
       exists t.
       applys* conflict_free_last_local_write Hcf' Hplay Hbinds''.
-    * simpls*.
+    * clears HdescSh HdescL.
+      simpls*.
   + (* StepReadGlobal *)
     exists. split.
     * constructors*.
@@ -451,8 +461,10 @@ Proof.
       asserts* Hdom: (t \indom T).
       forwards~ Hdom': HdomTC Hdom.
       applys* conflict_free_last_global_write Hcf Hwfr Hplay.
-    * simpls*.
+    * clears HdescSh HdescL.
+      simpls*.
   + (* StepWrite *)
+    clears HdescSh HdescL.
     eexists. split; [ constructors* | simpls*].
   + (* StepSpawn *)
     exists. split.
@@ -470,15 +482,19 @@ Proof.
       rew_dom. rew_set. autos.
     }
     asserts* Hneq: (t <> t').
+    clears HdescSh HdescL.
     simpls*.
   + (* StepJoin *)
     asserts* Hex: (exists d c, binds T t' (state_terminated, te_ret r, d, c)).
     apply Hsame in Hex.
+    clears HdescSh HdescL.
     exists. split; [ constructors* | simpls*].
   + (* StepLock *)
+    clears HdescSh HdescL.
     exists. split; [ constructors* | simpls*].
   + (* StepRelease *)
     asserts* Hdom: (t \indom Tsh).
+    clears HdescSh HdescL.
     exists. split; [ constructors* | simpls*].
 Qed.
 

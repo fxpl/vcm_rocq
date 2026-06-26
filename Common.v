@@ -111,3 +111,18 @@ Proof.
   destruct l1; rew_list in *; inverts* Heq.
   forwards: nil_eq_middle_inv y l1 l2; rew_list~.
 Qed.
+
+Lemma last_eq_middle_inv :
+  forall A (xs : list A) x ys1 y ys2,
+    xs & x = ys1 ++ y :: ys2 ->
+    x = y /\ xs = ys1 /\ ys2 = nil \/
+    exists ys2', ys2 = ys2' & x /\ xs = ys1 ++ y :: ys2'.
+Proof.
+  introv Heq.
+  gen ys1 ys2 x y.
+  induction xs; rew_list in *; intros.
+  - destruct ys1; rew_list in *; inverts* Heq.
+    apply nil_eq_app_inv in H1 as (-> & contra). congruence.
+  - destruct ys1; rew_list in *; inverts* Heq.
+    forwards* [(-> & -> & ->) | (ys2' & -> & ->)]: IHxs H1.
+Qed.

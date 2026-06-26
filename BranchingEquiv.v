@@ -314,7 +314,7 @@ Proof.
     destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
     apply Hwrite in H6 as (t' & log'0 & Hfilter).
     destruct HdescB as (_ & _ & _ & Hrun & _ & _ &
-      (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2) & _).
+      (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC) & _).
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
@@ -335,7 +335,7 @@ Proof.
       destruct (last_write_position log x log'0 t' v Hfilter) as (mw & HNL & Hlast).
       forwards HLlt: Nth_inbound HNL.
       asserts Hplayf: (exists CHf,
-        play_log (log & event_read t x v) (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CHf).
+        play_log (log & event_read t x v) init_play_cfg (D, TC, G, LC) CHf).
       { eexists. applys PlaySnoc Hplay. apply PlayRead. }
       destruct Hplayf as (CHf & Hplayf).
       asserts HNLf: (LibList.Nth mw (log & event_read t x v) (event_write t' x v)).
@@ -377,6 +377,7 @@ Proof.
     { apply binds_update_same. }
     asserts HbiTt: (binds (T[t:=(state_running, te_exp (K t'), d, c)][t':=(state_new, te_exp e', \{}, 0)]) t (state_running, te_exp (K t'), d, c)).
     { applys binds_update_neq Hneq. apply binds_update_same. }
+    clears HdescB HdescSh. (* Implication in describes tanks proof search*)
     exists. splits; [ constructors* | simpls*].
   + (* StepJoin *)
     forwards (c'' & Hfresh): exists_commit_fresh HwfG.
@@ -407,7 +408,7 @@ Proof.
     asserts Hmerge: (conflict_free_merge d' c' c G).
     {
       destruct HdescB as (_ & _ & _ & _ & _ & _ &
-        (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2) & _).
+        (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC) & _).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds').
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -419,6 +420,7 @@ Proof.
       applys conflict_free_merge_holds Hwf Hcflog Hplay;
         [ applys HdomD HtT | applys HdomTC HtT | applys HTCdom; applys HdomTC Ht'T ].
     }
+    clears HdescSh HdescB.
     exists. splits; [ constructors* | simpls*].
   + (* StepLock *)
     branches.
@@ -427,7 +429,7 @@ Proof.
       asserts Hmerge: (conflict_free_merge d c c' G).
       {
         destruct HdescB as (_ & _ & _ & _ & _ & _ &
-          (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2) & _).
+          (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC) & _).
         forwards Hcflog: conflict_free_last_inv Hcf.
         lets HtT: (indom_of_binds Hbinds).
         forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -437,7 +439,7 @@ Proof.
         forwards* Heql: binds_inj Hlock Hbdl. inverts Heql.
         forwards Hpgwf: play_log_graph_wf Hplay. destruct Hpgwf as (_ & _ & HLCdom).
         applys conflict_free_merge_holds Hwf Hcflog Hplay;
-          [ applys HdomD HtT | applys HdomTC HtT | applys HLCdom; applys HdomLC Hl0L ].
+          [ applys HdomD HtT | applys HdomTC HtT | applys HLCdom; applys* HdomLC ].
       }
       asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_lock t l0 c'' T G L = (T', G') /\
                                                              binds T' t (state_running, te_exp e, d, c'')).
@@ -451,9 +453,11 @@ Proof.
         - reflexivity.
         - apply binds_update_same.
       }
+      clears HdescSh HdescB.
       exists. splits; [ constructors* | simpls*].
     * forwards Heq: matching_locks_same_domain Hlck.
       rewrite Heq in *.
+      clears HdescSh HdescB.
       exists. splits; [ applys* StepLockFresh | simpls*].
   + (* StepRelease *)
     forwards (c'' & Hfresh): exists_commit_fresh HwfG.
@@ -477,6 +481,7 @@ Proof.
       - reflexivity.
       - apply binds_update_same.
     }
+    clears HdescSh HdescB.
     exists. splits; [ constructors* | simpls*].
 Qed.
 
@@ -510,27 +515,30 @@ Proof.
         apply Hthr in Hex as Hbinds; clear Hex
     end.
   + (* StepStart *)
+    clears HdescSh HdescB.
     exists. split; [ constructors* | simpls*].
   + (* StepEnd *)
+    clears HdescSh HdescB.
     exists. split; [ constructors* | simpls*].
   + (* StepReadLocal *)
     exists. split.
     { constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & Hstart & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2) & _).
+      destruct HdescB as (_ & _ & _ & Hstart & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC) & _).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       apply Hwrite.
       forwards Hcf': conflict_free_last_inv Hcf.
       forwards* Hbinds'': HdomD t.
       forwards* Hex: conflict_free_last_local_write Hplay. }
+    clears HdescSh HdescB.
     simpls*.
   + (* StepReadGlobal *)
     exists. split.
     {
       constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & Hrun & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC & HdomLC2) & _).
+      destruct HdescB as (_ & _ & _ & Hrun & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC) & _).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       forwards* Heq: binds_inj Hbinds'.
@@ -552,8 +560,10 @@ Proof.
       forwards~ Hdom': HdomTC Hdom.
       forwards* Hex: conflict_free_last_global_write Hcf Hwfr Hcfg Hplay.
     }
+    clears HdescSh HdescB.
     simpls*.
   + (* StepWrite *)
+    clears HdescSh HdescB.
     exists. split; [ constructors* | simpls*].
   + (* StepSpawn *)
     forwards Heq: matching_threads_same_domain Hthr.
@@ -566,10 +576,12 @@ Proof.
         asserts HbiTt': (binds iT t' (state_new, te_exp e', \{}, 0));
         [ apply binds_update_same |]
     end.
+    clears HdescSh HdescB.
     exists. split; [ constructors* | simpls*].
   + (* StepJoin *)
     asserts* Hex: (exists d c, binds T t' (state_terminated, te_ret r, d, c)).
     apply Hthr in Hex.
+    clears HdescSh HdescB.
     exists. split; [ constructors* | simpls*].
   + (* StepLock *)
     exists. split.
@@ -581,10 +593,12 @@ Proof.
       forwards Hiff': HunlockedB l0.
       left. apply Hiff. apply* Hiff'.
     }
+    clears HdescSh HdescB.
     simpls*.
   + (* StepLockFresh *)
     forwards Heq: matching_locks_same_domain Hlck.
     asserts Hnd: (l0 \notindom Lsh). { rewrite Heq. assumption. }
+    clears HdescSh HdescB.
     exists. split; [ constructors* | simpls*].
   + (* StepRelease *)
     exists. split.
@@ -595,6 +609,7 @@ Proof.
       forwards* (t' & log' & Hiff): HlockedSh t l0.
       forwards* (t'' & log'' & Hiff'): HunlockedB t l0.
     }
+    clears HdescSh HdescB.
     simpls*.
 Qed.
 

@@ -9,7 +9,6 @@ Inductive event :=
 | event_unlock (t : tid) (l : lid)
 | event_start (t : tid)
 | event_end (t : tid)
-| event_init (t : tid)
 .
 
 Definition get_thread (e : event) :=
@@ -21,8 +20,7 @@ Definition get_thread (e : event) :=
   | event_lock t _
   | event_unlock t _
   | event_start t
-  | event_end t
-  | event_init t => t
+  | event_end t => t
   end.
 
 Definition touches_lock (l : lid) (e : event) :=
@@ -114,7 +112,7 @@ Definition wf_log (log : log) : Prop :=
   (* Threads start after spawning, or are initialised (the root) *)
   (forall l1 l2 t2,
       log = l1 ++ event_start t2 :: l2 ->
-      (exists t1, mem (event_spawn t1 t2) l1) \/ mem (event_init t2) l1)
+      (exists t1, mem (event_spawn t1 t2) l1) \/ t2 = t_root)
   /\
   (* Threads are joined after ending *)
   (forall l1 l2 t1 t2,
@@ -126,7 +124,6 @@ Definition wf_log (log : log) : Prop :=
       log = l1 ++ e :: l2 ->
       get_thread e = t ->
       e <> event_start t ->
-      e <> event_init t ->
       mem (event_start t) l1)
   /\
   (* Threads end by ending *)
@@ -139,10 +136,10 @@ Definition wf_log (log : log) : Prop :=
       wf_lock_log (LibList.filter (fun e => touches_lock l e) log)
   )
   /\
-  (* The init event initialises the root thread and is the very first event *)
-  (forall l1 l2 t,
-      log = l1 ++ event_init t :: l2 ->
-      t = t_root /\ l1 = nil)
+  (* The first event is the start of the root thread *)
+  (forall l1 l2,
+      log = l1 ++ event_start t_root :: l2 ->
+      l1 = nil)
   /\
   (* The root thread is never spawned *)
   (forall t1, ~ mem (event_spawn t1 t_root) log)
@@ -178,6 +175,3 @@ Definition is_merge_event (e : event) : Prop :=
   | event_join _ _ => True
   | _ => False
   end.
-
-(* The log that describes the initial configuration *)
-Definition init_log := event_init t_root::nil.

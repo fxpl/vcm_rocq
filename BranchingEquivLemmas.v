@@ -28,7 +28,7 @@ Existing Instance inhab_exp.
    stated with the correct [is_commit_event] (flush) boundary. *)
 Lemma delta_is_uncommitted_write :
   forall log D TC G LC CH t x v,
-    play_log log (empty, empty, (empty, empty), empty) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     t \indom D ->
     binds D[t] x v ->
     exists m,
@@ -38,7 +38,12 @@ Proof.
   introv Hplay Hdom Hbinds.
   inductions Hplay.
   - (* PlayNil: D = empty *)
-    forwards*: indom_empty_inv.
+    rew_dom. rew_set in Hdom.
+    branches;
+      [forwards*: indom_empty_inv|].
+    subst.
+    rewrite read_update_same in Hbinds.
+    forwards* Heq: binds_empty_false Hbinds. typeclass.
   - (* PlaySnoc *)
     inverts H.
     + (* PlayRead *)
@@ -132,27 +137,12 @@ Proof.
       exists wm. split;
         [ applys* Nth_app_l wHN
         | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
-    + (* PlayInit *)
-      asserts Hneq: (t <> t0).
-      {
-        intros contra. subst.
-        rewrite read_update_same in Hbinds.
-        lets Hi: (indom_of_binds Hbinds).
-        forwards*: indom_empty_inv.
-      }
-      rewrite~ read_update_neq in Hbinds.
-      asserts* Hin: (t \indom D').
-      { lets* [Hc | Hd]: (indom_update_inv Hdom). }
-      forwards* (wm & wHN & wHns): IHHplay.
-      exists wm. split;
-        [ applys* Nth_app_l wHN
-        | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
 Qed.
 
 Lemma conflict_free_last_local_write :
   forall log D TC G LC CH t x v,
     conflict_free log ->
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     t \indom D ->
     binds D[t] x v ->
     exists log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t x v.
@@ -160,7 +150,13 @@ Proof.
   introv Hcf Hplay Hdom Hdelta.
   hint conflict_free_last_inv.
   inductions Hplay.
-  - forwards*: indom_empty_inv.
+  - (* PlayNil: D = empty *)
+    rew_dom. rew_set in Hdom.
+    branches;
+      [forwards*: indom_empty_inv|].
+    subst.
+    rewrite read_update_same in Hdelta.
+    forwards* Heq: binds_empty_false Hdelta. typeclass.
   - inverts H.
     + (* PlayRead*)
       forwards* (log' & Hfilter): IHHplay.
@@ -283,19 +279,6 @@ Proof.
       forwards* (log' & Hfilter): IHHplay.
       exists log'.
       rew_listx. cases_if. rew_list*.
-    + (* PlayInit *)
-      asserts Hneq: (t <> t0).
-      {
-        intros contra.
-        subst. rewrite read_update_same in Hdelta.
-        forwards contra: (indom_of_binds Hdelta).
-        forwards*: indom_empty_inv.
-      }
-      rewrite~ read_update_neq in Hdelta.
-      rew_dom. rew_set in Hdom. inverts Hdom; [|congruence].
-      forwards* (log' & Hfilter): IHHplay.
-      exists log'.
-      rew_listx. cases_if. rew_list*.
 Qed.
 
 (* The commit history is parallel to the log. *)
@@ -315,7 +298,7 @@ Lemma play_event_graph_extends :
     ancestor G'' x y.
 Proof.
   introv Hpe Hanc.
-  inverts Hpe; auto using ancestor_graph_commit, ancestor_graph_merge, ancestor_graph_root.
+  inverts Hpe; auto using ancestor_graph_commit, ancestor_graph_merge.
 Qed.
 
 (* After any play step, each thread's commit pointer advances to a descendant
@@ -324,11 +307,10 @@ Lemma play_event_TC_advance :
   forall E D' TC' G' LC' D'' TC'' G'' LC'' t,
     play_event E (D', TC', G', LC') (D'', TC'', G'', LC'') ->
     (forall t1 t2, E = event_spawn t1 t2 -> t <> t2) ->
-    (forall t1, E = event_init t1 -> t <> t1) ->
     ancestor G'' (TC'[t]) (TC''[t]).
 Proof.
-  introv Hpe Hspawn Hinit.
-  destruct E as [t1 t2 | t1 t2 | t0 x v | t0 x v | t0 ll | t0 ll | t0 | t0 | t0];
+  introv Hpe Hspawn.
+  destruct E as [t1 t2 | t1 t2 | t0 x v | t0 x v | t0 ll | t0 ll | t0 | t0];
     inverts Hpe as Hb Hf Hbd; try apply ancestor_refl.
   - (* spawn t1 t2 *)
     forwards Hnt2: Hspawn (eq_refl : event_spawn t1 t2 = event_spawn t1 t2).
@@ -357,10 +339,6 @@ Proof.
     + subst t. rewrite read_update_same.
       forwards Hrd: read_of_binds Hb. rewrite <- Hrd. apply ancestor_graph_commit_edge.
     + rewrite read_update_neq by congruence. apply ancestor_refl.
-  - (* init *)
-    forwards~ Hnt2: Hinit.
-    rewrite read_update_neq by congruence.
-    apply ancestor_refl.
 Qed.
 
 (* The commit pointer recorded for an event is an ancestor of the thread's final
@@ -386,14 +364,10 @@ Proof.
       forwards Hanc: IHHplay Hwf0 (eq_refl : (D', TC', G', LC') = (D', TC', G', LC')) HN0 Hgt HN0ch.
       apply ancestor_trans with (c' := TC'[t]).
       * eapply play_event_graph_extends; eassumption.
-      * eapply play_event_TC_advance; [ eassumption | |].
+      * eapply play_event_TC_advance; [ eassumption |].
         -- introv Heq. subst E.
            forwards Hne: spawned_thread_no_prior_event Hwf HN0.
            congruence.
-        -- introv Heq. subst E.
-           destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & Hinit & _).
-           forwards* (-> & ->): Hinit log (@nil event) t1.
-           forwards*: Nth_nil_inv.
     + (* last event = E *)
       subst em.
       forwards [HN0ch | (HmNch & Hcmeq)]: Nth_last_inv HNch.
@@ -450,17 +424,16 @@ Proof.
 Qed.
 
 (* A single play step leaves thread [t]'s commit pointer untouched whenever the
-   event is neither [t] acting nor a spawn or init of [t]. *)
+   event is neither [t] acting nor a spawn of [t]. *)
 Lemma play_event_TC_preserved :
   forall E D' TC' G' LC' D'' TC'' G'' LC'' t c,
     play_event E (D', TC', G', LC') (D'', TC'', G'', LC'') ->
     binds TC' t c ->
     get_thread E <> t ->
     (forall t1, E <> event_spawn t1 t) ->
-    E <> event_init t ->
     binds TC'' t c.
 Proof.
-  introv Hpe Hb Hgt Hsp Hinit.
+  introv Hpe Hb Hgt Hsp.
   inverts Hpe; simpls; try assumption.
   - (* PlayEnd *) applys binds_update_neq; [ congruence | assumption ].
   - (* PlaySpawn *)
@@ -470,8 +443,6 @@ Proof.
   - (* PlayJoin *) applys binds_update_neq; [ congruence | assumption ].
   - (* PlayLock *) applys binds_update_neq; [ congruence | assumption ].
   - (* PlayUnlock *) applys binds_update_neq; [ congruence | assumption ].
-  - (* PlayInit *)
-    applys* binds_update_neq.
 Qed.
 
 (* After [t2] ends, its commit pointer is frozen at the commit recorded for the
@@ -495,8 +466,8 @@ Proof.
       2:{ rewrite Hlen in HmNch. nat_math. }
       forwards Hwf0: wf_log_last_inv Hwf.
       forwards Hbpre: (>> IHHplay Hwf0 (eq_refl : (D', TC', G', LC') = (D', TC', G', LC')) HN0 HN0ch).
-      forwards (Hgt & Hns & Hinit): event_after_end_snoc Hwf HN0.
-      applys play_event_TC_preserved H Hbpre Hgt Hns Hinit.
+      forwards (Hgt & Hns): event_after_end_snoc Hwf HN0.
+      applys play_event_TC_preserved H Hbpre Hgt Hns.
     + (* end is the last (appended) event *)
       subst E.
       forwards [HN0ch | (HmNch & Hcmeq)]: Nth_last_inv HNch.
@@ -529,8 +500,8 @@ Proof.
       asserts Hnst0: (~ LibList.mem (event_start t2) log).
       { intro Hm. apply Hnst. rewrite mem_last_eq. left. exact Hm. }
       forwards Hbpre: (>> IHHplay Hwf0 (eq_refl : (D', TC', G', LC') = (D', TC', G', LC')) HN0 Hnst0 HN0ch).
-      forwards (Hgt & Hns & Hinit): event_after_spawn_snoc Hwf HN0 Hnst.
-      applys play_event_TC_preserved H Hbpre Hgt Hns Hinit.
+      forwards (Hgt & Hns): event_after_spawn_snoc Hwf HN0 Hnst.
+      applys play_event_TC_preserved H Hbpre Hgt Hns.
     + (* spawn is the last (appended) event *)
       subst E.
       forwards [HN0ch | (HmNch & Hcmeq)]: Nth_last_inv HNch.
@@ -608,13 +579,9 @@ Proof.
       * apply ancestor_trans with (c' := TC'[t]).
         -- eapply play_event_graph_extends; eassumption.
         -- applys play_event_TC_advance. eassumption.
-           ++ introv Heqsp. rewrite Heqsp in Hwf.
-              forwards Hng: spawned_thread_no_prior_event Hwf Hklock.
-              cbn [get_thread] in Hng. exact Hng.
-           ++ introv Heqinit. rewrite Heqinit in Hwf.
-              destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & Hinit & _).
-              forwards* (-> & ->): Hinit log (@nil event) t1.
-              forwards*: Nth_nil_inv.
+           introv Heqsp. rewrite Heqsp in Hwf.
+           forwards Hng: spawned_thread_no_prior_event Hwf Hklock.
+           cbn [get_thread] in Hng. exact Hng.
 Qed.
 
 (* Lock semantics: just before [t] unlocks [l], the lock holds some commit [cl]
@@ -870,12 +837,19 @@ Qed.
    [x = v] binding comes (via [delta_is_uncommitted_write]) from a write event. *)
 Lemma graph_writes_log_write :
   forall log D TC G LC CH cx x v,
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     graph_writes G cx x v ->
     exists tw m, LibList.Nth m log (event_write tw x v).
 Proof.
   introv Hplay. gen cx x v. inductions Hplay; introv Hgw.
-  - destruct Hgw as (dd & Hgb & Hbd). simpls. exfalso. applys binds_empty_false Hgb; typeclass.
+  - destruct Hgw as (dd & Hgb & Hbd). simpls.
+    destruct (classic (cx = root_commit)).
+    + subst.
+      forwards Hbinds: binds_update_same_inv Hgb.
+      subst.
+      forwards* Heq: binds_empty_false Hbd. typeclass.
+    + forwards~ Hbinds: binds_update_neq_inv Hgb.
+      forwards* Heq: binds_empty_false Hbinds. typeclass.
   - rename H into Hpe.
     inverts Hpe.
     1,2,3: (forwards* (tw & m0 & HN): IHHplay;
@@ -955,15 +929,6 @@ Proof.
     + (* PlayLockFresh: graph unchanged *)
       forwards* (tw & m0 & HN): IHHplay.
       exists tw m0. rew_list. applys Nth_app_l HN.
-    + (* PlayInit *)
-      asserts Hneq: (cx <> root_commit).
-      {
-        intros contra. subst.
-        forwards*: graph_writes_graph_root_same_false.
-      }
-      forwards*: graph_writes_graph_root_inv Hgw.
-      forwards* (tw & m0 & HN): IHHplay.
-      exists tw m0. applys* Nth_app_l.
 Qed.
 
 (* A play step preserves every pre-existing committed write (the new commit is
@@ -980,8 +945,7 @@ Proof.
     | apply graph_writes_graph_commit
     | apply graph_writes_graph_merge
     | apply graph_writes_graph_merge
-    | apply graph_writes_graph_commit
-    | apply graph_writes_graph_root];
+    | apply graph_writes_graph_commit];
     try exact Hgw;
     intro Heq; subst cs;
     match goal with Hf : commit_fresh _ _ |- _ => applys commit_fresh_not_indom Hf Hin end.
@@ -1035,7 +999,7 @@ Proof.
           + applys Hncf Hg Hgflt HNg0 Hgg.
           + forwards Hfin: Nth_inbound HNf. nat_math. }
       (* LEFT: [x] still in [tm]'s delta in the prefix; maintain the no-commit clause *)
-      destruct E as [s1 s2 | jt1 jt2 | rt rj rw | wt wj ww | lt ll | ut ul | stt | ett | t0];
+      destruct E as [s1 s2 | jt1 jt2 | rt rj rw | wt wj ww | lt ll | ut ul | stt | ett];
         inverts H.
       * (* spawn s1 s2: flush of the spawner s1 *)
         forwards Hns2: spawned_thread_no_prior_event Hwf HN0. cbn [get_thread] in Hns2.
@@ -1158,13 +1122,6 @@ Proof.
               ** rewrite read_update_neq; [ exact Hival | congruence ].
            ++ introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
               { applys Hnc Hg HNg0 Hgg. } { subst eg; simpls; congruence. }
-      * (* init t0: by wf_log the init event must be first, so [log = nil],
-           contradicting the prefix write of [x] *)
-        destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & Hinit & _).
-        asserts Heq: ((log & event_init t0) = log ++ event_init t0 :: nil).
-        { rew_list~. }
-        forwards (Heqt & Hnil): Hinit Heq.
-        rewrite Hnil in HN0. inverts HN0.
     + (* the write is the last (appended) event *)
       subst E. inverts H.
       left. split.
@@ -1242,13 +1199,16 @@ Proof. introv H. applys indom_update_inv H; typeclass. Qed.
 
 Lemma play_log_graph_wf :
   forall log D TC G LC CH,
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     play_graph_wf TC G LC.
 Proof.
   introv Hplay. inductions Hplay.
   - splits.
     + introv He. simpls. rew_set in He. false.
-    + introv Ht. false. applys indom_empty_inv Ht.
+    + introv Ht. rew_dom. rew_set in Ht. branches;
+        [ forwards*: indom_empty_inv|].
+      subst. rewrite read_update_same.
+      applys* graph_root_indom_same.
     + introv Hl. false. applys indom_empty_inv Hl.
   - forwards* Hwf: IHHplay. destruct Hwf as (Hedge & HTC & HLC).
     rename H into Hpe.
@@ -1372,19 +1332,6 @@ Proof.
         -- subst. rewrite* read_update_same.
         -- rewrite* read_update_neq.
       * subst. rewrite* read_update_same.
-    + splits.
-      * introv He.
-        unfolds graph_edge, graph_indom.
-        rew_dom. rew_set.
-        forwards*: Hedge He.
-      * introv Hdom. unfolds graph_indom.
-        rew_dom. rew_set in *.
-        destruct (classic (t = t0)).
-        -- subst. rewrite* read_update_same.
-        -- rewrite~ read_update_neq.
-      * introv Hdom.
-        unfolds graph_indom.
-        rew_dom. rew_set. auto_star.
   Unshelve. all: typeclass.
 Qed.
 
@@ -1397,7 +1344,7 @@ Qed.
    the flush position. *)
 Lemma graph_writes_flush :
   forall log D TC G LC CH cx x v,
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     graph_writes G cx x v ->
     exists f' ef' tw' kw',
       LibList.Nth f' CH cx /\ LibList.Nth f' log ef' /\ get_thread ef' = tw' /\
@@ -1406,7 +1353,14 @@ Lemma graph_writes_flush :
                     ~ is_commit_event ep).
 Proof.
   introv Hplay. gen cx x v. inductions Hplay; introv Hgw.
-  - destruct Hgw as (dd & Hgb & Hbd). simpls. exfalso. applys binds_empty_false Hgb; typeclass.
+  - destruct Hgw as (dd & Hgb & Hbd). simpls.
+    destruct (classic (cx = root_commit)).
+    + subst.
+      forwards Hbinds: binds_update_same_inv Hgb.
+      subst.
+      forwards* Heq: binds_empty_false Hbd. typeclass.
+    + forwards~ Hbinds: binds_update_neq_inv Hgb.
+      forwards* Heq: binds_empty_false Hbinds. typeclass.
   - rename H into Hpe.
     (* common tail: lift a prefix witness across the appended event [Ex]/commit [chx] *)
     assert (Hlift : forall (chx : commit) (Ex : event),
@@ -1548,13 +1502,6 @@ Proof.
       end.
     + (* PlayLockFresh: graph unchanged *)
       applys Hlift; forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R.
-    + (* PlayInit *)
-      asserts Hneq: (cx <> root_commit).
-      {
-        intros contra. subst.
-        forwards*: graph_writes_graph_root_same_false.
-      }
-      forwards*: graph_writes_graph_root_inv.
 Qed.
 
 (* Graph edges only ever point to the freshly created commit, so ancestry follows
@@ -1613,7 +1560,7 @@ Qed.
 (* The commit recorded for a commit event lives in the graph domain. *)
 Lemma CH_commit_event_indom :
   forall log D TC G LC CH k c e,
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     LibList.Nth k CH c -> LibList.Nth k log e -> is_commit_event e -> graph_indom G c.
 Proof.
   introv Hplay. gen k c e. inductions Hplay; introv HNch HNlog Hce.
@@ -1639,7 +1586,7 @@ Qed.
    fresh commit, as it is an ancestor source hence in the prefix domain). *)
 Lemma ancestor_creation_order :
   forall log D TC G LC CH a b ka kb ea eb,
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     LibList.Nth ka CH a -> LibList.Nth ka log ea -> is_commit_event ea ->
     LibList.Nth kb CH b -> LibList.Nth kb log eb -> is_commit_event eb ->
     ancestor G a b -> a <> b ->
@@ -1691,7 +1638,7 @@ Lemma last_write_maximal :
   forall log D TC G LC CH m tm x vm f ef cs,
     conflict_free log ->
     wf_log log ->
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     LibList.Nth m log (event_write tm x vm) ->
     (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
     LibList.Nth f log ef -> get_thread ef = tm -> is_commit_event ef -> m <= f ->
@@ -1740,7 +1687,7 @@ Lemma last_write_visible_commit :
   forall log D TC G LC CH m n tm x vm en,
     wf_log log ->
     conflict_free log ->
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     LibList.Nth m log (event_write tm x vm) ->
     (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
     x \notindom (D[tm]) ->
@@ -1796,7 +1743,7 @@ Lemma hb_last_write_visible :
     wf_log log ->
     conflict_free log ->
     conflict_free_graph G ->
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     LibList.Nth m log (event_write tm x vm) ->
     (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
     x \notindom (D[tm]) ->
@@ -1812,7 +1759,7 @@ Qed.
    filter of the log is non-empty. *)
 Lemma is_latest_value_log_write :
   forall log D TC G LC CH c x v,
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     is_latest_value G c x v ->
     exists lw tw vw,
       LibList.filter (fun e => writes_variable x e) log = lw & event_write tw x vw.
@@ -1829,7 +1776,7 @@ Proof.
   - asserts Hmx: (mem e (LibList.filter (fun e => writes_variable x e) log)).
     { rewrite Hsnoc. rewrite mem_last_eq. right. reflexivity. }
     forwards (Hmemx & Hwx): mem_filter_inv Hmx.
-    destruct e as [s1 s2 | j1 j2 | rt ri rv | tt jj ww | lt ll | ut ul | stt | ett | t0];
+    destruct e as [s1 s2 | j1 j2 | rt ri rv | tt jj ww | lt ll | ut ul | stt | ett];
       simpls; tryfalse.
     subst jj. exists lw tt ww. exact Hsnoc.
 Qed.
@@ -1845,7 +1792,6 @@ Proof.
   - apply indom_update_of_indom; (typeclass || assumption).
   - apply indom_update_of_indom;
       (typeclass || (apply indom_update_of_indom; (typeclass || assumption))).
-  - apply indom_update_of_indom; (typeclass || assumption).
   - apply indom_update_of_indom; (typeclass || assumption).
 Qed.
 
@@ -1868,7 +1814,7 @@ Qed.
    different thread, so it must have committed (cf. [hb_preserves_thread]). *)
 Lemma last_writer_not_in_delta :
   forall log D TC G LC CH m tm x vm n en,
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     LibList.Nth m log (event_write tm x vm) ->
     (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
     LibList.Nth n log en ->
@@ -1902,7 +1848,7 @@ Lemma conflict_free_last_global_write :
     conflict_free (log & event_read t x v) ->
     wf_log (log & event_read t x v) ->
     conflict_free_graph G ->
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     x \notindom (D[t]) ->
     t \indom TC ->
     TC[t] = c ->
@@ -1915,7 +1861,7 @@ Proof.
   forwards (L & HNL & Hlast): last_write_position Hfilter.
   forwards HLlt: Nth_inbound HNL.
   (* Play the read as a no-op, and place the write and the read in [log & read]. *)
-  asserts Hplayf: (exists CHf, play_log (log & event_read t x v) (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CHf).
+  asserts Hplayf: (exists CHf, play_log (log & event_read t x v) init_play_cfg (D, TC, G, LC) CHf).
   { eexists. applys PlaySnoc Hplay. apply PlayRead. }
   destruct Hplayf as (CHf & Hplayf).
   asserts HNLf: (LibList.Nth L (log & event_read t x v) (event_write tL x vL)).
@@ -1952,7 +1898,7 @@ Qed.
 Lemma write_hb_flush_ancestor :
   forall log D TC G LC CH ta tb x va vb ka fa ea ha kb fb eb hbb,
     wf_log log ->
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     (LibList.Nth ka log (event_write ta x va) /\ LibList.Nth fa CH ha /\
        LibList.Nth fa log ea /\ get_thread ea = ta /\ is_commit_event ea /\ ka < fa /\
        (forall p ep, ka <= p -> p < fa -> LibList.Nth p log ep -> get_thread ep = ta ->
@@ -1998,7 +1944,7 @@ Theorem conflict_free_log_describes_conflict_free_graph :
   forall log D TC G LC CH,
     wf_log log ->
     conflict_free log ->
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     conflict_free_graph G.
 Proof.
   introv Hwf Hcf Hplay.
@@ -2068,7 +2014,7 @@ Lemma delta_writer_ancestor :
   forall log D TC G LC CH t j vt c vc,
     wf_log log ->
     conflict_free log ->
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     t \indom D ->
     binds (D[t]) j vt ->
     graph_writes G c j vc ->
@@ -2133,7 +2079,7 @@ Lemma conflict_free_merge_holds :
   forall log D TC G LC CH t hc,
     wf_log log ->
     conflict_free log ->
-    play_log log (\{}, \{}, (\{}, \{}), \{}) (D, TC, G, LC) CH ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
     t \indom D ->
     t \indom TC ->
     graph_indom G hc ->

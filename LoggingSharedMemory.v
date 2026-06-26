@@ -13,11 +13,11 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
   | (T, H, L) =>
       (* Spawned and intited threads exist *)
       (forall t2,
-          (exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log <-> t2 \indom T)
+          (exists t1, mem (event_spawn t1 t2) log) \/ t2 = t_root <-> t2 \indom T)
       /\
       (* Spawned and inited threads that have not started are new *)
       (forall t2,
-          ((exists t1, mem (event_spawn t1 t2) log) \/ mem (event_init t2) log) /\ ~mem (event_start t2) log <-> exists e, binds T t2 (state_new, e))
+          ((exists t1, mem (event_spawn t1 t2) log) \/ t2 = t_root) /\ ~mem (event_start t2) log <-> exists e, binds T t2 (state_new, e))
       /\
       (* Ended threads are ended *)
       (forall t,
@@ -40,8 +40,8 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (forall x v,
           (exists t log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t x v) <-> binds H x v)
       /\
-      (* The log has the initialisation event *)
-      (exists t, mem (event_init t) log)
+      (* A non-empty log has the initialisation event *)
+      (log <> nil -> mem (event_start t_root) log)
   end.
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=

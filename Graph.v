@@ -112,10 +112,8 @@ Definition conflict_free_graph (G : graph) :=
 
 (* Introduce an origin commit [c] with empty data and no incoming/outgoing edges.
    Used to bootstrap the root thread's commit when it is initialised. *)
-Definition graph_root (G : graph) (c : commit) :=
-  match G with
-  | (C, P) => (C[c := empty], P)
-  end
+Definition graph_root (c : commit) : graph :=
+  (empty[c := empty], empty)
 .
 
 Definition graph_commit (G : graph) (c1 c2 : commit) (d : diff) :=
