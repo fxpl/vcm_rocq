@@ -191,6 +191,291 @@ Proof.
       apply (IHHwf log''). rew_list~.
 Qed.
 
+(* The [wf_log_*_last] family below records, once and for all, what each kind of
+   event requires of the existing log in order to preserve well-formedness when
+   appended. Together with [wf_log_read_last] and [wf_log_snoc_lock] above they
+   cover every event a step can emit, so the per-model [step_preserves_wf_log]
+   proofs collapse to a single application each. The recurring shape is: most of
+   the nine [wf_log] conjuncts are preserved by *any* event that is not of the
+   kind they constrain (decided by [last_eq_middle_inv] on the appended event),
+   and only the conjunct matching the event's own kind needs real work. *)
+
+(* Appending a write by a running thread preserves well-formedness; a write is
+   not a spawn/start/join/end and touches no lock, so every conjunct is generic. *)
+Lemma wf_log_write_last : forall lg t x v,
+    wf_log lg ->
+    mem (event_start t) lg ->
+    ~ mem (event_end t) lg ->
+    wf_log (lg & event_write t x v).
+Proof.
+  introv Hwf Hsmem Hnmem.
+  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  splits 9.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
+    rew_listx. rew_listx in Hmem'. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros contra. apply~ (Hustart l1 l2' t0).
+    rew_listx. rew_listx in contra. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hspawn.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hjoin.
+  + introv Heq <- Hneq.
+    forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Hmem'. simpl. exact Hsmem.
+    * apply~ Hstart.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    rew_listx. splits.
+    * apply~ Hend.
+    * simpl. intros ->. apply Hnmem. rew_listx*.
+  + introv. rew_listx.
+    cases_if~. rew_list~.
+  + introv Heq.
+    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + introv Hmem'.
+    rew_listx in Hmem'. branches; auto_star.
+Qed.
+
+(* Appending an end by a running thread: only the "no events after end" conjunct
+   does real work, recording that the ending thread had not already ended. *)
+Lemma wf_log_end_last : forall lg t,
+    wf_log lg ->
+    mem (event_start t) lg ->
+    ~ mem (event_end t) lg ->
+    wf_log (lg & event_end t).
+Proof.
+  introv Hwf Hsmem Hnmem.
+  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  splits 9.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
+    rew_listx. rew_listx in Hmem'. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros contra. apply~ (Hustart l1 l2' t0).
+    rew_listx. rew_listx in contra. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hspawn.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hjoin.
+  + introv Heq <- Hneq.
+    forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Hmem'. simpl. exact Hsmem.
+    * apply~ Hstart.
+  + introv Heq.
+    forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Hmem'. rew_listx~.
+    * rew_listx. splits.
+      -- apply~ Hend.
+      -- simpl. intros ->. apply Hnmem. rew_listx*.
+  + introv. rew_listx.
+    cases_if~. rew_list~.
+  + introv Heq.
+    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + introv Hmem'.
+    rew_listx in Hmem'. branches; auto_star.
+Qed.
+
+(* Appending a spawn of a *fresh* thread [t2] (no prior spawn targets it and it
+   is not the root): the "unique spawns" and "root never spawned" conjuncts do
+   the work. *)
+Lemma wf_log_spawn_last : forall lg t1 t2,
+    wf_log lg ->
+    mem (event_start t1) lg ->
+    ~ mem (event_end t1) lg ->
+    (~ exists t0, mem (event_spawn t0 t2) lg) ->
+    t2 <> t_root ->
+    wf_log (lg & event_spawn t1 t2).
+Proof.
+  introv Hwf Hsmem Hnmem Hnospawn Htneq.
+  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  splits 9.
+  + introv Heq.
+    forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Hmem'. rew_listx~.
+    * intros (t1' & Hmem''). apply~ Huspawn. exists t1'.
+      rew_listx. rew_listx in Hmem''.
+      branches; autos.
+      match goal with H : event_spawn _ _ = event_spawn _ _ |- _ => inverts H end.
+      false Hnospawn. exists t0. rew_listx~.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros contra. apply~ (Hustart l1 l2' t).
+    rew_listx. rew_listx in contra. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hspawn.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hjoin.
+  + introv Heq <- Hneq.
+    forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Hmem'. simpl. exact Hsmem.
+    * apply~ Hstart.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    rew_listx. splits.
+    * apply~ Hend.
+    * simpl. intros ->. apply Hnmem. rew_listx*.
+  + introv. rew_listx.
+    cases_if~. rew_list~.
+  + introv Heq.
+    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + introv Hmem'.
+    rew_listx in Hmem'.
+    destruct Hmem' as [Hmem' | Heq]; [ applys Hroot Hmem' | inverts Heq; congruence ].
+Qed.
+
+(* Appending a join by a running thread of an *ended* thread [t2]: only the
+   "join after end" conjunct does work, witnessed by [t2] having ended. *)
+Lemma wf_log_join_last : forall lg t1 t2,
+    wf_log lg ->
+    mem (event_start t1) lg ->
+    ~ mem (event_end t1) lg ->
+    mem (event_end t2) lg ->
+    wf_log (lg & event_join t1 t2).
+Proof.
+  introv Hwf Hsmem Hnmem Htended.
+  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  splits 9.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
+    rew_listx. rew_listx in Hmem'. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros contra. apply~ (Hustart l1 l2' t).
+    rew_listx. rew_listx in contra. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hspawn.
+  + introv Heq.
+    forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Hmem'. rew_listx~.
+    * apply* Hjoin.
+  + introv Heq <- Hneq.
+    forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Hmem'. simpl. exact Hsmem.
+    * apply~ Hstart.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    rew_listx. splits.
+    * apply~ Hend.
+    * simpl. intros ->. apply Hnmem. rew_listx*.
+  + introv. rew_listx.
+    cases_if~. rew_list~.
+  + introv Heq.
+    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + introv Hmem'.
+    rew_listx in Hmem'. branches; auto_star.
+Qed.
+
+(* Appending an unlock by a running thread whose lock's touch-filter currently
+   ends in a matching lock: only the lock conjunct does work. *)
+Lemma wf_log_unlock_last : forall lg t l lg'',
+    wf_log lg ->
+    mem (event_start t) lg ->
+    ~ mem (event_end t) lg ->
+    LibList.filter (fun e => touches_lock l e) lg = lg'' & event_lock t l ->
+    wf_log (lg & event_unlock t l).
+Proof.
+  introv Hwf Hsmem Hnmem Hlheld.
+  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  splits 9.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
+    rew_listx. rew_listx in Hmem'. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros contra. apply~ (Hustart l1 l2' t0).
+    rew_listx. rew_listx in contra. branches; autos.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hspawn.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    apply* Hjoin.
+  + introv Heq <- Hneq.
+    forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Hmem'. simpl. exact Hsmem.
+    * apply~ Hstart.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    rew_listx. splits.
+    * apply~ Hend.
+    * simpl. intros ->. apply Hnmem. rew_listx*.
+  + introv. rew_listx.
+    cases_if as Heql.
+    * unfold touches_lock in Heql. subst. rew_list.
+      apply* wf_lock_log_snoc_unlock.
+    * rew_list. apply~ Hlock.
+  + introv Heq.
+    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + introv Hmem'.
+    rew_listx in Hmem'. branches; auto_star.
+Qed.
+
+(* Appending a start of [t]: [t] must either have been spawned or be the root,
+   must not have already started, and -- if it is the root -- the log must be
+   empty (the root starts first). The unique-starts, spawn-before-start and
+   "first event is root start" conjuncts do the work. *)
+Lemma wf_log_start_last : forall lg t,
+    wf_log lg ->
+    ((exists t1, mem (event_spawn t1 t) lg) \/ t = t_root) ->
+    ~ mem (event_start t) lg ->
+    (t = t_root -> lg = nil) ->
+    wf_log (lg & event_start t).
+Proof.
+  introv Hwf Hsrc Hnmem Hrootnil.
+  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  splits 9.
+  + introv Heq.
+    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
+    intros (t1' & Hmem'). apply~ Huspawn.
+    exists t1'.
+    rew_listx. rew_listx in Hmem'.
+    branches; autos.
+  + introv Heq.
+    forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Hmem'. rew_list~.
+    * intros contra. apply~ (Hustart l1 l2' t0).
+      rew_listx. rew_listx in contra.
+      branches; autos.
+      match goal with H : event_start _ = event_start _ |- _ => inverts H end.
+      false Hnmem. rew_listx~.
+  + introv Heq.
+    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    inverts* contra.
+  + introv Heq.
+    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + introv Heq <- Hneq.
+    forwards* [(<- & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + introv Heq.
+    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    rew_listx. splits*.
+    simpl. intros ->.
+    forwards~ Hmem': (Hstart l1 l2' (event_end t0) t0).
+    false Hnmem. rew_listx*.
+  + introv. rew_listx.
+    cases_if~. rew_list~.
+  + introv Heq.
+    forwards [(Heq' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+    * inverts Heq'. apply~ Hrootnil.
+    * apply* Hinit.
+  + introv Hmem'.
+    rew_listx in Hmem'. branches; auto_star.
+Qed.
+
 Lemma unique_spawn_snoc :
   forall lg e t2,
     length (LibList.filter (fun e => exists t1, e = event_spawn t1 t2) lg) <= 1 ->

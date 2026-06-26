@@ -117,266 +117,50 @@ Theorem step_preserves_wf_log :
     wf_log log'.
 Proof.
   introv Hwf Hdesc Hstep.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
   inversion Hstep; substs; clear Hstep.
-  - lets (_ & Hdstart & _): Hdesc.
+  - (* StepStart: append [event_start t] *)
+    lets (_ & Hdstart & _): Hdesc.
     asserts (Hsrc & Hnmem): (((exists t1, mem (event_spawn t1 t) log) \/ t = t_root) /\ ~mem (event_start t) log).
     { apply* Hdstart. }
-    splits 9.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros (t1' & Hmem'). apply~ Huspawn.
-      exists t1'.
-      rew_listx. rew_listx in Hmem'.
-      branches; autos.
-    + introv Heq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. rew_list~.
-      * intros contra. apply~ (Hustart l1 l2' t0).
-        rew_listx. rew_listx in contra.
-        branches; autos. inverts H0.
-        false Hnmem. rew_listx~.
-    + introv Heq.
-      forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      inverts* contra.
-    + introv Heq.
-      forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-    + introv Heq <- Hneq.
-      forwards* [(<- & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-    + introv Heq.
-      forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      rew_listx. splits*.
-      simpl. intros ->.
-      forwards~ Hmem': (Hstart l1 l2' (event_end t0) t0).
-      false Hnmem. rew_listx*.
-    + introv. rew_listx.
-      cases_if~. rew_list~.
-    + introv Heq.
-      forwards* [(Heq' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      inverts Heq'.
-      destruct~ (classic (l1 = nil)).
+    asserts Hrootnil: (t = t_root -> log = nil).
+    { intros ->. destruct (classic (log = nil)) as [Hnil | Hne]; [exact Hnil|].
       lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      forwards*: Hdroot.
-    + introv Hmem'.
-      rew_listx in Hmem'. branches; auto_star.
-  - (* StepEnd: log' = log & event_end t *)
+      false Hnmem. apply Hdroot. exact Hne. }
+    apply* wf_log_start_last.
+  - (* StepEnd: append [event_end t] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
-    asserts (Hsmem & Henmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
-    splits 9.
-    + (* Unique spawns: new event is not a spawn *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
-      rew_listx. rew_listx in Hmem'. branches; autos.
-    + (* Unique starts: new event is not a start *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Hustart l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    + (* Spawn before start: new event is not a start *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hspawn.
-    + (* Join after end: new event is not a join *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hjoin.
-    + (* Start before non-start: new event_end t has event_start t before it *)
-      introv Heq <- Hneq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. simpl. exact Hsmem.
-      * apply~ Hstart.
-    + (* No events after end for that thread *)
-      introv Heq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. rew_listx~.
-      * rew_listx. splits.
-        -- apply~ Hend.
-        -- simpl. intros ->. apply Henmem. rew_listx*.
-    + introv. rew_listx.
-      cases_if~. rew_list~.
-    + introv Heq.
-      forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-    + introv Hmem'.
-      rew_listx in Hmem'. branches; auto_star.
-  - (* StepRead: log' = log & event_read t x v *)
+    apply* wf_log_end_last.
+  - (* StepRead: append [event_read t x v] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
-    asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
-    splits 9.
-    + (* Unique spawns: event_read is not a spawn *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
-      rew_listx. rew_listx in Hmem'. branches; autos.
-    + (* Unique starts: event_read is not a start *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Hustart l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    +(* Spawn before start: event_read is not a start *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hspawn.
-    + (* Join after end: event_read is not a join *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hjoin.
-    + (* Start before non-start: thread t must have started before the new event *)
-      introv Heq <- Hneq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. simpl. exact Hsmem.
-      * apply~ Hstart.
-    + (* No events after end for that thread *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      rew_listx. splits.
-      * apply~ Hend.
-      * simpl. intros ->. apply Hrnmem. rew_listx*.
-    + introv. rew_listx.
-      cases_if~. rew_list~.
-    + introv Heq.
-      forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-    + introv Hmem'.
-      rew_listx in Hmem'. branches; auto_star.
-  - (* StepWrite: log' = log & event_write t x v *)
+    apply* wf_log_read_last.
+  - (* StepWrite: append [event_write t x v] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
-    asserts (Hsmem & Hwnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
-    splits 9.
-    + (* Unique spawns: event_write is not a spawn *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
-      rew_listx. rew_listx in Hmem'. branches; autos.
-    + (* Unique starts: event_write is not a start *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Hustart l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    +(* Spawn before start: event_write is not a start *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hspawn.
-    + (* Join after end: event_write is not a join *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hjoin.
-    + (* Start before non-start: thread t must have started before the new event *)
-      introv Heq <- Hneq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. simpl. exact Hsmem.
-      * apply~ Hstart.
-    + (* No events after end for that thread *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      rew_listx. splits.
-      * apply~ Hend.
-      * simpl. intros ->. apply Hwnmem. rew_listx*.
-    + (* Lock filter unchanged: touches_lock l (event_write t x v) = False *)
-      introv. rew_listx.
-      cases_if~. rew_list~.
-    + introv Heq.
-      forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-    + introv Hmem'.
-      rew_listx in Hmem'. branches; auto_star.
-  - (* StepSpawn: log' = log & event_spawn t t' *)
+    apply* wf_log_write_last.
+  - (* StepSpawn: append [event_spawn t t'], with [t'] fresh *)
     destruct Hdesc as (Hdspawned & _ & _ & Hdrunning & _ & _ & _ & _).
-    asserts (Hsmem & Hsnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
-    (* t' is fresh: it was not in dom T, so no spawn for t' exists in log *)
     asserts Hnospawn: (~exists t1, mem (event_spawn t1 t') log).
     { intros (t1 & Hmem'). apply H6. apply* Hdspawned. }
-    splits 9.
-    + (* Unique spawns: event_spawn t t' is a spawn, but t' is fresh *)
-      introv Heq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. rew_listx~.
-      * intros (t1' & Hmem''). apply~ Huspawn. exists t1'.
-        rew_listx. rew_listx in Hmem''.
-        branches; autos. inverts H0.
-        false Hnospawn. exists t1. rew_listx~.
-    + (* Unique starts: event_spawn is not a start *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Hustart l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    +(* Spawn before start: event_spawn t t' is a start for t2 only if t2 = t';
-         but event_start t' is not in log & event_spawn t t' *)
-      introv Heq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hspawn.
-    + (* Join after end: event_spawn is not a join *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hjoin.
-    + (* Start before non-start: thread t must have started before the new event *)
-      introv Heq <- Hneq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. simpl. exact Hsmem.
-      * apply~ Hstart.
-    + (* No events after end for that thread *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      rew_listx. splits.
-      * apply~ Hend.
-      * simpl. intros ->. apply Hsnmem. rew_listx*.
-    + (* Lock filter unchanged: touches_lock l (event_spawn t t') = False *)
-      introv. rew_listx.
-      cases_if~. rew_list~.
-    + introv Heq.
-      forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-    + introv Hmem'.
-      rew_listx in Hmem'. destruct Hmem' as [Hmem' | Heq]; [auto_star|inverts Heq].
-      apply H6. apply* Hdspawned.
-  - (* StepJoin: log' = log & event_join t t' *)
+    asserts Htneq: (t' <> t_root).
+    { intros ->. apply H6. apply* Hdspawned. }
+    apply* wf_log_spawn_last.
+  - (* StepJoin: append [event_join t t'], with [t'] ended *)
     destruct Hdesc as (_ & _ & Hdend & Hdrunning & _).
-    asserts (Hsmem & Hjnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts Htended: (mem (event_end t') log).
     { apply Hdend. eauto. }
-    splits 9.
-    + (* Unique spawns: event_join is not a spawn *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
-      rew_listx. rew_listx in Hmem'. branches; autos.
-    + (* Unique starts: event_join is not a start *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Hustart l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    +(* Spawn before start: event_join is not a start *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hspawn.
-    + (* Join after end: event_join t t' appended — need event_end t' in prefix *)
-      introv Heq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. rew_listx~.
-      * apply* Hjoin.
-    + (* Start before non-start *)
-      introv Heq <- Hneq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. simpl. exact Hsmem.
-      * apply~ Hstart.
-    + (* No events after end for that thread *)
-      introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      rew_listx. splits.
-      * apply~ Hend.
-      * simpl. intros ->. apply Hjnmem. rew_listx*.
-    + (* Lock filter unchanged: touches_lock l (event_join t t') = False *)
-      introv. rew_listx.
-      cases_if~. rew_list~.
-    + introv Heq.
-      forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-    + introv Hmem'.
-      rew_listx in Hmem'. branches; auto_star.
-  - (* StepLock: log' = log & event_lock t l *)
+    apply* wf_log_join_last.
+  - (* StepLock: append [event_lock t l] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & Hdlock & Hdunlock & _).
-    asserts (Hsmem & Hlnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts Hlfree: (LibList.filter (fun e => touches_lock l e) log = nil \/
                      exists t'' log'', LibList.filter (fun e => touches_lock l e) log = log'' & event_unlock t'' l).
@@ -389,84 +173,14 @@ Proof.
             lets Hin: (indom_of_binds Hb). apply Hnotin. exact Hin.
           * forwards Hb: (proj1 (Hdunlock l)). { exists t' xs'. exact Heqf. }
             lets Hin: (indom_of_binds Hb). apply Hnotin. exact Hin. }
-    splits 9.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
-      rew_listx. rew_listx in Hmem'. branches; autos.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Hustart l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    +introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hspawn.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hjoin.
-    + introv Heq <- Hneq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. simpl. exact Hsmem.
-      * apply~ Hstart.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      rew_listx. splits.
-      * apply~ Hend.
-      * simpl. intros ->. apply Hlnmem. rew_listx*.
-    + (* wf_lock_log: for l0 = l, filter grows by event_lock t l *)
-      introv. rew_listx.
-      cases_if as Heql.
-      * unfold touches_lock in Heql. subst. rew_list.
-        apply wf_lock_log_snoc_lock.
-        { apply~ Hlock. }
-        { destruct Hlfree as [Hnil | (t'' & log'' & Hfilt)].
-          - left. exact Hnil.
-          - right. exists t'' log''. exact Hfilt. }
-      * rew_list. apply~ Hlock.
-    + introv Heq.
-      forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-    + introv Hmem'.
-      rew_listx in Hmem'. branches; auto_star.
-  - (* StepRelease: log' = log & event_unlock t l *)
+    apply* wf_log_snoc_lock.
+  - (* StepRelease: append [event_unlock t l] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & Hdlock & _).
-    asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts (log'' & Hlheld): (exists log'', LibList.filter (fun e => touches_lock l e) log = log'' & event_lock t l).
     { apply* Hdlock. }
-    splits 9.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros (t1' & Hmem'). apply~ Huspawn. exists t1'.
-      rew_listx. rew_listx in Hmem'. branches; autos.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      intros contra. apply~ (Hustart l1 l2' t0).
-      rew_listx. rew_listx in contra. branches; autos.
-    +introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hspawn.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      apply* Hjoin.
-    + introv Heq <- Hneq.
-      forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-      * inverts Hmem'. simpl. exact Hsmem.
-      * apply~ Hstart.
-    + introv Heq.
-      forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-      rew_listx. splits.
-      * apply~ Hend.
-      * simpl. intros ->. apply Hrnmem. rew_listx*.
-    + (* wf_lock_log: for l0 = l, filter grows by event_unlock t l *)
-      introv. rew_listx.
-      cases_if as Heql.
-      * unfold touches_lock in Heql. subst. rew_list.
-        apply* wf_lock_log_snoc_unlock.
-      * rew_list. apply~ Hlock.
-    + introv Heq.
-      forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-    + introv Hmem'.
-      rew_listx in Hmem'. branches; auto_star.
+    apply* wf_log_unlock_last.
 Qed.
 
 Theorem step_preserves_describes :
