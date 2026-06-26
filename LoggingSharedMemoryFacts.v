@@ -390,7 +390,7 @@ Theorem step_preserves_describes :
     describes log' cfg'.
 Proof.
   introv Hwf Hdesc Hstep.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit).
+  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _): Hwf.
   inversion Hstep; substs; clear Hstep.
   - (* StepStart: append [event_start t]; thread t goes new -> running.
        Interesting conjuncts: 2 (t leaves the new set), 4 (t becomes running),
