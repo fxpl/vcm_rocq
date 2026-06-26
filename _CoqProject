@@ -19,4 +19,5 @@ GraphFacts.v
 Branching.v
 LoggingBranching.v
 LoggingBranchingFacts.v
+BranchingEquivLemmas.v
 BranchingEquiv.v
