@@ -220,10 +220,14 @@ Proof.
     }
     asserts Hcf': (lin_conflict_free d c g G).
     {
-      admit. (* When replaying a conflict_free log, the resulting
-      deltas will all be mergable with the latest global commit
-      (and they will be disjoint, which we may need for proving
-      this) *)
+      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      forwards Hcflog: conflict_free_last_inv Hcf.
+      lets HtT: (indom_of_binds Hbinds).
+      forwards (ts0 & e0 & Hbdt): Hdelta HtT.
+      forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
+      forwards Hpgwf: play_log_graph_wf Hplay.
+      destruct Hpgwf as (_ & HTCdom).
+      applys* lin_conflict_free_holds.
     }
     asserts* Hdom: (t \indom T0).
     exists. splits; [ constructors* | simpls*].
@@ -232,7 +236,53 @@ Proof.
     and see whether x is bound in D[t]. Having the log be
     conflict_free means that a local read is indeed the latest
     write and that is_latest_value gets the latest write *)
-    admit.
+    destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
+    apply Hwrite in H6 as (t' & log'0 & Hfilter).
+    destruct HdescL as (_ & _ & _ & Hrun & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+    lets Htin: (indom_of_binds Hbinds).
+    forwards (ts0 & e0 & Hbd): Hdelta Htin.
+    forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
+    forwards Hcflog: conflict_free_last_inv Hcf.
+    destruct (classic (x \indom (D[t]))) as [Hin | Hnin].
+    * (* local (uncommitted) read: [x] is in [t]'s delta *)
+      asserts Hdt: (t \indom D). { applys HdomD Htin. }
+      asserts Hbdi: (binds (D[t]) x (D[t][x])).
+      { applys* binds_of_indom_read Hin. }
+      forwards (log'' & Hfilt2): conflict_free_last_local_write Hcflog Hplay Hdt Hbdi.
+      rewrite Hfilter in Hfilt2.
+      forwards (_ & Heqw): last_eq_last_inv Hfilt2. inverts Heqw.
+      exists. split; [ applys StepReadLocal Hbinds; [ eassumption | exact Hbdi ] |].
+      simpls*.
+    * (* global (committed) read: [x] is visible as the latest committed value *)
+      lets [_ Hback]: Hrun t. forwards* (Hms & Hmne): Hback.
+      asserts Hwfr: (wf_log (log & event_read t x v)). { applys wf_log_read_last Hms Hmne Hwf. }
+      destruct (last_write_position log x log'0 t' v Hfilter) as (mw & HNL & Hlast).
+      forwards HLlt: Nth_inbound HNL.
+      asserts Hplayf: (exists CHf,
+        play_log (log & event_read t x v) (\{}, \{}, empty_graph, root_commit) (D, TC, G, g) CHf).
+      { exists. applys PlaySnoc Hplay. apply PlayRead. }
+      destruct Hplayf as (CHf & Hplayf).
+      asserts HNLf: (LibList.Nth mw (log & event_read t x v) (event_write t' x v)).
+      { applys* Nth_app_l. }
+      asserts HNread: (LibList.Nth (length log) (log & event_read t x v) (event_read t x v)).
+      { applys* Nth_app_r'. }
+      asserts Hlastf:
+        (forall k tk vk, LibList.Nth k (log & event_read t x v) (event_write tk x vk) -> k <= mw).
+      { introv HNk. forwards [HN' | (Hpe & Hee)]: Nth_last_inv HNk.
+        - applys Hlast HN'.
+        - inverts Hee. }
+      asserts* Hacc: (accesses_variable x (event_read t x v)).
+      forwards Hhb: Hcf HNLf HNread Hacc HLlt.
+      asserts HndomL: (x \notindom (D[t'])).
+      {
+        destruct (classic (t' = t)) as [-> | Hne].
+        - exact Hnin.
+        - applys last_writer_not_in_delta Hplayf HNLf Hlastf HNread Hhb. simpl. congruence. }
+      forwards Hlv:
+        (>> hb_last_write_visible Hwfr Hcf Hplayf HNLf Hlastf HndomL HNread Hhb).
+      simpl in Hlv.
+      exists. split; [ applys StepReadGlobal Hbinds; [ eassumption | exact Hnin | exact Hlv ] |].
+      simpls*.
   - (* StepWrite *)
     exists. splits; [ constructors* | simpls*].
   - (* StepSpawn *)
@@ -244,7 +294,14 @@ Proof.
     }
     asserts Hcf': (lin_conflict_free d c g G).
     {
-      admit.
+      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      forwards Hcflog: conflict_free_last_inv Hcf.
+      lets HtT: (indom_of_binds Hbinds).
+      forwards (ts0 & e0 & Hbdt): Hdelta HtT.
+      forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
+      forwards Hpgwf: play_log_graph_wf Hplay.
+      destruct Hpgwf as (_ & HTCdom).
+      applys* lin_conflict_free_holds.
     }
     asserts (T' & G' & Heq): (exists T' G', push_thread t t' g g' (T[t := (state_running, te_exp (K t'), d, c)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G')).
     {
@@ -282,13 +339,27 @@ Proof.
     subst.
     asserts Hcf': (lin_conflict_free d' c' g G).
     {
-      admit.
+      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      forwards Hcflog: conflict_free_last_inv Hcf.
+      lets HtT: (indom_of_binds Hbinds').
+      forwards (ts0 & e0 & Hbdt): Hdelta HtT.
+      forwards* Heqt: binds_inj Hbinds' Hbdt. inverts Heqt.
+      forwards Hpgwf: play_log_graph_wf Hplay.
+      destruct Hpgwf as (_ & HTCdom).
+      forwards*: lin_conflict_free_holds.
     }
     exists. splits; [ constructors* | simpls*].
   - (* StepLock *)
     asserts Hcf': (lin_conflict_free d c g G).
     {
-      admit.
+      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      forwards Hcflog: conflict_free_last_inv Hcf.
+      lets HtT: (indom_of_binds Hbinds).
+      forwards (ts0 & e0 & Hbdt): Hdelta HtT.
+      forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
+      forwards Hpgwf: play_log_graph_wf Hplay.
+      destruct Hpgwf as (_ & HTCdom).
+      applys* lin_conflict_free_holds.
     }
     exists. splits; [ constructors* | simpls*].
   - forwards (g' & Hfresh): exists_commit_fresh HwfG.
@@ -301,11 +372,18 @@ Proof.
     }
     asserts Hcf': (lin_conflict_free d c g G).
     {
-      admit.
+      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      forwards Hcflog: conflict_free_last_inv Hcf.
+      lets HtT: (indom_of_binds Hbinds).
+      forwards (ts0 & e0 & Hbdt): Hdelta HtT.
+      forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
+      forwards Hpgwf: play_log_graph_wf Hplay.
+      destruct Hpgwf as (_ & HTCdom).
+      applys* lin_conflict_free_holds.
     }
     asserts* Hdom: (t \indom T0).
     exists. splits; [ constructors* | simpls*].
-Admitted.
+Qed.
 
 Theorem linear_sound :
   forall log log' cfgSh cfgL cfgL',
