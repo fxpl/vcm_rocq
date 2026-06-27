@@ -769,7 +769,7 @@ Proof.
            asserts Hd: (D[t] = d). { congruence. }
            asserts Htc: (TC[t] = c). { congruence. }
            rewrite Hd, Htc.
-           exists state_running (te_exp (K (ret_val v))). apply binds_update_same.
+           exists state_running (K (ret_val v)). apply binds_update_same.
         -- forwards~ Hin': indom_update_inv Hin.
            destruct Hin' as [->|Hin']. { congruence. }
            forwards (st' & e'' & Hbinds'): Hdelta t0 Hin'.
@@ -812,7 +812,7 @@ Proof.
            asserts Hd: (D[t] = d). { congruence. }
            asserts Htc: (TC[t] = c). { congruence. }
            rewrite Hd, Htc.
-           exists state_running (te_exp (K (ret_val v))). apply binds_update_same.
+           exists state_running (K (ret_val v)). apply binds_update_same.
         -- forwards~ Hin': indom_update_inv Hin.
            destruct Hin' as [->|Hin']. { congruence. }
            forwards (st' & e'' & Hbinds'): Hdelta t0 Hin'.
@@ -858,7 +858,7 @@ Proof.
         destruct (classic (t0 = t)) as [->|Hneq].
         -- asserts Hd_new: ((D[t := d[x:=v]])[t] = d[x:=v]). { rew_map*. }
            rewrite Hd_new, Htc.
-           exists state_running (te_exp (K void)). apply binds_update_same.
+           exists state_running (K void). apply binds_update_same.
         -- forwards~ Hin': indom_update_inv Hin.
            destruct Hin' as [->|Hin']. { congruence. }
            forwards (st' & e'' & Hbinds'): Hdelta t0 Hin'.
@@ -1004,7 +1004,7 @@ Proof.
         asserts Hneq': (t0 <> t').
         { intros ->. false* Hnotin. }
         destruct (classic (t0 = t)) as [->|Hneq2].
-        -- exists (te_exp (K t')) (empty : diff) g'.
+        -- exists (K t') (empty : diff) g'.
            apply~ binds_update_neq. apply binds_update_same.
         -- exists e2 d2 h2.
            apply~ binds_update_neq. apply~ binds_update_neq.
@@ -1057,7 +1057,7 @@ Proof.
               asserts Htc_t: ((TC[t := g'][t' := g'])[t] = g').
               { rewrite~ read_update_neq. rewrite read_update_same. auto. }
               rewrite Hd_t, Htc_t.
-              exists state_running (te_exp (K t')).
+              exists state_running (K t').
               apply~ binds_update_neq. apply binds_update_same.
            ++ forwards~ Hin1: indom_update_inv Hin.
               destruct Hin1 as [->|Hin1]. { congruence. }
@@ -1125,7 +1125,7 @@ Proof.
            forwards* Heq: binds_inj Hbinds'.
            asserts Hd: (D[t] = d). { congruence. }
            rewrite Hd. rewrite read_update_same.
-           exists state_running (te_exp (K r)). apply binds_update_same.
+           exists state_running (K r). apply binds_update_same.
         -- forwards~ Hin': indom_update_inv Hin.
            destruct Hin' as [->|Hin']. { congruence. }
            forwards (st' & e'' & Hbinds'): Hdelta t0 Hin'.
@@ -1202,7 +1202,7 @@ Proof.
            forwards* Heq: binds_inj Hbinds'.
            asserts Hd: (D[t] = d). { congruence. }
            rewrite Hd. rewrite read_update_same.
-           exists state_running (te_exp (K void)). apply binds_update_same.
+           exists state_running (K void). apply binds_update_same.
         -- forwards~ Hin': indom_update_inv Hin.
            destruct Hin' as [->|Hin']. { congruence. }
            forwards (st' & e'' & Hbinds'): Hdelta t0 Hin'.
@@ -1287,7 +1287,7 @@ Proof.
         -- asserts Hd_new: (D[t := empty][t] = empty). { rew_map*. }
            asserts Htc_new: (TC[t := g'][t] = g'). { rew_map*. }
            rewrite Hd_new, Htc_new.
-           exists state_running (te_exp (K void)). apply binds_update_same.
+           exists state_running (K void). apply binds_update_same.
         -- forwards~ Hin1: indom_update_inv Hin.
            destruct Hin1 as [->|Hin1]. { congruence. }
            forwards (st' & e'' & Hbinds'): Hdelta t0 Hin1.

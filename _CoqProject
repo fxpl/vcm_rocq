@@ -5,6 +5,7 @@
 Vcm.v
 Common.v
 SharedMemory.v
+SharedMemoryFacts.v
 Log.v
 LogFacts.v
 LoggingSharedMemory.v

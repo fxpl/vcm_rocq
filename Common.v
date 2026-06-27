@@ -58,10 +58,6 @@ Inductive eff :=
 | eff_unlock (l : lid)
 .
 
-Definition cont := ret -> exp.
-
-Parameter step_ul : exp -> cont -> eff -> Prop.
-
 Inductive thread_state :=
 | state_new
 | state_running
@@ -80,6 +76,10 @@ Inductive thread_exp :=
 #[global]
 Instance inhab_thread_exp : Inhab thread_exp.
 Proof. apply (Inhab_of_val (te_ret void)). Qed.
+
+Definition cont := ret -> thread_exp.
+
+Parameter step_ul : exp -> cont -> eff -> Prop.
 
 Inductive lock_state :=
 | ls_free
@@ -100,6 +100,12 @@ Ltac rew_dom :=
       replace (dom M[k := v]) with (union (dom M) (single k));
       [| solve[symmetry; apply dom_update] ]
   end.
+
+Lemma mem_le_sum : forall (n : nat) (l : list nat),
+  mem n l -> n <= fold_right plus 0 l.
+Proof.
+  introv Hmem. induction Hmem; rewrite fold_right_cons; nat_math.
+Qed.
 
 (* No mechanisation is complete without custom list lemmas *)
 Lemma single_eq_middle_inv :

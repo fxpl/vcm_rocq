@@ -306,7 +306,7 @@ Proof.
       destruct Hpgwf as (_ & HTCdom).
       applys* lin_conflict_free_holds.
     }
-    asserts (T' & G' & Heq): (exists T' G', push_thread t t' g g' (T[t := (state_running, te_exp (K t'), d, c)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G')).
+    asserts (T' & G' & Heq): (exists T' G', push_thread t t' g g' (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G')).
     {
       exists. unfolds push_thread, global_commit.
       rewrite~ read_update_neq.
@@ -315,12 +315,12 @@ Proof.
       rewrite read_update_same.
       reflexivity.
     }
-    asserts* Hdom: (t \indom T0[t:=(state_running, te_exp (K t'))][t':=(
+    asserts* Hdom: (t \indom T0[t:=(state_running, K t')][t':=(
       state_new, te_exp e')]).
     {
       rew_dom. rew_set. autos.
     }
-    asserts* Hdom': (t' \indom T0[t:=(state_running, te_exp (K t'))][t':=(
+    asserts* Hdom': (t' \indom T0[t:=(state_running, K t')][t':=(
       state_new, te_exp e')]).
     {
       rew_dom. rew_set. autos.
@@ -471,12 +471,12 @@ Proof.
     * constructors*.
       forwards~ Heq: matching_threads_same_domain Hsame.
       rewrite* Heq.
-    * asserts* Hdom: (t \indom Tsh[t:=(state_running, te_exp (K t'))][t':=(
+    * asserts* Hdom: (t \indom Tsh[t:=(state_running, K t')][t':=(
       state_new, te_exp e')]).
     {
       rew_dom. rew_set. autos.
     }
-    asserts* Hdom': (t' \indom Tsh[t:=(state_running, te_exp (K t'))][t':=(
+    asserts* Hdom': (t' \indom Tsh[t:=(state_running, K t')][t':=(
       state_new, te_exp e')]).
     {
       rew_dom. rew_set. autos.

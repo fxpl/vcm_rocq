@@ -364,7 +364,7 @@ Proof.
     forwards Heq: matching_threads_same_domain Hthr.
     rewrite Heq in H6.
     asserts* Hneq: (t <> t').
-    asserts (T' & G' & Hpush): (exists T' G', push_thread t t' c' T[t:=(state_running, te_exp (K t'), d, c)][t':=(state_new, te_exp e', \{}, 0)] G = (T', G')).
+    asserts (T' & G' & Hpush): (exists T' G', push_thread t t' c' T[t:=(state_running, K t', d, c)][t':=(state_new, te_exp e', \{}, 0)] G = (T', G')).
     {
       exists. unfolds push_thread, do_commit.
       rewrite~ read_update_neq.
@@ -373,9 +373,9 @@ Proof.
       rewrite read_update_same.
       reflexivity.
     }
-    asserts HbiTt': (binds (T[t:=(state_running, te_exp (K t'), d, c)][t':=(state_new, te_exp e', \{}, 0)]) t' (state_new, te_exp e', \{}, 0)).
+    asserts HbiTt': (binds (T[t:=(state_running, K t', d, c)][t':=(state_new, te_exp e', \{}, 0)]) t' (state_new, te_exp e', \{}, 0)).
     { apply binds_update_same. }
-    asserts HbiTt: (binds (T[t:=(state_running, te_exp (K t'), d, c)][t':=(state_new, te_exp e', \{}, 0)]) t (state_running, te_exp (K t'), d, c)).
+    asserts HbiTt: (binds (T[t:=(state_running, K t', d, c)][t':=(state_new, te_exp e', \{}, 0)]) t (state_running, K t', d, c)).
     { applys binds_update_neq Hneq. apply binds_update_same. }
     clears HdescB HdescSh. (* Implication in describes tanks proof search*)
     exists. splits; [ constructors* | simpls*].
@@ -571,7 +571,7 @@ Proof.
     asserts Hnd: (t' \notindom Tsh). { rewrite Heq. assumption. }
     match goal with
     | Hp : push_thread t t' ?hn ?iT G = (?TT, ?GG) |- _ =>
-        asserts HbiTt: (binds iT t (state_running, te_exp (K t'), d, c));
+        asserts HbiTt: (binds iT t (state_running, K t', d, c));
         [ applys binds_update_neq; [ | apply binds_update_same ]; auto |];
         asserts HbiTt': (binds iT t' (state_new, te_exp e', \{}, 0));
         [ apply binds_update_same |]

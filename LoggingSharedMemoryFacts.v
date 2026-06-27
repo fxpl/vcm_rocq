@@ -562,10 +562,10 @@ Proof.
     asserts* Htin: (t \indom T).
     splits.
     + intros t2.
-      replaces (dom (T[t := (state_running, te_exp (K t'))][t' := (state_new, te_exp e')])) with
-               (union (dom (T[t := (state_running, te_exp (K t'))])) (single t'));
+      replaces (dom (T[t := (state_running, K t')][t' := (state_new, te_exp e')])) with
+               (union (dom (T[t := (state_running, K t')])) (single t'));
         [apply dom_update|].
-      replaces (dom (T[t := (state_running, te_exp (K t'))])) with (union (dom T) (single t));
+      replaces (dom (T[t := (state_running, K t')])) with (union (dom T) (single t));
         [apply dom_update|].
       rew_set.
       splits.
@@ -654,7 +654,7 @@ Proof.
            ++ applys Hdspawned. left. exists t1. rewrite Heq2. rew_listx*.
            ++ applys* Hdspawned.
         -- destruct (classic (t0 = t)) as [->|Hneq].
-           ++ exists (te_exp (K t')). apply~ binds_update_neq. apply binds_update_same.
+           ++ exists (K t'). apply~ binds_update_neq. apply binds_update_same.
            ++ asserts (e0 & Hbinds): (exists e, binds T t0 (state_running, e)).
               { apply Hdrunning. split*. }
               exists e0. apply~ binds_update_neq. apply~ binds_update_neq.

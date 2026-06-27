@@ -90,12 +90,6 @@ Proof.
     false. applys commit_fresh_not_indom Hfresh Hin.
 Qed.
 
-Lemma mem_le_sum : forall (n : nat) (l : list nat),
-  mem n l -> n <= fold_right plus 0 l.
-Proof.
-  introv Hmem. induction Hmem; rewrite fold_right_cons; nat_math.
-Qed.
-
 Lemma exists_commit_fresh :
   forall G,
     wf_graph G ->

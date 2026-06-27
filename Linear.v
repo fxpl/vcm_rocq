@@ -80,25 +80,25 @@ Inductive step : cfg -> cfg -> Prop :=
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
     binds d x v ->
-    step (T, G, g, L) (T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, g, L)
+    step (T, G, g, L) (T[t := (state_running, K (ret_val v), d, c)], G, g, L)
 | StepReadGlobal : forall T G g L t e d c K x v,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
     x \notindom d ->
     (* a thread reads the latest value visible at its own commit *)
     is_latest_value G c x v ->
-    step (T, G, g, L) (T[t := (state_running, te_exp (K (ret_val v)), d, c)], G, g, L)
+    step (T, G, g, L) (T[t := (state_running, K (ret_val v), d, c)], G, g, L)
 | StepWrite : forall T G g L t e d c K x v,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_write x v) ->
-    step (T, G, g, L) (T[t := (state_running, te_exp (K void), d[x := v], c)], G, g, L)
+    step (T, G, g, L) (T[t := (state_running, K void, d[x := v], c)], G, g, L)
 | StepSpawn : forall T T' G G' g g' L t (t' : tid) e d c K e',
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_spawn e') ->
     t' \notindom T ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
-    push_thread t t' g g' (T[t := (state_running, te_exp (K t'), d, c)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G') ->
+    push_thread t t' g g' (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G') ->
     step (T, G, g, L) (T', G', g', L)
 | StepJoin : forall T G g L t t' e d c c' K r,
     binds T t (state_running, te_exp e, d, c) ->
@@ -106,13 +106,13 @@ Inductive step : cfg -> cfg -> Prop :=
     binds T t' (state_terminated, te_ret r, empty, c') ->
     lin_conflict_free d c g G ->
     (* the joined thread has already pushed (at its StepEnd); just fast-forward *)
-    step (T, G, g, L) (T[t := (state_running, te_exp (K r), d, g)], G, g, L)
+    step (T, G, g, L) (T[t := (state_running, K r, d, g)], G, g, L)
 | StepLock : forall T G g L t e d c K l,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_lock l) ->
     binds L l ls_free \/ l \notindom L ->
     lin_conflict_free d c g G ->
-    step (T, G, g, L) (T[t := (state_running, te_exp (K void), d, g)], G, g, L[l := ls_held t])
+    step (T, G, g, L) (T[t := (state_running, K void, d, g)], G, g, L[l := ls_held t])
 | StepRelease : forall T T' G G' g g' L t e d c K l,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_unlock l) ->
@@ -120,7 +120,7 @@ Inductive step : cfg -> cfg -> Prop :=
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' T G = (T', G') ->
-    step (T, G, g, L) (T'[t := (state_running, te_exp (K void), empty, g')], G', g', L[l := ls_free])
+    step (T, G, g, L) (T'[t := (state_running, K void, empty, g')], G', g', L[l := ls_free])
 .
 
 Hint Constructors step Linear.step : vcm.
