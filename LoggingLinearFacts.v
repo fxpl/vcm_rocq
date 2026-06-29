@@ -141,7 +141,6 @@ Proof.
     + rew_dom. introv Hdom. rew_set in *.
       branches; auto_star.
       forwards*: indom_empty_inv.
-  - congruence.
 Qed.
 
 Theorem step_equiv :
@@ -273,7 +272,7 @@ Theorem step_preserves_wf_log :
     wf_log log'.
 Proof.
   introv Hwf Hdesc Hstep.
-  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot): Hwf.
+  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hroot): Hwf.
   inversion Hstep; substs; clear Hstep.
   - (* StepStart: append [event_start t] *)
     lets (_ & Hdstart & _): Hdesc.
@@ -281,8 +280,7 @@ Proof.
     { apply* Hdstart. }
     asserts Hrootnil: (t = t_root -> log = nil).
     { intros ->. destruct (classic (log = nil)) as [Hnil | Hne]; [exact Hnil|].
-      lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      false Hnmem. apply Hdroot. exact Hne. }
+      false Hnmem. applys wf_log_nonempty_init Hwf Hne. }
     apply* wf_log_start_last.
   - (* StepEnd: append [event_end t] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
@@ -305,7 +303,7 @@ Proof.
     { apply* Hdrunning. }
     apply* wf_log_write_last.
   - (* StepSpawn: append [event_spawn t t'], with [t'] fresh *)
-    destruct Hdesc as (Hdspawned & _ & _ & Hdrunning & _ & _ & _ & _).
+    destruct Hdesc as (Hdspawned & _ & _ & Hdrunning & _ & _ & _).
     asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts Hnospawn: (~exists t1, mem (event_spawn t1 t') log).
@@ -511,15 +509,6 @@ Proof.
   - rew_list. apply Hd.
 Qed.
 
-Lemma describes_init_running : forall (log : Log.log) e t,
-    mem (event_start t) log ->
-    (log <> nil -> mem (event_start t_root) log) ->
-    ((log & e) <> nil -> mem (event_start t_root) (log & e)).
-Proof.
-  introv Hmem Hd _. rew_listx. left. apply Hd.
-  intro Heq. subst. forwards*: mem_nil_inv Hmem.
-Qed.
-
 Theorem step_preserves_describes :
   forall cfg cfg' log log',
     wf_log log ->
@@ -528,10 +517,10 @@ Theorem step_preserves_describes :
     describes log' cfg'.
 Proof.
   introv Hwf Hdesc Hstep.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hroot).
   inversion Hstep; substs; clear Hstep.
   - (* StepStart: log' = log & event_start t, T' = T[t := running c:=g] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts HtinX: (t \indom T). { apply* indom_of_binds. }
     asserts HnewX: (exists e' d' c', binds T t (state_new, e', d', c')). { do 3 eexists; eassumption. }
     asserts Htnend: (~ mem (event_end t) log).
@@ -630,17 +619,8 @@ Proof.
            destruct Hor as [->|Hor]. { congruence. }
            asserts HinTC: (t0 \indom TC). { applys~ HdomTC. }
            applys* indom_update_of_indom.
-    + (* 8. Init event present *)
-      introv _.
-      lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      rew_listx. destruct log; [|auto_star].
-      right.
-      asserts~ Hdom: (t \indom T).
-      apply Hdspawned in Hdom.
-      destruct Hdom as [(t1 & contra)| ->]; auto.
-      forwards*: mem_nil_inv contra.
   - (* StepEnd: log' = log & event_end t, commit delta then terminate t *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     match goal with H : global_commit _ _ _ _ _ = _ |- _ =>
       unfold global_commit in H;
       replace (T[t]) with (state_running, te_ret r, d, c) in H by (forwards*: read_of_binds);
@@ -743,10 +723,8 @@ Proof.
            }
            asserts HinTC: (t0 \indom TC). { applys~ HdomTC. }
            applys* indom_update_of_indom.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running HsmemX.
   - (* StepReadLocal: log' = log & event_read t x v, T' = T[t := running K(v)] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts HtinX: (t \indom T). { apply* indom_of_binds. }
@@ -786,10 +764,8 @@ Proof.
         -- asserts Hor: (t0 = t \/ t0 \indom T). { applys* indom_update_inv. }
            destruct Hor as [->|Hor]. { congruence. }
            applys~ HdomTC.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running Hsmem.
   - (* StepReadGlobal: same resulting config/log as StepReadLocal *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts HtinX: (t \indom T). { apply* indom_of_binds. }
@@ -829,10 +805,8 @@ Proof.
         -- asserts Hor: (t0 = t \/ t0 \indom T). { applys* indom_update_inv. }
            destruct Hor as [->|Hor]. { congruence. }
            applys~ HdomTC.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running Hsmem.
   - (* StepWrite: log' = log & event_write t x v, T' = T[t := running K(void), d[x:=v]] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts HtinX: (t \indom T). { apply* indom_of_binds. }
@@ -878,10 +852,8 @@ Proof.
         -- asserts Hor: (t0 = t \/ t0 \indom T). { applys* indom_update_inv. }
            destruct Hor as [->|Hor]. { congruence. }
            applys~ HdomTC.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running Hsmem.
   - (* StepSpawn *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts* Hneq: (t <> t').
     match goal with Hpt : _ = (_, _) |- _ =>
       unfold push_thread, global_commit in Hpt;
@@ -1098,12 +1070,8 @@ Proof.
               forwards~ Hin4: indom_update_inv Hin3. destruct Hin4 as [->|Hin4]. { congruence. }
               asserts HinTC: (t0 \indom TC). { applys~ HdomTC. }
               rew_dom. rew_set. left. left. exact HinTC.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      asserts (Hsmem & Henmem): (mem (event_start t) log /\ ~mem (event_end t) log).
-      { apply (Hdrunning t). do 3 eexists. eassumption. }
-      applys* describes_init_running Hsmem.
   - (* StepJoin: log' = log & event_join t t', T' = T[t := running K(r), c:=g] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts HtinX: (t \indom T). { apply* indom_of_binds. }
@@ -1145,10 +1113,8 @@ Proof.
            destruct Hor as [->|Hor]. { congruence. }
            asserts HinTC: (t0 \indom TC). { applys~ HdomTC. }
            applys* indom_update_of_indom.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running Hsmem.
   - (* StepLock: log' = log & event_lock t l, T' = T[t := ...,c:=g], L' = L[l := held t] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts HtinX: (t \indom T). { apply* indom_of_binds. }
@@ -1222,10 +1188,8 @@ Proof.
            destruct Hor as [->|Hor]. { congruence. }
            asserts HinTC: (t0 \indom TC). { applys~ HdomTC. }
            applys* indom_update_of_indom.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running Hsmem.
   - (* StepRelease: log' = log & event_unlock t l, commit delta, L' = L[l := free] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     match goal with H : global_commit t g g' T G = _ |- _ =>
       unfold global_commit in H;
       replace (T[t]) with (state_running, te_exp e, d, c) in H by (forwards*: read_of_binds T);
@@ -1309,6 +1273,4 @@ Proof.
            destruct Hor as [->|Hor]. { congruence. }
            asserts HinTC: (t0 \indom TC). { applys~ HdomTC. }
            applys* indom_update_of_indom.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running Hsmem.
 Qed.

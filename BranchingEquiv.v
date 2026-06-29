@@ -314,7 +314,7 @@ Proof.
     destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
     apply Hwrite in H6 as (t' & log'0 & Hfilter).
     destruct HdescB as (_ & _ & _ & Hrun & _ & _ &
-      (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC) & _).
+      (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
@@ -408,7 +408,7 @@ Proof.
     asserts Hmerge: (conflict_free_merge d' c' c G).
     {
       destruct HdescB as (_ & _ & _ & _ & _ & _ &
-        (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC) & _).
+        (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds').
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -429,7 +429,7 @@ Proof.
       asserts Hmerge: (conflict_free_merge d c c' G).
       {
         destruct HdescB as (_ & _ & _ & _ & _ & _ &
-          (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC) & _).
+          (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
         forwards Hcflog: conflict_free_last_inv Hcf.
         lets HtT: (indom_of_binds Hbinds).
         forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -524,7 +524,7 @@ Proof.
     exists. split.
     { constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & Hstart & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC) & _).
+      destruct HdescB as (_ & _ & _ & Hstart & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       apply Hwrite.
@@ -538,7 +538,7 @@ Proof.
     {
       constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & Hrun & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC) & _).
+      destruct HdescB as (_ & _ & _ & Hrun & _ & _ & (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       forwards* Heq: binds_inj Hbinds'.

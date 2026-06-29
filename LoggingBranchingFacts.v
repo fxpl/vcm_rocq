@@ -111,7 +111,6 @@ Proof.
       forwards*: indom_empty_inv.
     + intros. splits; introv contra;
       forwards*: indom_empty_inv.
-  - congruence.
 Qed.
 
 Theorem init_cfg_wf :
@@ -331,7 +330,7 @@ Theorem step_preserves_wf_log :
     wf_log log'.
 Proof.
   introv Hwf Hdesc Hstep.
-  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot): Hwf.
+  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hroot): Hwf.
   inversion Hstep; substs; clear Hstep.
   - (* StepStart: append [event_start t] *)
     lets (_ & Hdstart & _): Hdesc.
@@ -339,8 +338,7 @@ Proof.
     { apply* Hdstart. }
     asserts Hrootnil: (t = t_root -> log = nil).
     { intros ->. destruct (classic (log = nil)) as [Hnil | Hne]; [exact Hnil|].
-      lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      false Hnmem. apply Hdroot. exact Hne. }
+      false Hnmem. applys wf_log_nonempty_init Hwf Hne. }
     apply* wf_log_start_last.
   - (* StepEnd: append [event_end t] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
@@ -584,16 +582,6 @@ Proof.
   - rew_list. apply Hd.
 Qed.
 
-(* Conjunct 8: the root start is present. *)
-Lemma describes_init_running : forall (log : Log.log) e t,
-    mem (event_start t) log ->
-    (log <> nil -> mem (event_start t_root) log) ->
-    ((log & e) <> nil -> mem (event_start t_root) (log & e)).
-Proof.
-  introv Hmem Hd _. rew_listx. left. apply Hd.
-  intro Heq. subst. forwards*: mem_nil_inv Hmem.
-Qed.
-
 Theorem step_preserves_describes :
   forall cfg cfg' log log',
     wf_log log ->
@@ -602,10 +590,10 @@ Theorem step_preserves_describes :
     describes log' cfg'.
 Proof.
   introv Hwf Hdesc Hstep.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hroot).
   inversion Hstep; substs; clear Hstep.
   - (* StepStart: log' = log & event_start t, T' = T[t := running] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts* HtinX: (t \indom T).
     asserts HnewX: (exists e' d' c', binds T t (state_new, e', d', c')). { do 3 eexists; eassumption. }
     asserts Htnend: (~ mem (event_end t) log).
@@ -701,17 +689,8 @@ Proof.
         asserts*: (t \indom TC).
         rew_dom.
         rew_set in Hmem. branches; auto_star.
-    + (* 8. Init event present *)
-      introv _.
-      lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      rew_listx. destruct log; [|auto_star].
-      right.
-      asserts~ Hdom: (t \indom T).
-      apply Hdspawned in Hdom.
-      destruct Hdom as [(t1 & contra)| ->]; auto.
-      forwards*: mem_nil_inv contra.
   - (* StepEnd: log' = log & event_end t, T' = T'[t := terminated] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     unfolds do_commit. simpl in H5.
     asserts Ht: (T[t] = (state_running, te_ret r, d, c)).
     { apply* read_of_binds. }
@@ -801,10 +780,8 @@ Proof.
         asserts*: (t \indom TC).
         rew_dom.
         rew_set in Hmem. rew_set. branches; auto_star.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running.
   - (* StepReadLocal: log' = log & event_read t x v, T' = T[t := running K(v)] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts* HtinX: (t \indom T).
@@ -840,10 +817,8 @@ Proof.
         rew_dom.
         rew_set in Hmem.
         branches; auto_star.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running.
   - (* StepReadGlobal: log' = log & event_read t x v, T' = T[t := running K(v)] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts* HtinX: (t \indom T).
@@ -877,10 +852,8 @@ Proof.
       * introv Hmem.
         rew_dom.
         rew_set in Hmem. branches; auto_star.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running.
   - (* StepWrite: log' = log & event_write t x v, T' = T[t := running K(void)] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts* HtinX: (t \indom T).
@@ -920,10 +893,8 @@ Proof.
       * introv Hmem.
         rew_dom.
         rew_set in Hmem. branches; auto_star.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running.
   - (* StepSpawn: log' = log & event_spawn t t', T' = T'[t := ...][t' := new] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts* Hneq: (t' <> t).
     unfolds push_thread, do_commit. simpl in H7.
     rewrite~ read_update_neq in H7. rewrite~ read_update_same in H7.
@@ -1138,12 +1109,8 @@ Proof.
         rew_dom.
         rew_set in Hmem.
         rew_set. repeat (branches; auto).
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      asserts (Hsmem & Henmem): (mem (event_start t) log /\ ~mem (event_end t) log).
-      { apply (Hdrunning t). eauto. }
-      applys* describes_init_running.
   - (* StepJoin: log' = log & event_join t t', T' = T[t := running K(r)] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts* Hneq: (t' <> t).
     unfolds pull_thread, do_merge.
     asserts Ht': (T[t'] = (state_terminated, te_ret r, empty, c')).
@@ -1200,10 +1167,8 @@ Proof.
         rew_dom.
         rew_set in Hmem. rew_set.
         branches; auto_star.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running.
   - (* StepLock: log' = log & event_lock t l, T' = T[t := ...], L' = L[l := held t] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     unfolds pull_lock, do_merge.
     asserts Hl: (L[l] = (ls_free, c')).
     { apply* read_of_binds. }
@@ -1302,10 +1267,8 @@ Proof.
       * intros. splits; introv Hmem; rew_dom;
         rew_set in *; try branches; try apply* HdomLC.
         left. apply* HdomLC.
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running.
   - (* StepLockFresh: log' = log & event_lock t l, T' = T[t := K void, d, c], G unchanged *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts (Hsmem & Henmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). eauto. }
     asserts* HtinX: (t \indom T).
@@ -1378,10 +1341,8 @@ Proof.
       * intros. splits; introv Hmem; rew_dom;
           rew_set in *; branches;
           try solve[left; apply* HdomLC| subst*].
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running.
   - (* StepRelease: log' = log & event_unlock t l, T' = T[t := ...], L' = L'[l := free] *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay & _): Hdesc.
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     unfolds push_lock, do_commit.
     asserts Ht: (T[t] = (state_running, te_exp e, d, c)).
     { apply* read_of_binds. }
@@ -1477,6 +1438,4 @@ Proof.
       * intros. splits; introv Hmem; rew_dom;
           rew_set in *; repeat branches;
           try solve[repeat left; apply* HdomLC| subst*].
-    + lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      applys* describes_init_running.
 Qed.

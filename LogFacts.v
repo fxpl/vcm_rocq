@@ -1,6 +1,28 @@
 From Vcm Require Import Common.
 From Vcm Require Import Log.
 
+(* Appending an event to a log that already starts with the root start keeps it
+   starting with the root start.  The [mem] hypothesis only serves to show the
+   log is non-empty. *)
+Lemma wf_log_init_head_snoc : forall lg e t0,
+    (lg <> nil -> exists l, lg = event_start t_root :: l) ->
+    mem (event_start t0) lg ->
+    exists l, lg & e = event_start t_root :: l.
+Proof.
+  introv Hhead Hmem.
+  forwards (l & Hlg): Hhead. { intro Hc. subst lg. forwards*: mem_nil_inv Hmem. }
+  exists (l & e). rewrite Hlg. rew_list~.
+Qed.
+
+(* The root start event is present in any non-empty well-formed log -- this is
+   the fact that used to live as a conjunct of [describes]. *)
+Lemma wf_log_nonempty_init :
+  forall log, wf_log log -> log <> nil -> mem (event_start t_root) log.
+Proof.
+  introv Hwf Hne. destruct Hwf as (_ & _ & _ & _ & _ & _ & _ & Hhead & _).
+  forwards (l & ->): Hhead Hne. rew_listx~.
+Qed.
+
 Lemma wf_log_read_last :
   forall lg t i v,
     mem (event_start t) lg ->
@@ -70,13 +92,7 @@ Proof.
       asserts* Hneq: (t <> t0).
       simpls*.
   - (* locks *) introv. rew_listx. cases_if*. rew_list*.
-  - (* init *) introv Heq.
-    destruct (last_case l2) as [-> | (e & l2' & ->)].
-    + forwards*: last_eq_last_inv Heq.
-    + replaces (l1 ++ event_start t_root :: l2' & e)
-          with ((l1 ++ event_start t_root :: l2') & e)
-            in Heq; [rew_list*|].
-      forwards* (Heq' & <-): last_eq_last_inv Heq.
+  - (* init *) intros _. applys wf_log_init_head_snoc Hinit Hstart.
   - (* root never spawned *) intros t1 Hmem. rew_listx in Hmem.
     destruct Hmem as [Hmem | Hmem]; (applys Hrootsp Hmem || inverts Hmem).
 Qed.
@@ -162,9 +178,7 @@ Proof.
         - left. exact Hnil.
         - right. exists t'' lg''. exact Hfilt. }
     * rew_list. apply~ Hlock.
-  + (* init *) introv Heq.
-    forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
-    apply* Hinit.
+  + (* init *) intros _. applys wf_log_init_head_snoc Hinit Hsmem.
   + (* root never spawned *) intros t1 Hmem. rew_listx in Hmem.
     destruct Hmem as [Hmem | Hmem]; (applys Hrootsp Hmem || inverts Hmem).
 Qed.
@@ -236,8 +250,7 @@ Proof.
     * simpl. intros ->. apply Hnmem. rew_listx*.
   + introv. rew_listx.
     cases_if~. rew_list~.
-  + introv Heq.
-    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + intros _. applys wf_log_init_head_snoc Hinit Hsmem.
   + introv Hmem'.
     rew_listx in Hmem'. branches; auto_star.
 Qed.
@@ -279,8 +292,7 @@ Proof.
       -- simpl. intros ->. apply Hnmem. rew_listx*.
   + introv. rew_listx.
     cases_if~. rew_list~.
-  + introv Heq.
-    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + intros _. applys wf_log_init_head_snoc Hinit Hsmem.
   + introv Hmem'.
     rew_listx in Hmem'. branches; auto_star.
 Qed.
@@ -328,8 +340,7 @@ Proof.
     * simpl. intros ->. apply Hnmem. rew_listx*.
   + introv. rew_listx.
     cases_if~. rew_list~.
-  + introv Heq.
-    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + intros _. applys wf_log_init_head_snoc Hinit Hsmem.
   + introv Hmem'.
     rew_listx in Hmem'.
     destruct Hmem' as [Hmem' | Heq]; [ applys Hroot Hmem' | inverts Heq; congruence ].
@@ -373,8 +384,7 @@ Proof.
     * simpl. intros ->. apply Hnmem. rew_listx*.
   + introv. rew_listx.
     cases_if~. rew_list~.
-  + introv Heq.
-    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + intros _. applys wf_log_init_head_snoc Hinit Hsmem.
   + introv Hmem'.
     rew_listx in Hmem'. branches; auto_star.
 Qed.
@@ -419,8 +429,7 @@ Proof.
     * unfold touches_lock in Heql. subst. rew_list.
       apply* wf_lock_log_snoc_unlock.
     * rew_list. apply~ Hlock.
-  + introv Heq.
-    forwards* [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
+  + intros _. applys wf_log_init_head_snoc Hinit Hsmem.
   + introv Hmem'.
     rew_listx in Hmem'. branches; auto_star.
 Qed.
@@ -468,10 +477,12 @@ Proof.
     false Hnmem. rew_listx*.
   + introv. rew_listx.
     cases_if~. rew_list~.
-  + introv Heq.
-    forwards [(Heq' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
-    * inverts Heq'. apply~ Hrootnil.
-    * apply* Hinit.
+  + intros _.
+    destruct (classic (lg = nil)) as [-> | Hne].
+    * destruct Hsrc as [(t1 & Hmem) | ->]; [forwards*: mem_nil_inv Hmem|].
+      exists (@nil event). rew_list~.
+    * forwards (l' & Hlg): Hinit Hne.
+      exists (l' & event_start t). rewrite Hlg. rew_list~.
   + introv Hmem'.
     rew_listx in Hmem'. branches; auto_star.
 Qed.
@@ -720,9 +731,10 @@ Proof.
     cases_if as Ht.
     + applys wf_lock_log_drop_last Hwll. rew_list~.
     + rew_list~ in Hwll.
-  - (* init *) introv Heq.
-    forwards~ Hr: (>> Hinit l1 (l2 & E)).
-    rewrite Heq. rew_list~.
+  - (* init *) intros Hne.
+    destruct log as [| e0 log']; [false Hne; reflexivity|].
+    forwards (l & Hl): Hinit. { rew_list. discriminate. }
+    rew_list in Hl. inverts Hl. exists log'. reflexivity.
   - (* root never spawned *) intros t1 Hmem.
     apply (Hrootsp t1). rewrite mem_last_eq. auto.
 Qed.
@@ -922,8 +934,7 @@ Proof.
   - introv Heq.
     forwards: nil_eq_middle_inv; rew_list*.
   - intros. rew_listx. constructor.
-  - introv Heq.
-    forwards: nil_eq_middle_inv; rew_list*.
+  - introv Hne. false* Hne.
   - introv contra.
     inverts contra as Hmem.
 Qed.

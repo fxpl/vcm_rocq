@@ -139,9 +139,6 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
             (forall t, t \indom T -> t \indom D) /\
             (forall t, t \indom T -> t \indom TC) /\
             (forall l, l \indom L <-> l \indom LC))
-      /\
-      (* A non-empty log has the initialisation event *)
-      (log <> nil -> mem (event_start t_root) log)
   end.
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=

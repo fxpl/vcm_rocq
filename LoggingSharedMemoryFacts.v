@@ -95,7 +95,6 @@ Proof.
     + introv contra.
       forwards*: indom_of_binds; [typeclass|].
       forwards*: indom_empty_inv.
-  - intros contra. congruence.
 Qed.
 
 Theorem step_equiv :
@@ -124,8 +123,7 @@ Proof.
     { apply* Hdstart. }
     asserts Hrootnil: (t = t_root -> log = nil).
     { intros ->. destruct (classic (log = nil)) as [Hnil | Hne]; [exact Hnil|].
-      lets (_ & _ & _ & _ & _ & _ & _ & Hdroot): Hdesc.
-      false Hnmem. apply Hdroot. exact Hne. }
+      false Hnmem. applys wf_log_nonempty_init Hwf Hne. }
     apply* wf_log_start_last.
   - (* StepEnd: append [event_end t] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
@@ -143,7 +141,7 @@ Proof.
     { apply* Hdrunning. }
     apply* wf_log_write_last.
   - (* StepSpawn: append [event_spawn t t'], with [t'] fresh *)
-    destruct Hdesc as (Hdspawned & _ & _ & Hdrunning & _ & _ & _ & _).
+    destruct Hdesc as (Hdspawned & _ & _ & Hdrunning & _ & _ & _).
     asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts Hnospawn: (~exists t1, mem (event_spawn t1 t') log).
@@ -371,17 +369,6 @@ Proof.
   - rew_list. apply Hd.
 Qed.
 
-(* Conjunct 8 (the root start is present): once a running thread exists, the log
-   is non-empty and already contains the root start, which survives the snoc. *)
-Lemma describes_init_running : forall (log : Log.log) e t,
-    mem (event_start t) log ->
-    (log <> nil -> mem (event_start t_root) log) ->
-    ((log & e) <> nil -> mem (event_start t_root) (log & e)).
-Proof.
-  introv Hmem Hd _. rew_listx. left. apply Hd.
-  intro Heq. subst. forwards*: mem_nil_inv Hmem.
-Qed.
-
 Theorem step_preserves_describes :
   forall cfg cfg' log log',
     wf_log log ->
@@ -395,7 +382,7 @@ Proof.
   - (* StepStart: append [event_start t]; thread t goes new -> running.
        Interesting conjuncts: 2 (t leaves the new set), 4 (t becomes running),
        8 (the start may be the root's). *)
-    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & Hdroot): Hdesc.
+    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite): Hdesc.
     asserts* Htin: (t \indom T).
     asserts Hnew: (exists e', binds T t (state_new, e')). { eexists; eassumption. }
     asserts Hnend: (~ mem (event_end t) log).
@@ -459,16 +446,9 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + applys* describes_writes_snoc.
-    + introv _.
-      rew_listx. destruct log; [|auto_star].
-      right.
-      asserts~ Hdom: (t \indom T).
-      apply Hdspawned in Hdom.
-      destruct Hdom as [(t1 & contra)| ->]; auto.
-      forwards*: mem_nil_inv contra.
   - (* StepEnd: append [event_end t]; thread t terminates.
        Interesting conjuncts: 3 (t becomes terminated), 4 (t leaves running). *)
-    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & Hdroot): Hdesc.
+    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite): Hdesc.
     asserts (Hsmem & Henmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts* Htin: (t \indom T).
@@ -514,17 +494,16 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + applys* describes_writes_snoc.
-    + applys* describes_init_running.
   - (* StepRead: append [event_read t x v]; thread t stays running.
        Every conjunct is generic. *)
-    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & Hdroot): Hdesc.
+    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite): Hdesc.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts* Htin: (t \indom T).
-    splits; [ applys* describes_spawned_inplace | applys* describes_new_inplace | applys* describes_ended_inplace | applys* describes_running_inplace | applys* describes_locked_snoc | applys* describes_free_snoc | applys* describes_writes_snoc | applys* describes_init_running ].
+    splits; [ applys* describes_spawned_inplace | applys* describes_new_inplace | applys* describes_ended_inplace | applys* describes_running_inplace | applys* describes_locked_snoc | applys* describes_free_snoc | applys* describes_writes_snoc ].
   - (* StepWrite: append [event_write t x v]; thread t stays running, H gains x.
        Interesting conjunct: 7 (the heap). *)
-    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & Hdroot): Hdesc.
+    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite): Hdesc.
     asserts (Hsmem & Hwnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts* Htin: (t \indom T).
@@ -551,10 +530,9 @@ Proof.
         -- introv Hbinds.
            forwards~ Hbinds': binds_update_neq_inv Hbinds.
            apply* Hdwrite.
-    + applys* describes_init_running.
   - (* StepSpawn: append [event_spawn t t']; t stays running, fresh t' added as new.
        The genuinely interesting case: conjuncts 1,2,3,4 all see the new thread. *)
-    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & Hdroot): Hdesc.
+    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite): Hdesc.
     asserts (Hsmem & Hsnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts Hnospawn: (~exists t1, mem (event_spawn t1 t') log).
@@ -676,17 +654,16 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + applys* describes_writes_snoc.
-    + applys* describes_init_running.
   - (* StepJoin: append [event_join t t']; thread t stays running.
        Every conjunct is generic. *)
-    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & Hdroot): Hdesc.
+    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite): Hdesc.
     asserts (Hsmem & Hjnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts* Htin: (t \indom T).
-    splits; [ applys* describes_spawned_inplace | applys* describes_new_inplace | applys* describes_ended_inplace | applys* describes_running_inplace | applys* describes_locked_snoc | applys* describes_free_snoc | applys* describes_writes_snoc | applys* describes_init_running ].
+    splits; [ applys* describes_spawned_inplace | applys* describes_new_inplace | applys* describes_ended_inplace | applys* describes_running_inplace | applys* describes_locked_snoc | applys* describes_free_snoc | applys* describes_writes_snoc ].
   - (* StepLock: append [event_lock t l]; t stays running, L gains held l.
        Interesting conjuncts: 5 (held locks), 6 (free locks). *)
-    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & Hdroot): Hdesc.
+    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite): Hdesc.
     asserts (Hsmem & Hlnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts* Htin: (t \indom T).
@@ -725,10 +702,9 @@ Proof.
            forwards Hbinds': binds_update_neq_inv Hbinds Hcase.
            apply Hdunlock in Hbinds'. exact Hbinds'.
     + applys* describes_writes_snoc.
-    + applys* describes_init_running.
   - (* StepRelease: append [event_unlock t l]; t stays running, L marks l free.
        Interesting conjuncts: 5 (held locks), 6 (free locks). *)
-    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite & Hdroot): Hdesc.
+    lets (Hdspawned & Hdstart & Hdend & Hdrunning & Hdlock & Hdunlock & Hdwrite): Hdesc.
     asserts (Hsmem & Hlnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts* Htin: (t \indom T).
@@ -764,5 +740,4 @@ Proof.
            forwards Hbinds': binds_update_neq_inv Hbinds Hcase.
            apply Hdunlock in Hbinds'. exact Hbinds'.
     + applys* describes_writes_snoc.
-    + applys* describes_init_running.
 Qed.

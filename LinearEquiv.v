@@ -221,7 +221,7 @@ Proof.
     }
     asserts Hcf': (lin_conflict_free d c g G).
     {
-      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -240,7 +240,7 @@ Proof.
     write and that is_latest_value gets the latest write *)
     destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
     apply Hwrite in H6 as (t' & log'0 & Hfilter).
-    destruct HdescL as (_ & _ & _ & Hrun & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+    destruct HdescL as (_ & _ & _ & Hrun & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
@@ -297,7 +297,7 @@ Proof.
     }
     asserts Hcf': (lin_conflict_free d c g G).
     {
-      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -343,7 +343,7 @@ Proof.
     subst.
     asserts Hcf': (lin_conflict_free d' c' g G).
     {
-      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds').
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -357,7 +357,7 @@ Proof.
   - (* StepLock *)
     asserts Hcf': (lin_conflict_free d c g G).
     {
-      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -378,7 +378,7 @@ Proof.
     }
     asserts Hcf': (lin_conflict_free d c g G).
     {
-      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -430,7 +430,7 @@ Proof.
     exists. splits.
     * constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescL as (_ & _ & _ & Hstart & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      destruct HdescL as (_ & _ & _ & Hstart & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       apply Hwrite.
@@ -444,7 +444,7 @@ Proof.
     exists. split.
     * constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescL as (_ & _ & _ & Hrun & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC) & _).
+      destruct HdescL as (_ & _ & _ & Hrun & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       forwards* Heq: binds_inj Hbinds'.

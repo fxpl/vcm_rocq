@@ -39,9 +39,6 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (* The value of each variable is its latest write *)
       (forall x v,
           (exists t log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t x v) <-> binds H x v)
-      /\
-      (* A non-empty log has the initialisation event *)
-      (log <> nil -> mem (event_start t_root) log)
   end.
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=

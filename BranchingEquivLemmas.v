@@ -798,7 +798,7 @@ Lemma hb_pointer_ancestor :
 Proof.
   introv Hwf Hplay Hhb. gen cm cn.
   induction Hhb as
-    [ m n t e1 e2 HN1 HN2 Hg1 Hg2 Hlt
+    [ m n e1 e2 HN1 HN2 Heq Hlt
     | n m t1 t2 l HNu HNl Hlt
     | m n t1 t2 HNs HNst Hlt
     | m n t1 t2 HNe HNj Hlt
@@ -806,7 +806,7 @@ Proof.
     introv HNchm HNchn.
   - (* HbPo *)
     asserts Hle: (m <= n). { nat_math. }
-    applys (>> CH_thread_monotone Hwf Hplay HN1 Hg1 HN2 Hg2 Hle HNchm HNchn).
+    applys* (>> CH_thread_monotone Hwf Hplay HN1 HN2 Hle HNchm HNchn).
   - (* HbLock *)
     applys (>> hb_lock_pointer_ancestor Hwf Hplay HNu HNl Hlt HNchm HNchn).
   - (* HbSpawn *)
@@ -1147,7 +1147,7 @@ Lemma hb_cross_thread_flush :
                    is_commit_event ef /\ hb log f n.
 Proof.
   introv Hhb. induction Hhb as
-    [ p q th e1 e2 HN1 HN2 Hg1 Hg2 Hlt
+    [ p q e1 e2 HN1 HN2 Heq Hlt
     | q p lt1 lt2 ll HNsrc HNtgt Hlt
     | p q st1 st2 HNsrc HNtgt Hlt
     | p q jt1 jt2 HNsrc HNtgt Hlt
@@ -1384,7 +1384,7 @@ Lemma describes_wf_cfg :
 Proof.
   introv Hdesc. destruct cfg as [(T & G) L].
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
-    (D & TC & LC & CH & Hplay & HdT & HdL & HdomD & HdomTC & HdomLClk) & _).
+    (D & TC & LC & CH & Hplay & HdT & HdL & HdomD & HdomTC & HdomLClk)).
   splits.
   - applys play_log_wf_graph Hplay.
   - introv Hb.
@@ -1786,7 +1786,7 @@ Proof.
         { destruct (classic (f = f')) as [Hfe | Hfne].
           - subst f'. exact Hhbf'.
           - apply HbTrans with (k := f').
-            + applys HbPo HNf HNf' Hgf Hgf'. nat_math.
+            + applys* HbPo HNf HNf'.
             + exact Hhbf'. }
         forwards Hnlt: Nth_inbound HNn.
         forwards Hlench: play_log_CH_length Hplay.
@@ -2141,7 +2141,7 @@ Qed.
    ([conflict_free_log_describes_conflict_free_graph]); the [dom (D[t])] half is
    [delta_writer_ancestor] (no pending write of [t] can sit in the change set
    merged in from [hc]). *)
-Lemma conflict_free_merge_holds :
+Theorem conflict_free_merge_holds :
   forall log D TC G LC CH t hc,
     wf_log log ->
     conflict_free log ->

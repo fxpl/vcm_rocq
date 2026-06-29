@@ -135,10 +135,9 @@ Definition wf_log (log : log) : Prop :=
       wf_lock_log (LibList.filter (fun e => touches_lock l e) log)
   )
   /\
-  (* The first event is the start of the root thread *)
-  (forall l1 l2,
-      log = l1 ++ event_start t_root :: l2 ->
-      l1 = nil)
+  (* A non-empty log starts with the root thread's start event.  This both
+     places the root start first and guarantees it is present at all. *)
+  (log <> nil -> exists l, log = event_start t_root :: l)
   /\
   (* The root thread is never spawned *)
   (forall t1, ~ mem (event_spawn t1 t_root) log)

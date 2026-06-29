@@ -99,9 +99,6 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
             (forall t, t \indom T -> exists st e, binds T t (st, e, D[t], TC[t])) /\
             (forall t, t \indom T -> t \indom D) /\
             (forall t, t \indom T -> t \indom TC))
-      /\
-      (* A non-empty log has the initialisation event *)
-      (log <> nil -> mem (event_start t_root) log)
   end.
 
 (* The single-branch well-formedness of a configuration, transferred from
