@@ -108,6 +108,14 @@ Definition inert (cfg : cfg) (t : tid) : Prop :=
         (forall K a, step_ul e K a -> blocked T L a)
   end.
 
+(* Well-formedness: a terminated thread always carries a return value (it became
+   terminated only via [StepEnd], whose continuation handed one back). This rules
+   out the otherwise-stuck [(state_terminated, te_exp _)] thread in progress. *)
+Definition wf_cfg (cfg : cfg) : Prop :=
+  match cfg with
+  | (T, _, _) => forall t e, binds T t (state_terminated, e) -> exists r, e = te_ret r
+  end.
+
 (* The configuration is *done* when every thread has terminated. *)
 Definition done (cfg : cfg) : Prop :=
   match cfg with
