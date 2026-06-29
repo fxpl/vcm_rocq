@@ -413,11 +413,10 @@ Qed.
 
 Lemma play_log_inv :
   forall log D TC G g CH,
-    wf_log log ->
     play_log log init_play_cfg (D, TC, G, g) CH ->
     play_state_inv TC G g.
 Proof.
-  introv Hwf Hplay.
+  introv Hplay.
   inductions Hplay.
   - (* PlayNil *)
     unfold play_state_inv. splits.
@@ -430,7 +429,6 @@ Proof.
     + intros t Ht. rew_dom. rew_set in *. branches; try solve[forwards*: indom_empty_inv].
       subst. rewrite* read_update_same.
   - (* PlaySnoc *)
-    forwards Hwf0: wf_log_last_inv Hwf.
     forwards~ Hinv': IHHplay.
     applys* play_event_preserves_inv H.
 Qed.
@@ -1118,7 +1116,7 @@ Proof.
       { forwards Hib: Nth_inbound HNchn0. rewrite <- Hlen in HnN. nat_math. }
       inverts H.
       cbn [get_thread] in Hcneq. rewrite read_update_same in Hcneq. subst cn.
-      forwards Hinv: play_log_inv Hwf0 Hplay. destruct Hinv as (_ & Hmax & _).
+      forwards Hinv: play_log_inv Hplay. destruct Hinv as (_ & Hmax & _).
       applys Hmax Hcmdom.
 Qed.
 
@@ -1156,7 +1154,7 @@ Proof.
       { forwards Hib: Nth_inbound HNchn0. rewrite <- Hlen in HnN. nat_math. }
       inverts H.
       cbn [get_thread] in Hcneq. rewrite read_update_same in Hcneq. subst cn.
-      forwards Hinv: play_log_inv Hwf0 Hplay. destruct Hinv as (_ & Hmax & _).
+      forwards Hinv: play_log_inv Hplay. destruct Hinv as (_ & Hmax & _).
       applys Hmax Hcmdom.
 Qed.
 
@@ -1194,7 +1192,7 @@ Proof.
       { forwards Hib: Nth_inbound HNchn0. rewrite <- Hlen in HnN. nat_math. }
       inverts H.
       cbn [get_thread] in Hcneq. rewrite read_update_same in Hcneq. subst cn.
-      forwards Hinv: play_log_inv Hwf0 Hplay. destruct Hinv as (_ & Hmax & _).
+      forwards Hinv: play_log_inv Hplay. destruct Hinv as (_ & Hmax & _).
       applys Hmax Hcmdom.
 Qed.
 
@@ -1556,7 +1554,7 @@ Lemma conflict_free_last_global_write :
 Proof.
   introv Hcf Hwf Hplay Hndom Hdom HTC Hval.
   forwards Hwf': wf_log_last_inv Hwf.
-  forwards Hinv: play_log_inv Hwf' Hplay.
+  forwards Hinv: play_log_inv Hplay.
   destruct Hinv as (Htot & _ & _).
   forwards Hcfg: total_order_conflict_free_graph Htot.
   forwards (lw & tL & vL & Hfilter): is_latest_value_log_write Hplay Hval.
@@ -1677,4 +1675,129 @@ Proof.
   asserts Hbdj: (binds (D[t]) j (D[t][j])).
   { applys binds_of_indom_read Hjd; (reflexivity || typeclass). }
   applys Hnanc. applys (>> delta_writer_ancestor Hwf Hcf Hplay Htd Hbdj Hgwc).
+Qed.
+
+(* The graph-membership half of [wf_cfg], read straight off the replay (no
+   [wf_log] needed): the graph stays well formed (graph_commit only ever extends
+   the totally-ordered chain at the in-graph head), the head is in the graph, and
+   every thread pointer is in the graph. Mirrors [play_event_preserves_inv]. *)
+Lemma play_event_preserves_graph_facts :
+  forall E Dp TCp Gp gp D TC G g,
+    play_event E (Dp, TCp, Gp, gp) (D, TC, G, g) ->
+    wf_graph Gp /\ graph_indom Gp gp /\ (forall t, t \indom TCp -> graph_indom Gp (TCp[t])) ->
+    wf_graph G /\ graph_indom G g /\ (forall t, t \indom TC -> graph_indom G (TC[t])).
+Proof.
+  introv Hpe (Hwf' & Hg' & HTC'). inverts Hpe.
+  - (* PlayRead *) splits; assumption.
+  - (* PlayWrite *) splits; assumption.
+  - (* PlayStart: TCp[t := gp], graph/head unchanged *)
+    splits; [ exact Hwf' | exact Hg' | ].
+    intros tq Htq. destruct (classic (tq = t)) as [->|Hne].
+    + rewrite read_update_same. exact Hg'.
+    + rewrite read_update_neq; auto.
+      asserts Hin: (tq \indom TCp).
+      { asserts Hor: (tq = t \/ tq \indom TCp). { applys* indom_update_inv Htq. }
+        destruct Hor as [Heq|Hin]; [congruence|exact Hin]. }
+      applys HTC' Hin.
+  - (* PlayEnd: graph_commit Gp gp g' d, TCp[t := g'] *)
+    match goal with Hf : commit_fresh _ _ |- _ => rename Hf into Hfresh end.
+    splits.
+    + applys graph_commit_wf Hwf' Hfresh Hg'.
+    + applys graph_commit_indom_same.
+    + intros tq Htq. destruct (classic (tq = t)) as [->|Hne].
+      * rewrite read_update_same. applys graph_commit_indom_same.
+      * rewrite read_update_neq; auto.
+        asserts Hin: (tq \indom TCp).
+        { asserts Hor: (tq = t \/ tq \indom TCp). { applys* indom_update_inv Htq. }
+          destruct Hor as [Heq|Hin]; [congruence|exact Hin]. }
+        applys graph_commit_indom. applys HTC' Hin.
+  - (* PlaySpawn: graph_commit, TCp[t1 := g'][t2 := g'] *)
+    match goal with Hf : commit_fresh _ _ |- _ => rename Hf into Hfresh end.
+    splits.
+    + applys graph_commit_wf Hwf' Hfresh Hg'.
+    + applys graph_commit_indom_same.
+    + intros tq Htq. destruct (classic (tq = t2)) as [->|Hne2].
+      * rewrite read_update_same. applys graph_commit_indom_same.
+      * rewrite read_update_neq; auto. destruct (classic (tq = t1)) as [->|Hne1].
+        -- rewrite read_update_same. applys graph_commit_indom_same.
+        -- rewrite read_update_neq; auto.
+           asserts Hin: (tq \indom TCp).
+           { asserts Ho2: (tq = t2 \/ tq \indom (TCp[t1 := g])). { applys* indom_update_inv Htq. }
+             destruct Ho2 as [Heq|Hin2]; [congruence|].
+             asserts Ho1: (tq = t1 \/ tq \indom TCp). { applys* indom_update_inv Hin2. }
+             destruct Ho1 as [Heq|Hin1]; [congruence|exact Hin1]. }
+           applys graph_commit_indom. applys HTC' Hin.
+  - (* PlayJoin: TCp[t1 := gp], graph/head unchanged *)
+    splits; [ exact Hwf' | exact Hg' | ].
+    intros tq Htq. destruct (classic (tq = t1)) as [->|Hne].
+    + rewrite read_update_same. exact Hg'.
+    + rewrite read_update_neq; auto.
+      asserts Hin: (tq \indom TCp).
+      { asserts Hor: (tq = t1 \/ tq \indom TCp). { applys* indom_update_inv Htq. }
+        destruct Hor as [Heq|Hin]; [congruence|exact Hin]. }
+      applys HTC' Hin.
+  - (* PlayLock: TCp[t := gp], graph/head unchanged *)
+    splits; [ exact Hwf' | exact Hg' | ].
+    intros tq Htq. destruct (classic (tq = t)) as [->|Hne].
+    + rewrite read_update_same. exact Hg'.
+    + rewrite read_update_neq; auto.
+      asserts Hin: (tq \indom TCp).
+      { asserts Hor: (tq = t \/ tq \indom TCp). { applys* indom_update_inv Htq. }
+        destruct Hor as [Heq|Hin]; [congruence|exact Hin]. }
+      applys HTC' Hin.
+  - (* PlayUnlock: graph_commit, TCp[t := g'] *)
+    match goal with Hf : commit_fresh _ _ |- _ => rename Hf into Hfresh end.
+    splits.
+    + applys graph_commit_wf Hwf' Hfresh Hg'.
+    + applys graph_commit_indom_same.
+    + intros tq Htq. destruct (classic (tq = t)) as [->|Hne].
+      * rewrite read_update_same. applys graph_commit_indom_same.
+      * rewrite read_update_neq; auto.
+        asserts Hin: (tq \indom TCp).
+        { asserts Hor: (tq = t \/ tq \indom TCp). { applys* indom_update_inv Htq. }
+          destruct Hor as [Heq|Hin]; [congruence|exact Hin]. }
+        applys graph_commit_indom. applys HTC' Hin.
+Qed.
+
+Lemma play_log_graph_facts :
+  forall log D TC G g CH,
+    play_log log init_play_cfg (D, TC, G, g) CH ->
+    wf_graph G /\ graph_indom G g /\ (forall t, t \indom TC -> graph_indom G (TC[t])).
+Proof.
+  introv Hplay. inductions Hplay.
+  - splits.
+    + apply init_graph_wf.
+    + applys graph_root_indom_same.
+    + intros t Ht.
+      asserts Hor: (t = t_root \/ t \indom (empty : commits)). { applys* indom_update_inv Ht. }
+      destruct Hor as [-> | Hin].
+      * rewrite read_update_same. applys graph_root_indom_same.
+      * false. applys indom_empty_inv Hin.
+  - forwards* Hfacts: IHHplay.
+    applys* play_event_preserves_graph_facts H Hfacts.
+Qed.
+
+(* As for Branching, [describes] already implies [wf_cfg], with no [wf_log]
+   needed: the graph-membership conjuncts come from [play_log_graph_facts] and the
+   [total_order] / head-is-maximum conjuncts from [play_log_inv]. *)
+Lemma describes_wf_cfg :
+  forall log cfg,
+    describes log cfg ->
+    wf_cfg cfg.
+Proof.
+  introv Hdesc. destruct cfg as [[[T G] g] L].
+  destruct Hdesc as (_ & _ & _ & _ & _ & _ &
+    (D & TC & CH & Hplay & HdT & HdomD & HdomTC) & _).
+  forwards (Hwfg & Hgin & HTCin): play_log_graph_facts Hplay.
+  forwards (Htot & Hmax & _): play_log_inv Hplay.
+  splits.
+  - exact Hwfg.
+  - exact Htot.
+  - exact Hgin.
+  - exact Hmax.
+  - introv Hb.
+    lets Hin: (indom_of_binds Hb).
+    forwards (st0 & e0 & Hb0): HdT Hin.
+    forwards* Heq: binds_inj Hb Hb0. inverts Heq.
+    applys HTCin. applys HdomTC Hin.
 Qed.

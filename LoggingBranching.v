@@ -138,7 +138,6 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
             (forall l, l \indom L -> exists ls, binds L l (ls, LC[l])) /\
             (forall t, t \indom T -> t \indom D) /\
             (forall t, t \indom T -> t \indom TC) /\
-            (* TODO: Merge into iff *)
             (forall l, l \indom L <-> l \indom LC))
       /\
       (* A non-empty log has the initialisation event *)

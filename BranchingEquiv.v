@@ -274,7 +274,6 @@ Hint Resolve matching_locks_push_lock : vcm.
 Theorem branching_complete :
   forall log log' cfgSh cfgB cfgSh',
     wf_log log ->
-    wf_cfg cfgB ->
     LoggingSharedMemory.describes log cfgSh ->
     LoggingBranching.describes log cfgB ->
     match cfgSh, cfgB with
@@ -288,8 +287,9 @@ Theorem branching_complete :
       | (TSh', _, LSh'), (TB', _, LB') => matching_threads TSh' TB' /\ matching_locks LSh' LB'
       end.
 Proof.
-  introv Hwf HwfB HdescSh HdescB Hmatch Hcf Hstep.
+  introv Hwf HdescSh HdescB Hmatch Hcf Hstep.
   destruct cfgB as [(T & G) L].
+  forwards HwfB: describes_wf_cfg HdescB.
   destruct HwfB as (HwfG & _).
   inverts Hstep;
     destruct Hmatch as (Hthr & Hlck);
@@ -617,7 +617,6 @@ Qed.
 Corollary branching_equiv :
   forall log log' cfgSh cfgB,
     wf_log log ->
-    wf_cfg cfgB ->
     LoggingSharedMemory.describes log cfgSh ->
     LoggingBranching.describes log cfgB ->
     match cfgSh, cfgB with
@@ -627,7 +626,7 @@ Corollary branching_equiv :
       (exists cfgSh', LoggingSharedMemory.step (cfgSh, log) (cfgSh', log')) <->
       (exists cfgB', LoggingBranching.step (cfgB, log) (cfgB', log')).
 Proof.
-  introv Hwf HwfB HdescSh HdescB Hmatch Hcf. split.
+  introv Hwf HdescSh HdescB Hmatch Hcf. split.
   - introv (cfgSh' & Hstep).
     forwards* (cfgB' & Hb & _): branching_complete.
   - introv (cfgB' & Hstep).

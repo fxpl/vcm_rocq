@@ -1335,6 +1335,72 @@ Proof.
   Unshelve. all: typeclass.
 Qed.
 
+(* Replaying a log preserves [wf_graph]: the initial graph is well formed
+   ([init_graph_wf]) and every graph-changing event is a [graph_commit] /
+   [graph_merge] whose new commit is fresh and whose parent(s) are already in the
+   graph (the latter via [play_log_graph_wf] on the prefix). *)
+Lemma play_log_wf_graph :
+  forall log D TC G LC CH,
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
+    wf_graph G.
+Proof.
+  introv Hplay. inductions Hplay.
+  - apply init_graph_wf.
+  - forwards* Hwf': IHHplay.
+    forwards Hpgwf: play_log_graph_wf Hplay.
+    destruct Hpgwf as (_ & HTC & HLC).
+    rename H into Hpe.
+    match goal with Hp : play_log _ _ (_, _, ?GG, _) _ |- _ => destruct GG as (C & P) end.
+    inverts Hpe; try assumption.
+    + (* PlayEnd: graph_commit *)
+      applys graph_commit_wf Hwf';
+        [ assumption | applys binds_graph_indom; [ eassumption | exact HTC ] ].
+    + (* PlaySpawn: graph_commit *)
+      applys graph_commit_wf Hwf';
+        [ assumption | applys binds_graph_indom; [ eassumption | exact HTC ] ].
+    + (* PlayJoin: graph_merge (both parents from TC) *)
+      applys graph_merge_wf Hwf';
+        [ assumption
+        | applys binds_graph_indom; [ eassumption | exact HTC ]
+        | applys binds_graph_indom; [ eassumption | exact HTC ] ].
+    + (* PlayLock: graph_merge (lock parent from LC, thread parent from TC) *)
+      applys graph_merge_wf Hwf';
+        [ assumption
+        | applys binds_graph_indom; [ eassumption | exact HLC ]
+        | applys binds_graph_indom; [ eassumption | exact HTC ] ].
+    + (* PlayUnlock: graph_commit *)
+      applys graph_commit_wf Hwf';
+        [ assumption | applys binds_graph_indom; [ eassumption | exact HTC ] ].
+Qed.
+
+(* [describes] already pins down [wf_cfg]: the graph is the replay of the log
+   (well formed by [play_log_wf_graph]) and every thread/lock commit pointer is
+   [TC[t]]/[LC[l]], which [play_log_graph_wf] places in the graph. No [wf_log]
+   needed. *)
+Lemma describes_wf_cfg :
+  forall log cfg,
+    describes log cfg ->
+    wf_cfg cfg.
+Proof.
+  introv Hdesc. destruct cfg as [(T & G) L].
+  destruct Hdesc as (_ & _ & _ & _ & _ & _ &
+    (D & TC & LC & CH & Hplay & HdT & HdL & HdomD & HdomTC & HdomLClk) & _).
+  splits.
+  - applys play_log_wf_graph Hplay.
+  - introv Hb.
+    lets Hin: (indom_of_binds Hb).
+    forwards (ts0 & e0 & Hb0): HdT Hin.
+    forwards* Heq: binds_inj Hb Hb0. inverts Heq.
+    forwards Hpgwf: play_log_graph_wf Hplay. destruct Hpgwf as (_ & HTC & _).
+    applys HTC. applys HdomTC Hin.
+  - introv Hb.
+    lets Hin: (indom_of_binds Hb).
+    forwards (ls0 & Hb0): HdL Hin.
+    forwards* Heq: binds_inj Hb Hb0. inverts Heq.
+    forwards Hpgwf: play_log_graph_wf Hplay. destruct Hpgwf as (_ & _ & HLC).
+    applys HLC. apply (proj1 (HdomLClk l)). exact Hin.
+Qed.
+
 (* Every graph x-writer [cx] is the commit produced by some flush at position [f']
    (so [cx = CH[f']], a commit event of its thread [tw']), and the flushed value
    came from an x-write at some earlier position [kw'] that was still uncommitted

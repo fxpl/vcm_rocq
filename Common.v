@@ -28,8 +28,7 @@ Parameter void : val.
 (* thread id *)
 Definition tid := nat.
 
-(* The distinguished initial ("root") thread: it is not spawned by anyone, and
-   is brought into existence by an [event_init] at the start of the log. *)
+(* The distinguished initial ("root") thread which exists at program start. *)
 Parameter t_root : tid.
 
 (* lock id *)

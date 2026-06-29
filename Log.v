@@ -53,12 +53,11 @@ Definition accesses_variable (x : var) (e : event) :=
 Definition log := list event.
 
 Inductive hb (log : log) : nat -> nat -> Prop :=
-| HbPo : forall m n t e1 e2,
+| HbPo : forall m n e1 e2,
     (* Events are ordered within a thread *)
     LibList.Nth m log e1 ->
     LibList.Nth n log e2 ->
-    get_thread e1 = t ->
-    get_thread e2 = t ->
+    get_thread e1 = get_thread e2 ->
     m < n ->
     hb log m n
 | HbLock : forall n m t1 t2 l,

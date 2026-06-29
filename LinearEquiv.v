@@ -183,7 +183,6 @@ Hint Resolve matching_threads_push_thread : vcm.
 Theorem linear_complete :
   forall log log' cfgSh cfgL cfgSh',
     wf_log log ->
-    wf_cfg cfgL ->
     LoggingSharedMemory.describes log cfgSh ->
     LoggingLinear.describes log cfgL ->
     match cfgSh, cfgL with
@@ -197,8 +196,9 @@ Theorem linear_complete :
         | (TSh', _, LSh'), (TL', _, _, LL') => matching_threads TSh' TL' /\ LSh' = LL'
         end.
 Proof.
-  introv Hwf HwfL HdescSh HdescL Hmatch Hcf Hstep.
+  introv Hwf HdescSh HdescL Hmatch Hcf Hstep.
   destruct cfgL as (((T & G) & g) & L).
+  forwards HwfL: describes_wf_cfg HdescL.
   destruct HwfL as (HwfG & Htotal & Hgdom & Hmax & Hcorr).
   inverts Hstep;
     destruct Hmatch as (Hsame & ->);
@@ -501,7 +501,6 @@ Qed.
 Theorem linear_equiv :
   forall log log' cfgSh cfgL,
     wf_log log ->
-    wf_cfg cfgL ->
     LoggingSharedMemory.describes log cfgSh ->
     LoggingLinear.describes log cfgL ->
     match cfgSh, cfgL with
@@ -511,7 +510,7 @@ Theorem linear_equiv :
       (exists cfgSh', LoggingSharedMemory.step (cfgSh, log) (cfgSh', log')) <->
       (exists cfgL', LoggingLinear.step (cfgL, log) (cfgL', log')).
 Proof.
-  introv Hwf Hwfc HdescSh HdescL Hmatch Hcf.
+  introv Hwf HdescSh HdescL Hmatch Hcf.
   split.
   - introv (cfgSh' & Hstep).
     forwards* (cfgL' & Hstep' & _): linear_complete.

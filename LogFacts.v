@@ -588,7 +588,7 @@ Lemma hb_preserves_thread :
 Proof.
   introv Hhb.
   induction Hhb as
-    [ m n th ea eb HNa HNb Hga Hgb Hlt
+    [ m n ea eb HNa HNb Heq Hlt
     | n m lt1 lt2 ll HNsrc HNtgt Hlt
     | m n st1 st2 HNsrc HNtgt Hlt
     | m n jt1 jt2 HNsrc HNtgt Hlt
@@ -746,7 +746,6 @@ Proof.
     - assert (Heq2: log & event_spawn t1 t2 = l1 ++ em :: (l2 & event_spawn t1 t2))
         by (rewrite Heq; rew_list~).
       forwards~ Hms: (>> Hstartby l1 (l2 & event_spawn t1 t2) em t2).
-      (* em <> event_init t2: else t2 = t_root, but t2 is spawned *)
       rewrite Heq. rewrite~ mem_app_eq.
   }
   forwards (a & b & Heqs): mem_inv_middle Hmemstart.
