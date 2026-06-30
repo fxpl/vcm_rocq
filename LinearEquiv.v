@@ -105,79 +105,6 @@ Qed.
 
 Hint Resolve matching_threads_global_commit : vcm.
 
-Lemma matching_threads_push_thread :
-  forall TSh TL TL' t t' g g' G G',
-    matching_threads TSh TL ->
-    t \indom TSh ->
-    t' \indom TSh ->
-    t <> t' ->
-    push_thread t t' g g' TL G = (TL', G') ->
-    matching_threads TSh TL'.
-Proof.
-  introv Hmatch HdomSh HdomSh' Hneq Hpush.
-  asserts HdomL: (t \indom TL).
-  {
-    forwards Heq: matching_threads_same_domain Hmatch.
-    rewrite* <- Heq.
-  }
-  asserts HdomL': (t' \indom TL).
-  {
-    forwards Heq: matching_threads_same_domain Hmatch.
-    rewrite* <- Heq.
-  }
-  unfolds push_thread, global_commit.
-  introv. splits; introv Hbinds.
-  - destruct (classic (t = t0)).
-    + subst.
-      apply Hmatch in Hbinds as (d' & c & Hbinds).
-      forwards Hread: read_of_binds Hbinds.
-      destruct (TL[t0]) as [[[ts' e'] d''] c'].
-      inverts Hread.
-      rewrite~ read_update_neq in Hpush.
-      destruct (TL[t']) as [[[ts' e'] d''] c'].
-      inverts Hpush.
-      exists. apply~ binds_update_neq.
-      apply* binds_update_same.
-    + apply Hmatch in Hbinds as (d & c & Hbinds).
-      forwards* Hbinds': binds_of_indom_read HdomL.
-      destruct (TL[t]) as [[[ts' e'] d'] c'].
-      rewrite~ read_update_neq in Hpush.
-      forwards* Hbinds'': binds_of_indom_read HdomL'.
-      destruct (TL[t']) as [[[ts'' e''] d''] c''].
-      inverts Hpush.
-      destruct (classic (t0 = t')).
-      * subst.
-        forwards~ Heq: binds_inj Hbinds Hbinds''.
-        inverts Heq.
-        exists.
-        apply* binds_update_same.
-      * exists.
-        do 2 apply* binds_update_neq.
-  - apply Hmatch.
-    forwards* Hbinds': binds_of_indom_read HdomL.
-    destruct (TL[t]) as [[[ts' e'] d'] c'].
-    rewrite~ read_update_neq in Hpush.
-    forwards* Hbinds'': binds_of_indom_read HdomL'.
-    destruct (TL[t']) as [[[ts'' e''] d''] c''].
-    inverts Hpush.
-    destruct Hbinds as (d & c & Hbinds).
-    destruct (classic (t' = t0)).
-    + subst.
-      forwards Heq: binds_update_same_inv Hbinds.
-      inverts Heq.
-      exists*.
-    + forwards~ Hbinds''': binds_update_neq_inv Hbinds.
-      destruct (classic (t = t0)).
-      * subst.
-        forwards Heq: binds_update_same_inv Hbinds'''.
-        inverts Heq.
-        exists*.
-      * forwards~ Hbinds'''': binds_update_neq_inv Hbinds'''.
-        exists*.
-Qed.
-
-Hint Resolve matching_threads_push_thread : vcm.
-
 (* Completeness: every SharedMemory step is matched by a Linear step, and the
    resulting configurations still have the same expressions and locks. *)
 Theorem linear_complete :
@@ -234,10 +161,6 @@ Proof.
     clears HdescSh HdescL.
     exists. splits; [ constructors* | simpls*].
   - (* StepRead *)
-    (* TODO: Cases on global vs. local read. Connect to play_log
-    and see whether x is bound in D[t]. Having the log be
-    conflict_free means that a local read is indeed the latest
-    write and that is_latest_value gets the latest write *)
     destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
     apply Hwrite in H6 as (t' & log'0 & Hfilter).
     destruct HdescL as (_ & _ & _ & Hrun & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
@@ -258,31 +181,7 @@ Proof.
     * (* global (committed) read: [x] is visible as the latest committed value *)
       lets [_ Hback]: Hrun t. forwards* (Hms & Hmne): Hback.
       asserts Hwfr: (wf_log (log & event_read t x v)). { applys wf_log_read_last Hms Hmne Hwf. }
-      destruct (last_write_position log x log'0 t' v Hfilter) as (mw & HNL & Hlast).
-      forwards HLlt: Nth_inbound HNL.
-      asserts Hplayf: (exists CHf,
-        play_log (log & event_read t x v) init_play_cfg (D, TC, G, g) CHf).
-      { exists. applys PlaySnoc Hplay. apply PlayRead. }
-      destruct Hplayf as (CHf & Hplayf).
-      asserts HNLf: (LibList.Nth mw (log & event_read t x v) (event_write t' x v)).
-      { applys* Nth_app_l. }
-      asserts HNread: (LibList.Nth (length log) (log & event_read t x v) (event_read t x v)).
-      { applys* Nth_app_r'. }
-      asserts Hlastf:
-        (forall k tk vk, LibList.Nth k (log & event_read t x v) (event_write tk x vk) -> k <= mw).
-      { introv HNk. forwards [HN' | (Hpe & Hee)]: Nth_last_inv HNk.
-        - applys Hlast HN'.
-        - inverts Hee. }
-      asserts* Hacc: (accesses_variable x (event_read t x v)).
-      forwards Hhb: Hcf HNLf HNread Hacc HLlt.
-      asserts HndomL: (x \notindom (D[t'])).
-      {
-        destruct (classic (t' = t)) as [-> | Hne].
-        - exact Hnin.
-        - applys last_writer_not_in_delta Hplayf HNLf Hlastf HNread Hhb. simpl. congruence. }
-      forwards Hlv:
-        (>> hb_last_write_visible Hwfr Hcf Hplayf HNLf Hlastf HndomL HNread Hhb).
-      simpl in Hlv.
+      forwards Hlv: last_global_write_latest_value Hcf Hwfr Hplay Hnin Hfilter.
       exists. split; [ applys StepReadGlobal Hbinds; [ eassumption | exact Hnin | exact Hlv ] |].
       simpls*.
   - (* StepWrite *)
@@ -306,14 +205,14 @@ Proof.
       destruct Hpgwf as (_ & HTCdom).
       applys* lin_conflict_free_holds.
     }
-    asserts (T' & G' & Heq): (exists T' G', push_thread t t' g g' (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G')).
+    asserts (T' & G' & Heq): (exists T' G', global_commit t g g' T[t:=(state_running, K t', d, c)][t':=(
+    state_new, te_exp e', \{}, g')] G = (T', G')).
     {
-      exists. unfolds push_thread, global_commit.
+      asserts* Hneq: (t <> t').
+      unfolds global_commit.
       rewrite~ read_update_neq.
-      rewrite read_update_same.
-      rewrite~ read_update_neq.
-      rewrite read_update_same.
-      reflexivity.
+      rewrite~ read_update_same.
+      exists. reflexivity.
     }
     asserts* Hdom: (t \indom T0[t:=(state_running, K t')][t':=(
       state_new, te_exp e')]).

@@ -269,30 +269,58 @@ Qed.
 
 Hint Resolve matching_locks_push_lock : vcm.
 
+(* [matching_locks] is not an independent assumption: a lock's state is fully
+   determined by its touch-filter in the log, so two configurations describing the
+   same log necessarily agree on locks.  (The thread expressions, by contrast, are
+   only existentially constrained by [describes], so [matching_threads] genuinely
+   has to be assumed.) *)
+Lemma matching_locks_describes :
+  forall log cfgSh cfgB,
+    LoggingSharedMemory.describes log cfgSh ->
+    LoggingBranching.describes log cfgB ->
+    match cfgSh, cfgB with
+    | (_, _, LSh), (_, _, LB) => matching_locks LSh LB
+    end.
+Proof.
+  introv HdescSh HdescB.
+  destruct cfgSh as ((TSh & HSh) & LSh). destruct cfgB as ((TB & G) & LB).
+  destruct HdescSh as (_ & _ & _ & _ & HShlocked & HShfree & _).
+  destruct HdescB as (_ & _ & _ & _ & HBlocked & HBfree & _).
+  intros l ls. destruct ls as [ | t].
+  - (* ls_free: the filter ends in an [event_unlock] on both sides *)
+    split.
+    + introv Hb. apply (HBfree l). apply (HShfree l). exact Hb.
+    + introv (c & Hb). apply (HShfree l). apply (HBfree l). exists* c.
+  - (* ls_held t: the filter ends in [event_lock t l] on both sides *)
+    split.
+    + introv Hb. apply (HBlocked t l). apply (HShlocked t l). exact Hb.
+    + introv (c & Hb). apply (HShlocked t l). apply (HBlocked t l). exists* c.
+Qed.
+
 (* Completeness: every SharedMemory step is matched by a Branching step, and the
-   resulting configurations still match on threads and locks. *)
+   resulting configurations still match on threads. *)
 Theorem branching_complete :
   forall log log' cfgSh cfgB cfgSh',
     wf_log log ->
     LoggingSharedMemory.describes log cfgSh ->
     LoggingBranching.describes log cfgB ->
     match cfgSh, cfgB with
-    | (TSh, _, LSh), (TB, _, LB) => matching_threads TSh TB /\ matching_locks LSh LB
+    | (TSh, _, _), (TB, _, _) => matching_threads TSh TB
     end ->
     conflict_free log' ->
     LoggingSharedMemory.step (cfgSh, log) (cfgSh', log') ->
     exists cfgB',
       LoggingBranching.step (cfgB, log) (cfgB', log') /\
       match cfgSh', cfgB' with
-      | (TSh', _, LSh'), (TB', _, LB') => matching_threads TSh' TB' /\ matching_locks LSh' LB'
+      | (TSh', _, _), (TB', _, _) => matching_threads TSh' TB'
       end.
 Proof.
-  introv Hwf HdescSh HdescB Hmatch Hcf Hstep.
+  introv Hwf HdescSh HdescB Hthr Hcf Hstep.
   destruct cfgB as [(T & G) L].
   forwards HwfB: describes_wf_cfg HdescB.
   destruct HwfB as (HwfG & _).
+  forwards Hlck: matching_locks_describes HdescSh HdescB.
   inverts Hstep;
-    destruct Hmatch as (Hthr & Hlck);
     match goal with
     | H: binds ?T ?t (?ts', ?e) |- _ =>
         assert (Ht := H);
@@ -329,33 +357,9 @@ Proof.
       forwards (_ & Heqw): last_eq_last_inv Hfilt2. inverts Heqw.
       exists. split; [ applys StepReadLocal Hbinds; [ eassumption | exact Hbdi ] | simpls* ].
     * (* global (committed) read: [x] is visible as the latest committed value *)
-      forwards Hcfg: conflict_free_log_describes_conflict_free_graph Hwf Hcflog Hplay.
       lets [_ Hback]: Hrun t. forwards (Hms & Hmne): Hback. { do 3 eexists. exact Hbinds. }
       asserts Hwfr: (wf_log (log & event_read t x v)). { applys wf_log_read_last Hms Hmne Hwf. }
-      destruct (last_write_position log x log'0 t' v Hfilter) as (mw & HNL & Hlast).
-      forwards HLlt: Nth_inbound HNL.
-      asserts Hplayf: (exists CHf,
-        play_log (log & event_read t x v) init_play_cfg (D, TC, G, LC) CHf).
-      { eexists. applys PlaySnoc Hplay. apply PlayRead. }
-      destruct Hplayf as (CHf & Hplayf).
-      asserts HNLf: (LibList.Nth mw (log & event_read t x v) (event_write t' x v)).
-      { applys* Nth_app_l. }
-      asserts HNread: (LibList.Nth (length log) (log & event_read t x v) (event_read t x v)).
-      { applys* Nth_app_r'. }
-      asserts Hlastf:
-        (forall k tk vk, LibList.Nth k (log & event_read t x v) (event_write tk x vk) -> k <= mw).
-      { introv HNk. forwards [HN' | (Hpe & Hee)]: Nth_last_inv HNk.
-        - applys Hlast HN'.
-        - inverts Hee. }
-      asserts Hacc: (accesses_variable x (event_read t x v)). { reflexivity. }
-      forwards Hhb: Hcf HNLf HNread Hacc HLlt.
-      asserts HndomL: (x \notindom (D[t'])).
-      { destruct (classic (t' = t)) as [-> | Hne].
-        - exact Hnin.
-        - applys last_writer_not_in_delta Hplayf HNLf Hlastf HNread Hhb. simpl. congruence. }
-      forwards Hlv:
-        (>> hb_last_write_visible Hwfr Hcf Hcfg Hplayf HNLf Hlastf HndomL HNread Hhb).
-      simpl in Hlv.
+      forwards Hlv: last_global_write_latest_value Hcf Hwfr Hplay Hnin Hfilter.
       exists. split; [ applys StepReadGlobal Hbinds; [ eassumption | exact Hnin | exact Hlv ] | simpls* ].
   + (* StepWrite *)
     exists. splits; [ constructors* | simpls*].
@@ -493,20 +497,20 @@ Theorem branching_sound :
     LoggingSharedMemory.describes log cfgSh ->
     LoggingBranching.describes log cfgB ->
     match cfgSh, cfgB with
-    | (TSh, _, LSh), (TB, _, LB) => matching_threads TSh TB /\ matching_locks LSh LB
+    | (TSh, _, _), (TB, _, _) => matching_threads TSh TB
     end ->
     conflict_free log' ->
     LoggingBranching.step (cfgB, log) (cfgB', log') ->
     exists cfgSh',
       LoggingSharedMemory.step (cfgSh, log) (cfgSh', log') /\
       match cfgSh', cfgB' with
-      | (TSh', _, LSh'), (TB', _, LB') => matching_threads TSh' TB' /\ matching_locks LSh' LB'
+      | (TSh', _, _), (TB', _, _) => matching_threads TSh' TB'
       end.
 Proof.
-  introv Hwf HdescSh HdescB Hmatch Hcf Hstep.
+  introv Hwf HdescSh HdescB Hthr Hcf Hstep.
   destruct cfgSh as ((Tsh & Hp) & Lsh).
+  forwards Hlck: matching_locks_describes HdescSh HdescB.
   inverts Hstep;
-    destruct Hmatch as (Hthr & Hlck);
     try
     match goal with
     | H: binds ?T ?t (?ts, ?e, ?d, ?c) |- _ =>
@@ -545,11 +549,6 @@ Proof.
       inverts Heq.
       asserts* ->: (c = TC[t]).
       apply Hwrite.
-      asserts Hcfg: (conflict_free_graph G).
-      {
-        forwards Hcflog: conflict_free_last_inv Hcf.
-        applys conflict_free_log_describes_conflict_free_graph Hwf Hcflog Hplay.
-      }
       asserts Hwfr: (wf_log (log & event_read t x v)).
       {
         lets [_ Hback]: Hrun t.
@@ -558,7 +557,7 @@ Proof.
       }
       asserts* Hdom: (t \indom T).
       forwards~ Hdom': HdomTC Hdom.
-      forwards* Hex: conflict_free_last_global_write Hcf Hwfr Hcfg Hplay.
+      forwards* Hex: conflict_free_last_global_write Hcf Hwfr Hplay.
     }
     clears HdescSh HdescB.
     simpls*.
@@ -620,7 +619,7 @@ Corollary branching_equiv :
     LoggingSharedMemory.describes log cfgSh ->
     LoggingBranching.describes log cfgB ->
     match cfgSh, cfgB with
-    | (TSh, _, LSh), (TB, _, LB) => matching_threads TSh TB /\ matching_locks LSh LB
+    | (TSh, _, _), (TB, _, _) => matching_threads TSh TB
     end ->
     conflict_free log' ->
       (exists cfgSh', LoggingSharedMemory.step (cfgSh, log) (cfgSh', log')) <->

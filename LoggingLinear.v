@@ -39,6 +39,8 @@ Inductive play_event :
 | PlaySpawn : forall D TC G g g' t1 t2 d,
     binds D t1 d ->
     commit_fresh G g' ->
+    (* the spawned thread [t2] starts at the head [g'] as a
+       placeholder, mirroring [global_commit] in [StepSpawn] *)
     play_event (event_spawn t1 t2) (D, TC, G, g)
       (D[t1 := empty][t2 := empty], TC[t1 := g'][t2 := g'], graph_commit G g g' d, g')
 | PlayJoin : forall D TC G g t1 t2,
@@ -157,7 +159,7 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
     t' \notindom T ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
-    push_thread t t' g g' (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G') ->
+    global_commit t g g' (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, g')]) G = (T', G') ->
     step ((T, G, g, L), log) ((T', G', g', L), log & event_spawn t t')
 | StepJoin : forall T G g L t t' e d c c' K r log,
     binds T t (state_running, te_exp e, d, c) ->

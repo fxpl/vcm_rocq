@@ -1,20 +1,5 @@
 From Vcm Require Import Common.
 
-Definition commit := nat.
-
-Definition root_commit := 0.
-
-Hint Unfold commit : vcm.
-Hint Extern 1 => unfolds commit : vcm.
-
-Definition diff := map var val.
-
-Definition empty_diff : diff := empty.
-
-Instance inhab_diff : Inhab diff.
-  constructor. exists empty_diff. tauto.
-Qed.
-
 Definition commit_data := map commit diff.
 
 Definition commit_rels := set (commit * commit).

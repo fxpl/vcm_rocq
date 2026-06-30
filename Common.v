@@ -89,6 +89,22 @@ Inductive lock_state :=
 Instance inhab_lock_state : Inhab lock_state.
 Proof. apply (Inhab_of_val ls_free). Qed.
 
+Definition commit := nat.
+
+Definition root_commit := 0.
+
+Hint Unfold commit : vcm.
+Hint Extern 1 => unfolds commit : vcm.
+
+Definition diff := map var val.
+
+Definition empty_diff : diff := empty.
+
+Instance inhab_diff : Inhab diff.
+  constructor. exists empty_diff. tauto.
+Qed.
+
+(* A tactic for rewriting domain equations *)
 Ltac rew_dom :=
   repeat
   match goal with

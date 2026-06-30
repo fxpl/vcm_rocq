@@ -108,7 +108,7 @@ Definition wf_log (log : log) : Prop :=
       log = l1 ++ event_start t :: l2 ->
       (~mem (event_start t) (l1 ++ l2)))
   /\
-  (* Threads start after spawning, or are initialised (the root) *)
+  (* Threads start after spawning, or are the root thread *)
   (forall l1 l2 t2,
       log = l1 ++ event_start t2 :: l2 ->
       (exists t1, mem (event_spawn t1 t2) l1) \/ t2 = t_root)
@@ -118,7 +118,7 @@ Definition wf_log (log : log) : Prop :=
       log = l1 ++ event_join t1 t2 :: l2 ->
       mem (event_end t2) l1)
   /\
-  (* Threads start by starting (the init event needs no prior start) *)
+  (* Threads start by starting *)
   (forall l1 l2 e t,
       log = l1 ++ e :: l2 ->
       get_thread e = t ->

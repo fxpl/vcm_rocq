@@ -22,8 +22,6 @@ From Vcm Require Import Graph.
 (*   - locks no longer carry a commit: lock/unlock synchronise through the   *)
 (*     global branch (lock = pull, unlock = push), so a lock is just         *)
 (*     free / held.                                                          *)
-(*   - reads (StepReadGlobal) observe the global head, not the thread's own  *)
-(*     commit -- the linear model has a single total order of writes.        *)
 (* ------------------------------------------------------------------------ *)
 
 Definition thread := (thread_state * thread_exp * diff * commit)%type.
@@ -51,12 +49,6 @@ Definition global_commit (t : tid) (g g' : commit) (T : threads) (G : graph)
   (T[t := (st, e, empty_diff, g')],
    graph_commit G g g' d).
 
-Definition push_thread (t t' : tid) (g g' : commit) (T : threads) (G : graph) :=
-  let '(T', G') := global_commit t g g' T G in
-  let '(ts, e, d, _) := T'[t'] in
-  (T'[t' := (ts, e, d, g')], G').
-
-
 (* A thread at commit [c] may commit (or fast-forward over) its diff [d]
    only if none of the variables it writes were written between [c] and the
    global head [g] -- i.e. by a commit it has not yet observed. *)
@@ -66,9 +58,6 @@ Definition lin_conflict_free (d : diff) (c g : commit) (G : graph) : Prop :=
 Inductive step : cfg -> cfg -> Prop :=
 | StepStart : forall T G g L t e d c,
     binds T t (state_new, e, d, c) ->
-    (* a starting thread fast-forwards to the global head (this is
-    different from the paper where it keeps the commit it got from
-    its spawning thread) *)
     step (T, G, g, L) (T[t := (state_running, e, d, g)], G, g, L)
 | StepEnd : forall T T' G G' g g' L t r d c,
     binds T t (state_running, te_ret r, d, c) ->
@@ -98,7 +87,10 @@ Inductive step : cfg -> cfg -> Prop :=
     t' \notindom T ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
-    push_thread t t' g g' (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G') ->
+    (* the spawned thread [t']'s commit is irrelevant (overwritten
+       when it starts), so we just leave it at the fresh commit
+       [g'] *)
+    global_commit t g g' (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, g')]) G = (T', G') ->
     step (T, G, g, L) (T', G', g', L)
 | StepJoin : forall T G g L t t' e d c c' K r,
     binds T t (state_running, te_exp e, d, c) ->

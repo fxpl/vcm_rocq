@@ -1808,7 +1808,6 @@ Lemma hb_last_write_visible :
   forall log D TC G LC CH m n tm x vm en,
     wf_log log ->
     conflict_free log ->
-    conflict_free_graph G ->
     play_log log init_play_cfg (D, TC, G, LC) CH ->
     LibList.Nth m log (event_write tm x vm) ->
     (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
@@ -1817,7 +1816,7 @@ Lemma hb_last_write_visible :
     hb log m n ->
     is_latest_value G (TC[get_thread en]) x vm.
 Proof.
-  introv Hwf Hcf Hcfg Hplay HNm Hlast Hndom HNn Hhb.
+  introv Hwf Hcf Hplay HNm Hlast Hndom HNn Hhb.
   applys (>> last_write_visible_commit Hwf Hcf Hplay HNm Hlast Hndom HNn Hhb).
 Qed.
 
@@ -1902,57 +1901,6 @@ Proof.
   asserts Hgteq: (get_thread en = tm).
   { applys hb_preserves_thread Hhb HNm; try reflexivity; try exact Hncm; try exact HNn. }
   apply Hgne. exact Hgteq.
-Qed.
-
-(* Global counterpart of [conflict_free_last_local_write]: when [t] reads [x]
-   globally (it is not in [t]'s delta), the value [t] sees ([is_latest_value]) is
-   the last write to [x] in the log. The read of [x=v] by [t] is included in the
-   (tightened) conflict-free log, so it happens-after every x-write; combined with
-   [hb_last_write_visible] this forces the last write's value to equal [v]. *)
-Lemma conflict_free_last_global_write :
-  forall log D TC G LC CH t x v c,
-    conflict_free (log & event_read t x v) ->
-    wf_log (log & event_read t x v) ->
-    conflict_free_graph G ->
-    play_log log init_play_cfg (D, TC, G, LC) CH ->
-    x \notindom (D[t]) ->
-    t \indom TC ->
-    TC[t] = c ->
-    is_latest_value G c x v ->
-    exists t' log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v.
-Proof.
-  introv Hcf Hwf Hcfg Hplay Hndom Hdom HTC Hval.
-  (* [is_latest_value] ensures there is an x-write; take the last one. *)
-  forwards (lw & tL & vL & Hfilter): is_latest_value_log_write Hplay Hval.
-  forwards (L & HNL & Hlast): last_write_position Hfilter.
-  forwards HLlt: Nth_inbound HNL.
-  (* Play the read as a no-op, and place the write and the read in [log & read]. *)
-  asserts Hplayf: (exists CHf, play_log (log & event_read t x v) init_play_cfg (D, TC, G, LC) CHf).
-  { eexists. applys PlaySnoc Hplay. apply PlayRead. }
-  destruct Hplayf as (CHf & Hplayf).
-  asserts HNLf: (LibList.Nth L (log & event_read t x v) (event_write tL x vL)).
-  { applys* Nth_app_l. }
-  asserts HNread: (LibList.Nth (length log) (log & event_read t x v) (event_read t x v)).
-  { applys* Nth_app_r'. }
-  asserts Hlastf:
-    (forall k tk vk, LibList.Nth k (log & event_read t x v) (event_write tk x vk) -> k <= L).
-  { introv HNk. forwards [HN' | (Hpe & Hee)]: Nth_last_inv HNk.
-    - applys Hlast HN'.
-    - inverts Hee. }
-  (* conflict-freedom: the last write happens-before the read. *)
-  asserts Hacc: (accesses_variable x (event_read t x v)). { reflexivity. }
-  forwards Hhb: Hcf HNLf HNread Hacc HLlt.
-  (* the last writer has flushed [x]. *)
-  asserts HndomL: (x \notindom (D[tL])).
-  { destruct (classic (tL = t)) as [-> | Hne].
-    - exact Hndom.
-    - applys last_writer_not_in_delta Hplayf HNLf Hlastf HNread Hhb.
-      simpl. congruence. }
-  (* the bridge: [vL] is the latest value [t] sees, which is [v]. *)
-  forwards Hlv: (>> hb_last_write_visible Hwf Hcf Hcfg Hplayf HNLf Hlastf HndomL HNread Hhb).
-  simpl in Hlv. rewrite HTC in Hlv.
-  forwards ->: is_latest_value_inj Hcfg Hlv Hval.
-  exists tL lw. exact Hfilter.
 Qed.
 
 (* The bridge from log happens-before to graph ancestry between flush commits:
@@ -2068,6 +2016,112 @@ Proof.
   destruct Hcmp as [Hc | Hc].
   - applys Hnanca2. applys ancestor_trans Hc Hancb2.
   - applys Hnancb1. applys ancestor_trans Hc Hanca1.
+Qed.
+
+(* Forward direction of the global-read correspondence: if [v] is the value of
+   the last write to [x] in the log and [t] reads [x] globally (it is not in [t]'s
+   delta), then [v] is exactly the value [t] sees in the commit graph
+   ([is_latest_value]).  The read of [x=v] by [t] is included in the (tightened)
+   conflict-free log, so it happens-after every x-write; [hb_last_write_visible]
+   then identifies its flushed value with what [t] sees.
+
+   This is the shared core that both directions of the global-read equivalence
+   build on: [branching_complete] uses it as is, and [conflict_free_last_global_write]
+   (its converse) recovers it via [is_latest_value_inj].  It is the single place
+   where [hb_last_write_visible] is applied. *)
+Lemma last_global_write_latest_value :
+  forall log D TC G LC CH t x vr v t' log',
+    conflict_free (log & event_read t x vr) ->
+    wf_log (log & event_read t x vr) ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
+    x \notindom (D[t]) ->
+    LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v ->
+    is_latest_value G (TC[t]) x v.
+Proof.
+  introv Hcf Hwf Hplay Hndom Hfilter.
+  forwards (mw & HNL & Hlast): last_write_position Hfilter.
+  forwards HLlt: Nth_inbound HNL.
+  (* Play the read as a no-op, and place the write and the read in [log & read]. *)
+  asserts Hplayf: (exists CHf, play_log (log & event_read t x vr) init_play_cfg (D, TC, G, LC) CHf).
+  { eexists. applys PlaySnoc Hplay. apply PlayRead. }
+  destruct Hplayf as (CHf & Hplayf).
+  asserts HNLf: (LibList.Nth mw (log & event_read t x vr) (event_write t' x v)).
+  { applys* Nth_app_l. }
+  asserts HNread: (LibList.Nth (length log) (log & event_read t x vr) (event_read t x vr)).
+  { applys* Nth_app_r'. }
+  asserts Hlastf:
+    (forall k tk vk, LibList.Nth k (log & event_read t x vr) (event_write tk x vk) -> k <= mw).
+  { introv HNk. forwards [HN' | (Hpe & Hee)]: Nth_last_inv HNk.
+    - applys Hlast HN'.
+    - inverts Hee. }
+  (* conflict-freedom: the last write happens-before the read (they share [x]). *)
+  asserts Hacc: (accesses_variable x (event_read t x vr)). { reflexivity. }
+  forwards Hhb: Hcf HNLf HNread Hacc HLlt.
+  (* the last writer has flushed [x]. *)
+  asserts HndomL: (x \notindom (D[t'])).
+  { destruct (classic (t' = t)) as [-> | Hne].
+    - exact Hndom.
+    - applys last_writer_not_in_delta Hplayf HNLf Hlastf HNread Hhb.
+      simpl. congruence. }
+  forwards Hlv: (>> hb_last_write_visible Hwf Hcf Hplayf HNLf Hlastf HndomL HNread Hhb).
+  simpl in Hlv. exact Hlv.
+Qed.
+
+(* Global counterpart of [conflict_free_last_local_write]: when [t] reads [x]
+   globally (it is not in [t]'s delta), the value [t] sees ([is_latest_value]) is
+   the last write to [x] in the log.  This is the converse of
+   [last_global_write_latest_value]: take the last write (with some value [vL]),
+   observe via that lemma that [t] sees [vL], and conclude [vL = v] by
+   [is_latest_value_inj].
+
+   [conflict_free_graph G] is not assumed: it is recovered from the conflict-free
+   [log] via [conflict_free_log_describes_conflict_free_graph]. *)
+Lemma conflict_free_last_global_write :
+  forall log D TC G LC CH t x v c,
+    conflict_free (log & event_read t x v) ->
+    wf_log (log & event_read t x v) ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
+    x \notindom (D[t]) ->
+    t \indom TC ->
+    TC[t] = c ->
+    is_latest_value G c x v ->
+    exists t' log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v.
+Proof.
+  introv Hcf Hwf Hplay Hndom Hdom HTC Hval.
+  (* [conflict_free_graph] is recovered from the conflict-free log. *)
+  forwards Hwf': wf_log_last_inv Hwf.
+  forwards Hcflog: conflict_free_last_inv Hcf.
+  forwards Hcfg: conflict_free_log_describes_conflict_free_graph Hwf' Hcflog Hplay.
+  (* [is_latest_value] ensures there is an x-write; take the last one. *)
+  forwards (lw & tL & vL & Hfilter): is_latest_value_log_write Hplay Hval.
+  (* the forward direction: [t] sees the last write's value [vL] *)
+  forwards Hlv: last_global_write_latest_value Hcf Hwf Hplay Hndom Hfilter.
+  rewrite HTC in Hlv.
+  (* and [is_latest_value] is functional, so [vL = v] *)
+  forwards ->: is_latest_value_inj Hcfg Hlv Hval.
+  exists tL lw. exact Hfilter.
+Qed.
+
+(* The global-read correspondence as a full equivalence: for a data-race-free,
+   [t]-readable log, the value [t] sees for [x] in the commit graph
+   ([is_latest_value]) is exactly the value of the last write to [x] in the log.
+   This simply packages the two directions -- [last_global_write_latest_value] and
+   its converse [conflict_free_last_global_write]. *)
+Lemma is_latest_value_iff_last_write :
+  forall log D TC G LC CH t x v,
+    conflict_free (log & event_read t x v) ->
+    wf_log (log & event_read t x v) ->
+    play_log log init_play_cfg (D, TC, G, LC) CH ->
+    x \notindom (D[t]) ->
+    t \indom TC ->
+    (is_latest_value G (TC[t]) x v
+     <-> exists t' log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v).
+Proof.
+  introv Hcf Hwf Hplay Hndom Hdom. split.
+  - introv Hval.
+    applys conflict_free_last_global_write Hcf Hwf Hplay Hndom Hdom; [ reflexivity | exact Hval ].
+  - introv (t' & log' & Hfilter).
+    applys last_global_write_latest_value Hcf Hwf Hplay Hndom Hfilter.
 Qed.
 
 (* A graph commit [c] that writes a variable [j] still uncommitted by a thread [t]
