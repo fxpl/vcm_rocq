@@ -1735,6 +1735,38 @@ Proof.
   applys Hnanc. applys (>> delta_writer_ancestor Hwf Hcf Hplay Htd Hbdj Hgwc).
 Qed.
 
+(* ===========================================================================
+   Soundness of conflict detection (linear).
+
+   Every linear synchronisation -- end, spawn, join, lock, release -- commits or
+   fast-forwards onto the global head, guarded by the same check
+   [lin_conflict_free (D[t]) (TC[t]) g G].  This theorem is the contrapositive of
+   [lin_conflict_free_holds]: if a running thread's staged writes conflict with the
+   global head -- so any synchronisation it attempts is blocked -- then the log
+   already exhibits a data race ([~ conflict_free log]).  It thus covers all five
+   linear synchronisation actions uniformly.
+   =========================================================================== *)
+
+Theorem linear_sync_conflict_sound :
+  forall log T G g L t e d c,
+    wf_log log ->
+    describes log (T, G, g, L) ->
+    binds T t (state_running, te_exp e, d, c) ->
+    ~ lin_conflict_free d c g G ->
+    ~ conflict_free log.
+Proof.
+  introv Hwf Hdesc Hbt Hncf Hcflog.
+  destruct Hdesc as (_ & _ & _ & _ & _ & _ &
+    (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
+  lets Htin: (indom_of_binds Hbt).
+  asserts HtD: (t \indom D). { applys HdomD Htin. }
+  asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
+  forwards (st0 & e0 & Hbd): Hdelta Htin.
+  forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
+  apply Hncf.
+  applys (>> lin_conflict_free_holds Hwf Hcflog Hplay HtD HtTC).
+Qed.
+
 (* The graph-membership half of [wf_cfg], read straight off the replay (no
    [wf_log] needed): the graph stays well formed (graph_commit only ever extends
    the totally-ordered chain at the in-graph head), the head is in the graph, and

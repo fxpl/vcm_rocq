@@ -2228,3 +2228,64 @@ Proof.
     unfold conflict_free_merge in Hcfm. rew_set in Hcfm.
     applys Hcfm j; [ rew_set; right; exact Hjcs | exact Hj2 ].
 Qed.
+
+(* ===========================================================================
+   Soundness of conflict detection (branching).
+
+   The branching model gets *stuck* on a synchronisation only at a [pull], where
+   it checks [conflict_free_merge].  The two theorems below are the contrapositive
+   of [conflict_free_merge_holds]: if a thread is poised to join a terminated
+   thread, or to acquire a free lock, and the corresponding merge check fails --
+   so the step is blocked, and not by a deadlock, since the joinee has terminated
+   / the lock is free -- then the log already exhibits a data race
+   ([~ conflict_free log], i.e. some write and a later access to the same variable
+   are not ordered by happens-before).
+   =========================================================================== *)
+
+Theorem branching_join_conflict_sound :
+  forall log T G L t e d c K t' r c',
+    wf_log log ->
+    describes log (T, G, L) ->
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_join t') ->
+    binds T t' (state_terminated, te_ret r, empty, c') ->
+    ~ conflict_free_merge d c c' G ->
+    ~ conflict_free log.
+Proof.
+  introv Hwf Hdesc Hbt Hul Hbt' Hncf Hcflog.
+  forwards (HwfG & Hcommits & Hlockcommits): describes_wf_cfg Hdesc.
+  forwards Hcdom: Hcommits Hbt'.
+  destruct Hdesc as (_ & _ & _ & _ & _ & _ &
+    (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
+  lets Htin: (indom_of_binds Hbt).
+  asserts HtD: (t \indom D). { applys HdomD Htin. }
+  asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
+  forwards (ts0 & e0 & Hbd): Hdelta Htin.
+  forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
+  apply Hncf.
+  applys (>> conflict_free_merge_holds Hwf Hcflog Hplay HtD HtTC Hcdom).
+Qed.
+
+Theorem branching_lock_conflict_sound :
+  forall log T G L t e d c K l c',
+    wf_log log ->
+    describes log (T, G, L) ->
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_lock l) ->
+    binds L l (ls_free, c') ->
+    ~ conflict_free_merge d c c' G ->
+    ~ conflict_free log.
+Proof.
+  introv Hwf Hdesc Hbt Hul Hbl Hncf Hcflog.
+  forwards (HwfG & Hcommits & Hlockcommits): describes_wf_cfg Hdesc.
+  forwards Hcdom: Hlockcommits Hbl.
+  destruct Hdesc as (_ & _ & _ & _ & _ & _ &
+    (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
+  lets Htin: (indom_of_binds Hbt).
+  asserts HtD: (t \indom D). { applys HdomD Htin. }
+  asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
+  forwards (ts0 & e0 & Hbd): Hdelta Htin.
+  forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
+  apply Hncf.
+  applys (>> conflict_free_merge_holds Hwf Hcflog Hplay HtD HtTC Hcdom).
+Qed.
