@@ -173,3 +173,18 @@ Definition is_merge_event (e : event) : Prop :=
   | event_join _ _ => True
   | _ => False
   end.
+
+(* (Absence of) out-of-thin-air reads *)
+Definition sourced_read (log : Log.log) (n : nat) : Prop :=
+  forall t x v,
+    LibList.Nth n log (event_read t x v) ->
+    exists m t',
+      LibList.Nth m log (event_write t' x v)
+      /\ ~ hb log n m
+      /\ ~ (exists m' t'' v',
+               m' <> m
+               /\ LibList.Nth m' log (event_write t'' x v')
+               /\ hb log m m' /\ hb log m' n).
+
+Definition no_thin_air (log : Log.log) : Prop :=
+  forall n, sourced_read log n.

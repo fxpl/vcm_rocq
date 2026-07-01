@@ -1,1 +1,1 @@
-This project can be built by running `coq_makefile -f _CoqProject -o Makefile.coq´ followed by Make.
+This project can be built by running `coq_makefile -f _CoqProject -o Makefile´ followed by Make.

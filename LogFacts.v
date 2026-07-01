@@ -31,7 +31,7 @@ Lemma wf_log_read_last :
     wf_log (lg & event_read t i v).
 Proof.
   introv Hstart Hend Hwf.
-  destruct Hwf as (Hspawns & Hstarts & Hspawn & Hjoin & Hstart' & Hend' & Hlock & Hinit & Hrootsp).
+  lets (Hspawns & Hstarts & Hspawn & Hjoin & Hstart' & Hend' & Hlock & _ & Hrootsp): Hwf.
   splits 9.
   - introv Heq (t1' & Hmem).
     destruct (last_case l2) as [-> | (e & l2' & ->)].
@@ -92,7 +92,9 @@ Proof.
       asserts* Hneq: (t <> t0).
       simpls*.
   - (* locks *) introv. rew_listx. cases_if*. rew_list*.
-  - (* init *) intros _. applys wf_log_init_head_snoc Hinit Hstart.
+  - (* init *) intros _.
+    lets (_ & _ & _ & _ & _ & _ & _ & Hinit & _): Hwf.
+    applys wf_log_init_head_snoc Hinit Hstart.
   - (* root never spawned *) intros t1 Hmem. rew_listx in Hmem.
     destruct Hmem as [Hmem | Hmem]; (applys Hrootsp Hmem || inverts Hmem).
 Qed.
@@ -144,7 +146,7 @@ Lemma wf_log_snoc_lock : forall lg t l,
     wf_log (lg & event_lock t l).
 Proof.
   introv Hwf Hsmem Hlnmem Hlfree.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hrootsp).
+  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hrootsp): Hwf.
   splits 9.
   + introv Heq.
     forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
@@ -178,7 +180,9 @@ Proof.
         - left. exact Hnil.
         - right. exists t'' lg''. exact Hfilt. }
     * rew_list. apply~ Hlock.
-  + (* init *) intros _. applys wf_log_init_head_snoc Hinit Hsmem.
+  + (* init *) intros _.
+    lets (_ & _ & _ & _ & _ & _ & _ & Hinit & _): Hwf.
+    applys wf_log_init_head_snoc Hinit Hsmem.
   + (* root never spawned *) intros t1 Hmem. rew_listx in Hmem.
     destruct Hmem as [Hmem | Hmem]; (applys Hrootsp Hmem || inverts Hmem).
 Qed.
@@ -223,7 +227,7 @@ Lemma wf_log_write_last : forall lg t x v,
     wf_log (lg & event_write t x v).
 Proof.
   introv Hwf Hsmem Hnmem.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hroot): Hwf.
   splits 9.
   + introv Heq.
     forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
@@ -250,7 +254,9 @@ Proof.
     * simpl. intros ->. apply Hnmem. rew_listx*.
   + introv. rew_listx.
     cases_if~. rew_list~.
-  + intros _. applys wf_log_init_head_snoc Hinit Hsmem.
+  + intros _.
+    lets (_ & _ & _ & _ & _ & _ & _ & Hinit & _): Hwf.
+    applys wf_log_init_head_snoc Hinit Hsmem.
   + introv Hmem'.
     rew_listx in Hmem'. branches; auto_star.
 Qed.
@@ -264,7 +270,7 @@ Lemma wf_log_end_last : forall lg t,
     wf_log (lg & event_end t).
 Proof.
   introv Hwf Hsmem Hnmem.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hroot): Hwf.
   splits 9.
   + introv Heq.
     forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
@@ -292,7 +298,9 @@ Proof.
       -- simpl. intros ->. apply Hnmem. rew_listx*.
   + introv. rew_listx.
     cases_if~. rew_list~.
-  + intros _. applys wf_log_init_head_snoc Hinit Hsmem.
+  + intros _.
+    lets (_ & _ & _ & _ & _ & _ & _ & Hinit & _): Hwf.
+    applys wf_log_init_head_snoc Hinit Hsmem.
   + introv Hmem'.
     rew_listx in Hmem'. branches; auto_star.
 Qed.
@@ -309,7 +317,7 @@ Lemma wf_log_spawn_last : forall lg t1 t2,
     wf_log (lg & event_spawn t1 t2).
 Proof.
   introv Hwf Hsmem Hnmem Hnospawn Htneq.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hroot): Hwf.
   splits 9.
   + introv Heq.
     forwards [(Hmem' & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq.
@@ -340,7 +348,9 @@ Proof.
     * simpl. intros ->. apply Hnmem. rew_listx*.
   + introv. rew_listx.
     cases_if~. rew_list~.
-  + intros _. applys wf_log_init_head_snoc Hinit Hsmem.
+  + intros _.
+    lets (_ & _ & _ & _ & _ & _ & _ & Hinit & _): Hwf.
+    applys wf_log_init_head_snoc Hinit Hsmem.
   + introv Hmem'.
     rew_listx in Hmem'.
     destruct Hmem' as [Hmem' | Heq]; [ applys Hroot Hmem' | inverts Heq; congruence ].
@@ -356,7 +366,7 @@ Lemma wf_log_join_last : forall lg t1 t2,
     wf_log (lg & event_join t1 t2).
 Proof.
   introv Hwf Hsmem Hnmem Htended.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hroot): Hwf.
   splits 9.
   + introv Heq.
     forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
@@ -384,7 +394,9 @@ Proof.
     * simpl. intros ->. apply Hnmem. rew_listx*.
   + introv. rew_listx.
     cases_if~. rew_list~.
-  + intros _. applys wf_log_init_head_snoc Hinit Hsmem.
+  + intros _.
+    lets (_ & _ & _ & _ & _ & _ & _ & Hinit & _): Hwf.
+    applys wf_log_init_head_snoc Hinit Hsmem.
   + introv Hmem'.
     rew_listx in Hmem'. branches; auto_star.
 Qed.
@@ -399,7 +411,7 @@ Lemma wf_log_unlock_last : forall lg t l lg'',
     wf_log (lg & event_unlock t l).
 Proof.
   introv Hwf Hsmem Hnmem Hlheld.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hroot): Hwf.
   splits 9.
   + introv Heq.
     forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
@@ -429,7 +441,9 @@ Proof.
     * unfold touches_lock in Heql. subst. rew_list.
       apply* wf_lock_log_snoc_unlock.
     * rew_list. apply~ Hlock.
-  + intros _. applys wf_log_init_head_snoc Hinit Hsmem.
+  + intros _.
+    lets (_ & _ & _ & _ & _ & _ & _ & Hinit & _): Hwf.
+    applys wf_log_init_head_snoc Hinit Hsmem.
   + introv Hmem'.
     rew_listx in Hmem'. branches; auto_star.
 Qed.
@@ -446,7 +460,7 @@ Lemma wf_log_start_last : forall lg t,
     wf_log (lg & event_start t).
 Proof.
   introv Hwf Hsrc Hnmem Hrootnil.
-  destruct Hwf as (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & Hinit & Hroot).
+  lets (Huspawn & Hustart & Hspawn & Hjoin & Hstart & Hend & Hlock & _ & Hroot): Hwf.
   splits 9.
   + introv Heq.
     forwards [(contra & -> & ->) | (l2' & -> & ->)]: last_eq_middle_inv Heq; [false~|].
@@ -478,6 +492,7 @@ Proof.
   + introv. rew_listx.
     cases_if~. rew_list~.
   + intros _.
+    lets (_ & _ & _ & _ & _ & _ & _ & Hinit & _): Hwf.
     destruct (classic (lg = nil)) as [-> | Hne].
     * destruct Hsrc as [(t1 & Hmem) | ->]; [forwards*: mem_nil_inv Hmem|].
       exists (@nil event). rew_list~.
@@ -514,6 +529,21 @@ Lemma hb_lt :
 Proof.
   introv Hhb.
   induction* Hhb.
+Qed.
+
+(* [hb] is monotone under extending the log on the right: an ordering that holds
+   in a prefix still holds once more events are appended.  ([LogFacts] only has
+   the inverse, [hb_app_inv].)  Needed to lift the [play_log] induction's
+   prefix-[hb] to the extended log. *)
+Lemma hb_weaken_snoc :
+  forall (lg : log) E m n, hb lg m n -> hb (lg & E) m n.
+Proof.
+  introv Hhb. induction Hhb.
+  - applys HbPo; [ applys* Nth_app_l | applys* Nth_app_l | assumption | assumption ].
+  - applys HbLock; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
+  - applys HbSpawn; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
+  - applys HbJoin; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
+  - applys* HbTrans.
 Qed.
 
 Lemma hb_app_inv :
@@ -702,7 +732,7 @@ Lemma wf_log_last_inv :
   forall log E, wf_log (log & E) -> wf_log log.
 Proof.
   introv Hwf. unfold wf_log in *.
-  destruct Hwf as (Huspawn & Hustart & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & Hinit & Hrootsp).
+  lets (Huspawn & Hustart & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & _ & Hrootsp): Hwf.
   splits 9.
   - introv Heq. intros (t1' & Hm).
     forwards Hno: (>> Huspawn l1 (l2 & E) t1 t2).
@@ -732,6 +762,7 @@ Proof.
     + applys wf_lock_log_drop_last Hwll. rew_list~.
     + rew_list~ in Hwll.
   - (* init *) intros Hne.
+    lets (_ & _ & _ & _ & _ & _ & _ & Hinit & _): Hwf.
     destruct log as [| e0 log']; [false Hne; reflexivity|].
     forwards (l & Hl): Hinit. { rew_list. discriminate. }
     rew_list in Hl. inverts Hl. exists log'. reflexivity.
@@ -749,7 +780,7 @@ Proof.
   forwards Hmem: Nth_mem HN.
   forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
   unfold wf_log in Hwf.
-  destruct Hwf as (Huspawn & Hustart & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & Hinit & Hrootsp).
+  lets (Huspawn & Hustart & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & _ & Hrootsp): Hwf.
   intro Hgt.
   assert (Hmemstart: mem (event_start t2) log).
   {
@@ -790,7 +821,7 @@ Proof.
   forwards Hmem: Nth_mem HN.
   forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
   unfold wf_log in Hwf.
-  destruct Hwf as (Huspawn & Hustart & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & Hinit & Hrootsp).
+  lets (Huspawn & Hustart & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & _ & Hrootsp): Hwf.
   assert (Heq2: log & E = l1 ++ event_end t2 :: (l2 & E))
     by (rewrite Heq; rew_list~).
   splits.
@@ -825,7 +856,7 @@ Proof.
   forwards Hmem: Nth_mem HN.
   forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
   unfold wf_log in Hwf.
-  destruct Hwf as (Huspawn & Hustart & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & Hinit & Hrootsp).
+  lets (Huspawn & Hustart & Hstartsp & Hjoinend & Hstartby & Hendby & Hlock & _ & Hrootsp): Hwf.
   splits.
   - intro Hgt.
     destruct (classic (E = event_start t2)) as [HE | HE].
@@ -937,4 +968,58 @@ Proof.
   - introv Hne. false* Hne.
   - introv contra.
     inverts contra as Hmem.
+Qed.
+
+Lemma no_thin_air_nil : no_thin_air nil.
+Proof. intros n t x v HN. inverts HN. Qed.
+
+(* Structural half of the invariant: appending one event preserves the
+   sourcedness of every read already in the log. Both the "not hb-after" and the
+   "no intervening x-write" clauses survive because hb only points forward
+   ([hb_lt]) and [hb_app_inv] shows the new (last) event cannot slip between two
+   earlier positions. *)
+Lemma sourced_read_snoc :
+  forall log e n,
+    n < length log ->
+    sourced_read log n ->
+    sourced_read (log & e) n.
+Proof.
+  introv Hlt Hread.
+  introv Hnth.
+  asserts Hnth': (LibList.Nth n log (event_read t x v)).
+  {
+    forwards* [Hnth' | (m & contra & _)]: Nth_app_inv Hnth.
+  }
+  forwards~ (m & t' & Hmth & Hnhb & Hnex): Hread Hnth'.
+  exists m t'. splits.
+  - applys* Nth_app_l.
+  - intros contra. apply Hnhb.
+    forwards~ Hlt': Nth_inbound Hmth.
+    applys* hb_app_inv.
+  - introv (m' & t'' & v' & Hneq & Hmth' & Hhb & Hhb').
+    apply Hnex.
+    asserts Hlt': (m' < length log).
+    {
+      forwards*: hb_lt Hhb'.
+    }
+    forwards [Hmth'' | (contra & _)]: Nth_last_inv Hmth'; [|nat_math].
+    forwards~ Hhb'': hb_app_inv Hhb.
+    forwards~ Hhb''': hb_app_inv Hhb'.
+    exists m' t'' v'.
+    splits*.
+Qed.
+
+(* Appending a non-read event preserves the whole invariant: old reads by
+   [sourced_read_snoc], and the new last position is not a read (vacuous). *)
+Lemma no_thin_air_snoc_nonread :
+  forall log e,
+    (forall t x v, e <> event_read t x v) ->
+    no_thin_air log ->
+    no_thin_air (log & e).
+Proof.
+  introv Hneq Hnt.
+  introv Hnth.
+  forwards* [Hnth' | (Heq & ->)]: Nth_last_inv Hnth.
+  forwards Hlt: Nth_inbound Hnth'.
+  apply* sourced_read_snoc.
 Qed.
