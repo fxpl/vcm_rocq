@@ -132,11 +132,6 @@ Proof.
         exists wm. split;
           [ applys* Nth_app_l wHN
           | applys no_commit_event_snoc wHns; intros Hgt; simpl in Hgt; congruence ]. }
-    + (* PlayLockFresh: no-op, D unchanged *)
-      forwards* (wm & wHN & wHns): IHHplay.
-      exists wm. split;
-        [ applys* Nth_app_l wHN
-        | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
 Qed.
 
 Lemma conflict_free_last_local_write :
@@ -272,10 +267,6 @@ Proof.
       }
       rewrite~ read_update_neq in Hdelta.
       rew_dom. rew_set in Hdom. inverts Hdom; [|congruence].
-      forwards* (log' & Hfilter): IHHplay.
-      exists log'.
-      rew_listx. cases_if. rew_list*.
-    + (* PlayLockFresh: D unchanged *)
       forwards* (log' & Hfilter): IHHplay.
       exists log'.
       rew_listx. cases_if. rew_list*.
@@ -514,24 +505,19 @@ Proof.
         rewrite read_update_same in Hcmeq. subst cm. applys binds_update_same.
 Qed.
 
-(* A single play step leaves [LC[l]] untouched whenever the event is not an
-   unlock of [l] (only [PlayUnlock] writes the lock map). *)
+(* A single play step leaves [lc_read LC l] untouched whenever the event is not
+   an unlock of [l] (only [PlayUnlock] writes the lock map; [PlayLock] only
+   reads [lc_read LC l], it never updates [LC]). *)
 Lemma play_event_LC_preserved :
-  forall E D' TC' G' LC' D'' TC'' G'' LC'' l c,
+  forall E D' TC' G' LC' D'' TC'' G'' LC'' l,
     play_event E (D', TC', G', LC') (D'', TC'', G'', LC'') ->
     (forall t3, E <> event_unlock t3 l) ->
-    binds LC' l c ->
-    binds LC'' l c.
+    lc_read LC'' l = lc_read LC' l.
 Proof.
-  introv Hpe Hne Hb. inverts Hpe; try assumption.
+  introv Hpe Hne. inverts Hpe; try reflexivity.
   - (* PlayUnlock t l0: LC'' = LC'[l0 := c']; l0 <> l from Hne *)
-    applys binds_update_neq; [ | assumption ].
+    unfold lc_read. apply read_default_update_neq.
     intro Heq. subst. eapply Hne; reflexivity.
-  - (* PlayLockFresh t lf: LC'' = LC'[lf := TC[t]]; l = lf makes [Hb] vacuous *)
-    match goal with Hf : ?lf \notindom LC' |- _ =>
-      destruct (classic (l = lf)) as [-> | Hne2];
-      [ lets Hin: (indom_of_binds Hb); exfalso; applys Hf Hin
-      | applys binds_update_neq; [ congruence | exact Hb ] ] end.
 Qed.
 
 (* Held-lock invariant: if the [l]-filter of the log ends in [event_lock t l]
@@ -543,7 +529,7 @@ Lemma held_dominates :
     wf_log log ->
     play_log log s0 (D, TC, G, LC) CH ->
     LibList.filter (fun e => touches_lock l e) log = pre & event_lock t l ->
-    exists cl, binds LC l cl /\ ancestor G cl (TC[t]).
+    ancestor G (lc_read LC l) (TC[t]).
 Proof.
   introv Hwf Hplay. gen l t pre.
   inductions Hplay; introv Hfilter.
@@ -555,15 +541,9 @@ Proof.
       rew_list in Hfilter.
       forwards (Hpre_eq & HEeq): last_eq_last_inv Hfilter.
       subst E.
-      inverts H as Hb1 HbL Hfr.
-      * (* PlayLock: merged [LC[l]] into [t] *)
-        exists c2. split.
-        -- exact HbL.
-        -- rewrite read_update_same. apply ancestor_graph_merge_edge_r.
-      * (* PlayLockFresh: [t] records its own commit, [TC] unchanged *)
-        exists (TC[t]). split.
-        -- apply binds_update_same.
-        -- apply ancestor_refl.
+      inverts H as Hb1 Hfr.
+      (* PlayLock: merged [lc_read LC' l] into [t] *)
+      rewrite read_update_same. apply ancestor_graph_merge_edge_r.
     + (* E does not touch l: LC[l] and the held relation are preserved *)
       rew_list in Hfilter.
       asserts Hmemfilt:
@@ -571,17 +551,18 @@ Proof.
       { rewrite Hfilter. rewrite mem_last_eq. right. reflexivity. }
       forwards (Hmemf & _): mem_filter_inv Hmemfilt.
       forwards (klock & Hklock): mem_Nth Hmemf.
-      forwards (cl & Hbcl & Hanccl):
+      forwards Hanccl:
         (>> IHHplay Hwf0 (eq_refl : (D', TC', G', LC') = (D', TC', G', LC')) Hfilter).
-      exists cl. split.
-      * applys play_event_LC_preserved H Hbcl.
-        intros t3 Heq. apply Ht. rewrite Heq. reflexivity.
-      * apply ancestor_trans with (c' := TC'[t]).
-        -- eapply play_event_graph_extends; eassumption.
-        -- applys play_event_TC_advance. eassumption.
-           introv Heqsp. rewrite Heqsp in Hwf.
-           forwards Hng: spawned_thread_no_prior_event Hwf Hklock.
-           cbn [get_thread] in Hng. exact Hng.
+      asserts HLCeq: (lc_read LC l = lc_read LC' l).
+      { applys play_event_LC_preserved H.
+        intros t3 Heq. apply Ht. rewrite Heq. reflexivity. }
+      rewrite HLCeq.
+      apply ancestor_trans with (c' := TC'[t]).
+      -- eapply play_event_graph_extends; eassumption.
+      -- applys play_event_TC_advance. eassumption.
+         introv Heqsp. rewrite Heqsp in Hwf.
+         forwards Hng: spawned_thread_no_prior_event Hwf Hklock.
+         cbn [get_thread] in Hng. exact Hng.
 Qed.
 
 (* Lock semantics: just before [t] unlocks [l], the lock holds some commit [cl]
@@ -591,13 +572,12 @@ Lemma unlock_holder_dominates :
     wf_log (log & event_unlock t l) ->
     play_log log s0 (D, TC, G, LC) CH ->
     binds TC t c ->
-    exists cl, binds LC l cl /\ ancestor G cl c.
+    ancestor G (lc_read LC l) c.
 Proof.
   introv Hwf Hplay Hbc.
   forwards (pre & Hpre): unlock_prev_lock Hwf.
   forwards Hwf0: wf_log_last_inv Hwf.
-  forwards (cl & Hbcl & Hanc): (>> held_dominates Hwf0 Hplay Hpre).
-  exists cl. split. exact Hbcl.
+  forwards Hanc: (>> held_dominates Hwf0 Hplay Hpre).
   forwards Hrd: read_of_binds Hbc.
   rewrite <- Hrd. exact Hanc.
 Qed.
@@ -612,7 +592,7 @@ Lemma unlock_ancestor_LC :
     play_log log s0 (D, TC, G, LC) CH ->
     LibList.Nth m log (event_unlock t1 l) ->
     LibList.Nth m CH cm ->
-    exists cl, binds LC l cl /\ ancestor G cm cl.
+    ancestor G cm (lc_read LC l).
 Proof.
   introv Hwf Hplay. gen m t1 l cm.
   inductions Hplay; introv HNlog HNch.
@@ -624,27 +604,28 @@ Proof.
       forwards Hib: Nth_inbound HN0.
       forwards [HN0ch | (HmNch & _)]: Nth_last_inv HNch.
       2:{ rewrite Hlen in HmNch. nat_math. }
-      forwards (clc & HbLC & Hanc):
+      forwards Hanc:
         (>> IHHplay Hwf0 (eq_refl : (D', TC', G', LC') = (D', TC', G', LC')) HN0 HN0ch).
       destruct (classic (exists t3, E = event_unlock t3 l)) as [(t3 & HE) | Hne].
       * (* same lock: chain through the holder's commit *)
         subst E.
         inverts H as Hbc Hfresh Hbd.
-        forwards (cl & HbLCl & Hdom): (>> unlock_holder_dominates Hwf Hplay Hbc).
-        assert (clc = cl) as Heqcl by (applys binds_inj HbLC HbLCl; typeclass).
-        eexists. split.
-        -- applys binds_update_same.
-        -- apply ancestor_trans with (c' := c).
-           ++ apply ancestor_graph_commit.
-              apply ancestor_trans with (c' := clc).
-              ** exact Hanc.
-              ** rewrite Heqcl. exact Hdom.
-           ++ apply ancestor_graph_commit_edge.
+        forwards Hdom: (>> unlock_holder_dominates Hwf Hplay Hbc).
+        asserts HLCeq: (lc_read LC'[l:=c'] l = c').
+        { unfold lc_read. apply read_default_update_same. }
+        rewrite HLCeq.
+        apply ancestor_trans with (c' := c).
+        -- apply ancestor_graph_commit.
+           apply ancestor_trans with (c' := lc_read LC' l).
+           ++ exact Hanc.
+           ++ exact Hdom.
+        -- apply ancestor_graph_commit_edge.
       * (* different lock (or non-unlock event): LC[l] preserved *)
-        exists clc. split.
-        -- applys play_event_LC_preserved H HbLC.
-           intros t3 Heq. apply Hne. exists t3. exact Heq.
-        -- eapply play_event_graph_extends; eassumption.
+        asserts HLCeq: (lc_read LC l = lc_read LC' l).
+        { applys play_event_LC_preserved H.
+          intros t3 Heq. apply Hne. exists t3. exact Heq. }
+        rewrite HLCeq.
+        eapply play_event_graph_extends; eassumption.
     + (* unlock m is the last (appended) event *)
       subst E.
       forwards [HN0ch | (HmNch & Hcmeq)]: Nth_last_inv HNch.
@@ -652,9 +633,10 @@ Proof.
       inverts H as Hbc Hfresh Hbd.
       cbn [get_thread] in Hcmeq.
       rewrite read_update_same in Hcmeq. subst cm.
-      eexists. split.
-      -- applys binds_update_same.
-      -- apply ancestor_refl.
+      asserts HLCeq: (lc_read LC'[l:=c'] l = c').
+      { unfold lc_read. apply read_default_update_same. }
+      rewrite HLCeq.
+      apply ancestor_refl.
 Qed.
 
 (* The three synchronisation edges: each mirrors the graph_merge / graph_commit
@@ -689,20 +671,17 @@ Proof.
       subst E.
       forwards [HNm0 | (HmN & _)]: Nth_last_inv HNlogm. 2:{ nat_math. }
       forwards [HNchm0 | (HmNc & _)]: Nth_last_inv HNchm. 2:{ rewrite Hlen in HmNc. nat_math. }
-      forwards (cl & HbLCl & Hanc_cm): (>> unlock_ancestor_LC Hwf0 Hplay HNm0 HNchm0).
+      forwards Hanc_cm: (>> unlock_ancestor_LC Hwf0 Hplay HNm0 HNchm0).
       forwards Hanc_lift: play_event_graph_extends H Hanc_cm.
       forwards [HNchn0 | (HnNc & Hcneq)]: Nth_last_inv HNchn.
       { forwards Hib: Nth_inbound HNchn0. rewrite <- Hlen in HnN. nat_math. }
-      inverts H as Hbc1 HbLC Hfresh.
-      * (* PlayLock: merges [l]'s stored commit *)
-        cbn [get_thread] in Hcneq.
-        rewrite read_update_same in Hcneq. subst cn.
-        assert (cl = c2) as Heqc by (applys binds_inj HbLCl HbLC; typeclass).
-        apply ancestor_trans with (c' := cl).
-        -- exact Hanc_lift.
-        -- rewrite Heqc. apply ancestor_graph_merge_edge_r.
-      * (* PlayLockFresh: impossible, [l] was unlocked at [m] so [l] ∈ dom LC' *)
-        exfalso. lets* Hin: (indom_of_binds HbLCl).
+      inverts H as Hbc1 Hfresh.
+      (* PlayLock: merges [lc_read LC l] into [t2] ([LC] is unchanged) *)
+      cbn [get_thread] in Hcneq.
+      rewrite read_update_same in Hcneq. subst cn.
+      apply ancestor_trans with (c' := lc_read LC l).
+      -- exact Hanc_lift.
+      -- apply ancestor_graph_merge_edge_r.
 Qed.
 
 Lemma hb_spawn_pointer_ancestor :
@@ -926,9 +905,6 @@ Proof.
           forwards* (tw & m0 & HN): IHHplay;
           exists tw m0; rew_list; applys Nth_app_l HN ]
       end.
-    + (* PlayLockFresh: graph unchanged *)
-      forwards* (tw & m0 & HN): IHHplay.
-      exists tw m0. rew_list. applys Nth_app_l HN.
 Qed.
 
 (* A play step preserves every pre-existing committed write (the new commit is
@@ -1067,11 +1043,6 @@ Proof.
         -- split; assumption.
         -- introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
            { applys Hnc Hg HNg0 Hgg. } { subst eg; simpl; auto. }
-      * (* lock (PlayLockFresh): graph unchanged, not a commit event *)
-        left; split.
-        -- split; assumption.
-        -- introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
-           { applys Hnc Hg HNg0 Hgg. } { subst eg; simpl; auto. }
       * (* unlock ut ul: flush of ut *)
         destruct (classic (ut = tm)) as [Hut | Hut].
         -- subst ut. right. exists (length log) (event_unlock tm ul).
@@ -1188,7 +1159,8 @@ Qed.
 Definition play_graph_wf (TC : commits) (G : graph) (LC : lcommits) : Prop :=
   (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) /\
   (forall t, t \indom TC -> graph_indom G (TC[t])) /\
-  (forall l, l \indom LC -> graph_indom G (LC[l])).
+  (forall l, l \indom LC -> graph_indom G (LC[l])) /\
+  graph_indom G root_commit.
 
 (* Conversion-tolerant membership inversion for an updated pointer map (the
    [Inhab] instance in [indom_update_eq] makes a bare [rewrite] miss the subterm). *)
@@ -1210,7 +1182,8 @@ Proof.
       subst. rewrite read_update_same.
       applys* graph_root_indom_same.
     + introv Hl. false. applys indom_empty_inv Hl.
-  - forwards* Hwf: IHHplay. destruct Hwf as (Hedge & HTC & HLC).
+    + applys* graph_root_indom_same.
+  - forwards* Hwf: IHHplay. destruct Hwf as (Hedge & HTC & HLC & Hroot).
     rename H into Hpe.
     match goal with Hp : play_log _ _ (_, _, ?GG, _) _ |- _ => destruct GG as (C & P) end.
     inverts Hpe; try (splits; assumption).
@@ -1232,6 +1205,7 @@ Proof.
            apply indom_update_of_indom;
              (typeclass || (applys HTC; destruct Hcase as [Hc | Hc]; [ congruence | exact Hc ])).
       * introv Hl. apply indom_update_of_indom; (typeclass || applys HLC Hl).
+      * unfolds graph_indom. rew_dom. rew_set. auto.
     + (* PlaySpawn t1 t2: graph_commit, TC[t1:=c'][t2:=c'] *)
       splits.
       * introv He. simpls. rew_set in He. destruct He as [He | He].
@@ -1254,6 +1228,7 @@ Proof.
               forwards H2: indom_update_cases H1. destruct H2 as [Hc2 | H2]; [ congruence | ].
               apply indom_update_of_indom; (typeclass || applys HTC H2).
       * introv Hl. apply indom_update_of_indom; (typeclass || applys HLC Hl).
+      * unfolds graph_indom. rew_dom. rew_set. auto.
     + (* PlayJoin t1 t2: graph_merge (C,P) c2 c1 c', TC[t1:=c'] *)
       splits.
       * introv He. simpls. rew_set in He. destruct He as [He | [He | He]].
@@ -1278,20 +1253,22 @@ Proof.
            apply indom_update_of_indom;
              (typeclass || (applys HTC; destruct Hcase as [Hc | Hc]; [ congruence | exact Hc ])).
       * introv Hl. apply indom_update_of_indom; (typeclass || applys HLC Hl).
-    + (* PlayLock t l: graph_merge (C,P) c2 c1 c', TC[t:=c'] (c2 from LC, c1 from TC) *)
+      * unfolds graph_indom. rew_dom. rew_set. auto.
+    + (* PlayLock t l0: graph_merge (C,P) c1 (lc_read LC l0) c', TC[t:=c'] (LC unchanged) *)
+      asserts HLClindom: (graph_indom (C, P) (lc_read LC l0)).
+      { unfold lc_read. destruct (classic (l0 \indom LC)) as [Hindom|Hnotin].
+        - rewrite (read_default_indom Hindom). applys* HLC.
+        - rewrite (read_default_notindom Hnotin). exact Hroot. }
       splits.
       * introv He. simpls. rew_set in He. destruct He as [He | [He | He]].
         -- inverts He. split.
            ++ apply indom_update_of_indom;
                 (typeclass ||
                  match goal with Hb : binds _ _ ?cc |- ?cc \indom _ =>
-                   applys binds_graph_indom Hb HTC || applys binds_graph_indom Hb HLC end).
+                   applys binds_graph_indom Hb HTC end).
            ++ apply indom_update_same; typeclass.
         -- inverts He. split.
-           ++ apply indom_update_of_indom;
-                (typeclass ||
-                 match goal with Hb : binds _ _ ?cc |- ?cc \indom _ =>
-                   applys binds_graph_indom Hb HTC || applys binds_graph_indom Hb HLC end).
+           ++ apply indom_update_of_indom; (typeclass || exact HLClindom).
            ++ apply indom_update_same; typeclass.
         -- forwards (Ha & Hb): Hedge He.
            split; (apply indom_update_of_indom; (typeclass || assumption)).
@@ -1302,6 +1279,7 @@ Proof.
            apply indom_update_of_indom;
              (typeclass || (applys HTC; destruct Hcase as [Hc | Hc]; [ congruence | exact Hc ])).
       * introv Hl. apply indom_update_of_indom; (typeclass || applys HLC Hl).
+      * unfolds graph_indom. rew_dom. rew_set. auto.
     + (* PlayUnlock t l: graph_commit, TC[t:=c'], LC[l:=c'] *)
       splits.
       * introv He. simpls. rew_set in He. destruct He as [He | He].
@@ -1326,12 +1304,7 @@ Proof.
         -- rewrite read_update_neq; [ | congruence ].
            apply indom_update_of_indom;
              (typeclass || (applys HLC; destruct Hcase as [Hc | Hc]; [ congruence | exact Hc ])).
-    + splits*.
-      introv Hl. simpls. rew_dom. rew_set in Hl. branches.
-      * destruct (classic (l = l0)).
-        -- subst. rewrite* read_update_same.
-        -- rewrite* read_update_neq.
-      * subst. rewrite* read_update_same.
+      * unfolds graph_indom. rew_dom. rew_set. auto.
   Unshelve. all: typeclass.
 Qed.
 
@@ -1348,7 +1321,7 @@ Proof.
   - apply init_graph_wf.
   - forwards* Hwf': IHHplay.
     forwards Hpgwf: play_log_graph_wf Hplay.
-    destruct Hpgwf as (_ & HTC & HLC).
+    destruct Hpgwf as (_ & HTC & HLC & Hroot).
     rename H into Hpe.
     match goal with Hp : play_log _ _ (_, _, ?GG, _) _ |- _ => destruct GG as (C & P) end.
     inverts Hpe; try assumption.
@@ -1363,10 +1336,14 @@ Proof.
         [ assumption
         | applys binds_graph_indom; [ eassumption | exact HTC ]
         | applys binds_graph_indom; [ eassumption | exact HTC ] ].
-    + (* PlayLock: graph_merge (lock parent from LC, thread parent from TC) *)
+    + (* PlayLock: graph_merge (lock parent from lc_read LC, thread parent from TC) *)
+      asserts HLClindom: (graph_indom (C, P) (lc_read LC l0)).
+      { unfold lc_read. destruct (classic (l0 \indom LC)) as [Hindom|Hnotin].
+        - rewrite (read_default_indom Hindom). applys* HLC.
+        - rewrite (read_default_notindom Hnotin). exact Hroot. }
       applys graph_merge_wf Hwf';
         [ assumption
-        | applys binds_graph_indom; [ eassumption | exact HLC ]
+        | exact HLClindom
         | applys binds_graph_indom; [ eassumption | exact HTC ] ].
     + (* PlayUnlock: graph_commit *)
       applys graph_commit_wf Hwf';
@@ -1385,20 +1362,23 @@ Proof.
   introv Hdesc. destruct cfg as [(T & G) L].
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
     (D & TC & LC & CH & Hplay & HdT & HdL & HdomD & HdomTC & HdomLClk)).
+  forwards Hpgwf: play_log_graph_wf Hplay.
+  destruct Hpgwf as (_ & HTC & HLC & Hroot).
   splits.
   - applys play_log_wf_graph Hplay.
+  - exact Hroot.
   - introv Hb.
     lets Hin: (indom_of_binds Hb).
     forwards (ts0 & e0 & Hb0): HdT Hin.
     forwards* Heq: binds_inj Hb Hb0. inverts Heq.
-    forwards Hpgwf: play_log_graph_wf Hplay. destruct Hpgwf as (_ & HTC & _).
     applys HTC. applys HdomTC Hin.
   - introv Hb.
     lets Hin: (indom_of_binds Hb).
     forwards (ls0 & Hb0): HdL Hin.
     forwards* Heq: binds_inj Hb Hb0. inverts Heq.
-    forwards Hpgwf: play_log_graph_wf Hplay. destruct Hpgwf as (_ & _ & HLC).
-    applys HLC. apply (proj1 (HdomLClk l)). exact Hin.
+    unfold lc_read. destruct (classic (l \indom LC)) as [Hindom|Hnotin].
+    + rewrite (read_default_indom Hindom). applys* HLC.
+    + rewrite (read_default_notindom Hnotin). exact Hroot.
 Qed.
 
 (* Every graph x-writer [cx] is the commit produced by some flush at position [f']
@@ -1566,8 +1546,6 @@ Proof.
         | forwards Hgw': graph_writes_graph_commit_inv Hc Hgw;
           applys Hlift; forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R ]
       end.
-    + (* PlayLockFresh: graph unchanged *)
-      applys Hlift; forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R.
 Qed.
 
 (* Graph edges only ever point to the freshly created commit, so ancestry follows
@@ -2253,7 +2231,7 @@ Theorem branching_join_conflict_sound :
     ~ conflict_free log.
 Proof.
   introv Hwf Hdesc Hbt Hul Hbt' Hncf Hcflog.
-  forwards (HwfG & Hcommits & Hlockcommits): describes_wf_cfg Hdesc.
+  forwards (HwfG & _ & Hcommits & Hlockcommits): describes_wf_cfg Hdesc.
   forwards Hcdom: Hcommits Hbt'.
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
     (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
@@ -2277,7 +2255,7 @@ Theorem branching_lock_conflict_sound :
     ~ conflict_free log.
 Proof.
   introv Hwf Hdesc Hbt Hul Hbl Hncf Hcflog.
-  forwards (HwfG & Hcommits & Hlockcommits): describes_wf_cfg Hdesc.
+  forwards (HwfG & _ & Hcommits & Hlockcommits): describes_wf_cfg Hdesc.
   forwards Hcdom: Hlockcommits Hbl.
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
     (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).

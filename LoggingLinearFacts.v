@@ -331,8 +331,12 @@ Proof.
     { apply* Hdrunning. }
     asserts Hlfree: (LibList.filter (fun e => touches_lock l e) log = nil \/
                      exists t'' log'', LibList.filter (fun e => touches_lock l e) log = log'' & event_unlock t'' l).
-    { match goal with Hpre: (binds _ l ls_free \/ l \notindom _) |- _ => destruct Hpre as [Hfree | Hnotin] end.
-      - right. apply~ Hdunlock.
+    { match goal with Hpre : lock_read L l = ls_free |- _ => rename Hpre into Hread end.
+      unfold lock_read, read_default in Hread.
+      destruct (classic (l \indom L)) as [Hindom | Hnotin].
+      - right. asserts Hfree: (binds L l ls_free).
+        { applys binds_of_indom_read Hindom. case_if* in Hread. }
+        apply~ Hdunlock.
       - left. destruct (last_case (LibList.filter (fun e => touches_lock l e) log)) as [Hnil | (x & xs' & Heqf)].
         + exact Hnil.
         + exfalso. forwards [(t' & ->) | (t' & ->)]: filter_touches_lock_last_inv Heqf.
@@ -345,6 +349,13 @@ Proof.
     destruct Hdesc as (_ & _ & _ & Hdrunning & Hdlock & _).
     asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
+    match goal with Hpre : lock_read L l = ls_held t |- _ => rename Hpre into Hread end.
+    unfold lock_read, read_default in Hread.
+    asserts Hindom: (l \indom L).
+    { destruct (classic (l \indom L)) as [?|Hnotin]; auto.
+      false. case_if* in Hread. }
+    asserts Hbheld: (binds L l (ls_held t)).
+    { applys binds_of_indom_read Hindom. case_if* in Hread. }
     asserts (log'' & Hlheld): (exists log'', LibList.filter (fun e => touches_lock l e) log = log'' & event_lock t l).
     { apply* Hdlock. }
     apply* wf_log_unlock_last.

@@ -16,7 +16,8 @@ Import LogFacts.
      - pulls (start / join / lock) fast-forward the actor's commit to [g] and
        leave the graph (and head) unchanged -- there is no merge;
      - lock events need no special handling for the graph (locks carry no commit),
-       so a single [PlayLock] rule covers both [StepLock] and [StepLockFresh]. *)
+       so a single [PlayLock] rule suffices; [StepLock]/[StepRelease] read the
+       lock state via the total [lock_read] (defaulting to [ls_free]). *)
 
 Definition deltas := map tid diff.
 Definition commits := map tid commit.
@@ -170,13 +171,13 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 | StepLock : forall T G g L t e d c K l log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_lock l) ->
-    binds L l ls_free \/ l \notindom L ->
+    lock_read L l = ls_free ->
     lin_conflict_free d c g G ->
     step ((T, G, g, L), log) ((T[t := (state_running, K void, d, g)], G, g, L[l := ls_held t]), log & event_lock t l)
 | StepRelease : forall T T' G G' g g' (L : locks) t e d c K l log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_unlock l) ->
-    binds L l (ls_held t) ->
+    lock_read L l = ls_held t ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' T G = (T', G') ->

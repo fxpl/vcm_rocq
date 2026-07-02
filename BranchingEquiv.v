@@ -208,7 +208,7 @@ Lemma matching_threads_pull_lock :
     matching_threads TSh T'.
 Proof.
   introv Hm Hb Heq. unfold pull_lock in Heq.
-  destruct (L[l]) as [ls c'].
+  destruct (lock_read L l) as [ls c'].
   applys matching_threads_do_merge Hm Hb Heq.
 Qed.
 
@@ -318,7 +318,7 @@ Proof.
   introv Hwf HdescSh HdescB Hthr Hcf Hstep.
   destruct cfgB as [(T & G) L].
   forwards HwfB: describes_wf_cfg HdescB.
-  destruct HwfB as (HwfG & _).
+  destruct HwfB as (HwfG & HwfRoot & _ & Hlockcommits).
   forwards Hlck: matching_locks_describes HdescSh HdescB.
   inverts Hstep;
     match goal with
@@ -427,50 +427,64 @@ Proof.
     clears HdescSh HdescB.
     exists. splits; [ constructors* | simpls*].
   + (* StepLock *)
-    branches.
-    * forwards (c'' & Hfresh): exists_commit_fresh HwfG.
-      apply Hlck in H0 as (c' & Hlock).
-      asserts Hmerge: (conflict_free_merge d c c' G).
-      {
-        destruct HdescB as (_ & _ & _ & _ & _ & _ &
-          (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
-        forwards Hcflog: conflict_free_last_inv Hcf.
-        lets HtT: (indom_of_binds Hbinds).
-        forwards (ts0 & e0 & Hbdt): Hdelta HtT.
-        forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
-        lets Hl0L: (indom_of_binds Hlock).
-        forwards (ls0 & Hbdl): Hlocks Hl0L.
-        forwards* Heql: binds_inj Hlock Hbdl. inverts Heql.
-        forwards Hpgwf: play_log_graph_wf Hplay. destruct Hpgwf as (_ & _ & HLCdom).
-        applys conflict_free_merge_holds Hwf Hcflog Hplay;
-          [ applys HdomD HtT | applys HdomTC HtT | applys HLCdom; applys* HdomLC ].
-      }
-      asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_lock t l0 c'' T G L = (T', G') /\
-                                                             binds T' t (state_running, te_exp e, d, c'')).
-      {
-        exists. unfolds pull_lock, do_merge.
-        forwards Hread: read_of_binds Hlock.
-        replace L[l0] with (ls_free, c').
-        forwards Hread': read_of_binds Hbinds.
-        replace T[t] with (state_running, te_exp e, d, c).
-        splits.
-        - reflexivity.
-        - apply binds_update_same.
-      }
-      clears HdescSh HdescB.
-      exists. splits; [ constructors* | simpls*].
-    * forwards Heq: matching_locks_same_domain Hlck.
-      rewrite Heq in *.
-      clears HdescSh HdescB.
-      exists. splits; [ applys* StepLockFresh | simpls*].
+    forwards (c'' & Hfresh): exists_commit_fresh HwfG.
+    asserts (c' & Hlockeq & Hc'indom): (exists c', lock_read L l0 = (ls_free, c') /\ graph_indom G c').
+    {
+      match goal with Hpre : SharedMemory.lock_read L0 l0 = ls_free |- _ => rename Hpre into Hread end.
+      unfold SharedMemory.lock_read, read_default in Hread.
+      destruct (classic (l0 \indom L0)) as [Hindom0|Hnotin0].
+      - asserts Hb0: (binds L0 l0 ls_free).
+        { applys binds_of_indom_read Hindom0. case_if* in Hread. }
+        apply Hlck in Hb0 as (c' & Hlock).
+        exists c'. split.
+        + lets Hindom: (indom_of_binds Hlock).
+          unfold lock_read, read_default. case_if*.
+          rewrite~ (read_of_binds Hlock).
+        + applys Hlockcommits Hlock.
+      - asserts HnotinL: (l0 \notindom L).
+        { forwards Heqd: matching_locks_same_domain Hlck. rewrite <- Heqd. exact Hnotin0. }
+        exists root_commit. split.
+        + unfold lock_read, read_default. case_if.
+          -- false. applys HnotinL. exact C.
+          -- reflexivity.
+        + exact HwfRoot.
+    }
+    asserts Hmerge: (conflict_free_merge d c c' G).
+    {
+      destruct HdescB as (_ & _ & _ & _ & _ & _ &
+        (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC)).
+      forwards Hcflog: conflict_free_last_inv Hcf.
+      lets HtT: (indom_of_binds Hbinds).
+      forwards (ts0 & e0 & Hbdt): Hdelta HtT.
+      forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
+      applys conflict_free_merge_holds Hwf Hcflog Hplay;
+        [ applys HdomD HtT | applys HdomTC HtT | exact Hc'indom ].
+    }
+    asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_lock t l0 c'' T G L = (T', G') /\
+                                                           binds T' t (state_running, te_exp e, d, c'')).
+    {
+      exists. unfolds pull_lock, do_merge.
+      rewrite Hlockeq.
+      forwards Hread': read_of_binds Hbinds.
+      replace T[t] with (state_running, te_exp e, d, c).
+      splits.
+      - reflexivity.
+      - apply binds_update_same.
+    }
+    clears HdescSh HdescB.
+    exists. splits; [ constructors* | simpls*].
   + (* StepRelease *)
     forwards (c'' & Hfresh): exists_commit_fresh HwfG.
     asserts (c' & HbindsL): (exists c', binds L l0 (ls_held t, c')).
     {
+      asserts Hb0: (binds L0 l0 (ls_held t)).
+      { match goal with Hpre : SharedMemory.lock_read L0 l0 = ls_held t |- _ => rename Hpre into Hread end.
+        unfold SharedMemory.lock_read in Hread.
+        destruct (classic (l0 \indom L0)) as [Hindom0|Hnotin0].
+        - applys binds_of_indom_read Hindom0. rewrite (read_default_indom Hindom0) in Hread. exact Hread.
+        - false. rewrite (read_default_notindom Hnotin0) in Hread. inverts Hread. }
       destruct HdescSh as (_ & _ & _ & _ & Hlock & _).
-      match goal with
-      | H : binds L0 l0 (ls_held t) |- _ => apply Hlock in H as Hex
-      end.
+      apply Hlock in Hb0 as Hex.
       destruct HdescB as (_ & _ & _ & _ & Hlock' & _).
       apply* Hlock'.
     }
@@ -582,31 +596,42 @@ Proof.
     apply Hthr in Hex.
     clears HdescSh HdescB.
     exists. split; [ constructors* | simpls*].
-  + (* StepLock *)
+  + (* StepLock: unified constructor -- a never-touched lock defaults to
+       [(ls_free, root_commit)], matching [SharedMemory.lock_read]'s own
+       default of [ls_free] *)
     exists. split.
     {
       constructors*.
-      destruct HdescSh as (_ & _ & _ & _ & _ & HunlockedSh & _).
-      destruct HdescB as (_ & _ & _ & _ & _ & HunlockedB & _).
-      forwards Hiff: HunlockedSh l0.
-      forwards Hiff': HunlockedB l0.
-      left. apply Hiff. apply* Hiff'.
+      unfold SharedMemory.lock_read.
+      destruct (classic (l0 \indom L)) as [Hindom|Hnotin].
+      - asserts Hb: (binds L l0 (ls_free, c')).
+        { applys binds_of_indom_read Hindom.
+          transitivity (lock_read L l0).
+          - symmetry. exact (read_default_indom Hindom).
+          - exact H5. }
+        asserts HbSh: (binds Lsh l0 ls_free).
+        { apply Hlck. exists c'. exact Hb. }
+        transitivity (Lsh[l0]).
+        + exact (read_default_indom (indom_of_binds HbSh)).
+        + exact (read_of_binds HbSh).
+      - forwards Heqd: matching_locks_same_domain Hlck.
+        asserts HnotinSh: (l0 \notindom Lsh). { rewrite Heqd. exact Hnotin. }
+        exact (read_default_notindom HnotinSh).
     }
     clears HdescSh HdescB.
     simpls*.
-  + (* StepLockFresh *)
-    forwards Heq: matching_locks_same_domain Hlck.
-    asserts Hnd: (l0 \notindom Lsh). { rewrite Heq. assumption. }
-    clears HdescSh HdescB.
-    exists. split; [ constructors* | simpls*].
   + (* StepRelease *)
     exists. split.
     {
       constructors*.
-      destruct HdescSh as (_ & _ & _ & _ & HlockedSh & _ & _).
-      destruct HdescB as (_ & _ & _ & _ & HunlockedB & _ & _).
-      forwards* (t' & log' & Hiff): HlockedSh t l0.
-      forwards* (t'' & log'' & Hiff'): HunlockedB t l0.
+      unfold SharedMemory.lock_read.
+      match goal with Hpre : binds L l0 (ls_held t, ?cc) |- _ =>
+        asserts HbSh: (binds Lsh l0 (ls_held t));
+        [ apply Hlck; exists cc; exact Hpre | ]
+      end.
+      transitivity (Lsh[l0]).
+      + exact (read_default_indom (indom_of_binds HbSh)).
+      + exact (read_of_binds HbSh).
     }
     clears HdescSh HdescB.
     simpls*.

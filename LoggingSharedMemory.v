@@ -70,12 +70,12 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 | StepLock : forall (T : threads) H (L : locks) t e K l log,
     binds T t (state_running, te_exp e) ->
     step_ul e K (eff_lock l) ->
-    (binds L l ls_free \/ l \notindom L) ->
+    lock_read L l = ls_free ->
     step ((T, H, L), log) ((T[t := (state_running, K void)], H, L[l := ls_held t]), log & event_lock t l)
 | StepRelease : forall (T : threads) H (L : locks) t e K l log,
     binds T t (state_running, te_exp e) ->
     step_ul e K (eff_unlock l) ->
-    binds L l (ls_held t) ->
+    lock_read L l = ls_held t ->
     step ((T, H, L), log) ((T[t := (state_running, K void)], H, L[l := ls_free]), log & event_unlock t l)
 .
 

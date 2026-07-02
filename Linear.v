@@ -55,6 +55,11 @@ Definition global_commit (t : tid) (g g' : commit) (T : threads) (G : graph)
 Definition lin_conflict_free (d : diff) (c g : commit) (G : graph) : Prop :=
   dom d \# change_set G c g.
 
+(* Locks default to free: a never-acquired lock reads as [ls_free], the same
+   as an explicitly-freed one (mirrors [SharedMemory.lock_read]). *)
+Definition lock_read (L : locks) (l : lid) : lock_state :=
+  read_default inhab_lock_state ls_free L l.
+
 Inductive step : cfg -> cfg -> Prop :=
 | StepStart : forall T G g L t e d c,
     binds T t (state_new, e, d, c) ->
@@ -102,13 +107,13 @@ Inductive step : cfg -> cfg -> Prop :=
 | StepLock : forall T G g L t e d c K l,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_lock l) ->
-    binds L l ls_free \/ l \notindom L ->
+    lock_read L l = ls_free ->
     lin_conflict_free d c g G ->
     step (T, G, g, L) (T[t := (state_running, K void, d, g)], G, g, L[l := ls_held t])
 | StepRelease : forall T T' G G' g g' L t e d c K l,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_unlock l) ->
-    binds L l (ls_held t) ->
+    lock_read L l = ls_held t ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' T G = (T', G') ->

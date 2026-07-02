@@ -17,6 +17,11 @@ Definition lcommits := map lid commit.
 Definition init_play_cfg : deltas * commits * graph * lcommits :=
   (empty[t_root := empty], empty[t_root := root_commit], graph_root root_commit, empty).
 
+(* A never-touched lock's commit pointer defaults to [root_commit] (mirrors
+   [Branching.lock_read]'s default). *)
+Definition lc_read (LC : lcommits) (l : lid) : commit :=
+  read_default _ root_commit LC l.
+
 Inductive play_event : event -> (deltas * commits * graph * lcommits) -> (deltas * commits * graph * lcommits) -> Prop :=
 | PlayRead :
   forall D TC G LC t x v,
@@ -47,24 +52,20 @@ Inductive play_event : event -> (deltas * commits * graph * lcommits) -> (deltas
     commit_fresh G c' ->
     play_event (event_join t1 t2) (D, TC, G, LC) (D, TC[t1 := c'], graph_merge G c2 c1 c', LC)
 | PlayLock :
-  forall D TC G LC t l c1 c2 c',
+  (* [lc_read LC l] defaults to [root_commit] for a never-touched lock, so a
+     single rule covers both the "already touched" and "fresh lock" cases
+     (merging with [root_commit] -- a universal ancestor with an empty diff
+     -- is always conflict-free, matching [Branching.StepLock]). *)
+  forall D TC G LC t l c1 c',
     binds TC t c1 ->
-    binds LC l c2 ->
     commit_fresh G c' ->
-    play_event (event_lock t l) (D, TC, G, LC) (D, TC[t := c'], graph_merge G c2 c1 c', LC)
+    play_event (event_lock t l) (D, TC, G, LC) (D, TC[t := c'], graph_merge G (lc_read LC l) c1 c', LC)
 | PlayUnlock :
   forall D TC G LC t l c c' d,
     binds TC t c ->
     commit_fresh G c' ->
     binds D t d ->
     play_event (event_unlock t l) (D, TC, G, LC) (D[t := empty], TC[t := c'], graph_commit G c c' d, LC[l := c'])
-| PlayLockFresh :
-  (* A never-acquired lock ([l] not in [LC]) has no prior commit to merge with;
-     it just records the locker's current commit so [LC] tracks [L]. *)
-  forall D TC G LC t l,
-    t \indom TC ->
-    l \notindom LC ->
-    play_event (event_lock t l) (D, TC, G, LC) (D, TC, G, LC[l := TC[t]])
 .
 
 (* [play_log] additionally produces a commit history [CH], a list parallel to the
@@ -131,14 +132,18 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (forall l,
           (exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> exists h, binds L l (ls_free, h))
       /\
-      (* Replaying the log produces the commit graph, staging areas and lock/thread commits *)
+      (* Replaying the log produces the commit graph, staging areas and lock/thread commits.
+         [LC] only records locks that have actually been *unlocked* at least once
+         ([PlayLock] reads a never-touched lock's parent via [lc_read]'s default
+         rather than adding it to [LC]), so the correspondence uses [lc_read] and
+         the domain fact is one-directional: [LC] can lag behind [L]. *)
       (exists D TC LC CH,
           play_log log init_play_cfg (D, TC, G, LC) CH /\
             (forall t, t \indom T -> exists ts e, binds T t (ts, e, D[t], TC[t])) /\
-            (forall l, l \indom L -> exists ls, binds L l (ls, LC[l])) /\
+            (forall l, l \indom L -> exists ls, binds L l (ls, lc_read LC l)) /\
             (forall t, t \indom T -> t \indom D) /\
             (forall t, t \indom T -> t \indom TC) /\
-            (forall l, l \indom L <-> l \indom LC))
+            (forall l, l \indom LC -> l \indom L))
   end.
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
@@ -184,18 +189,12 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 | StepLock : forall T T' G G' L t e d c c' c'' K l log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_lock l) ->
-    binds L l (ls_free, c') ->
+    lock_read L l = (ls_free, c') ->
     conflict_free_merge d c c' G ->
     commit_fresh G c'' ->
     pull_lock t l c'' T G L = (T', G') ->
     binds T' t (state_running, te_exp e, d, c'') ->
     step ((T, G, L), log) ((T'[t := (state_running, K void, d, c'')], G', L[l := (ls_held t, c')]), log & event_lock t l)
-| StepLockFresh : forall T G L t e d c K l log,
-    (* A never-acquired lock has no prior critical section to merge with. *)
-    binds T t (state_running, te_exp e, d, c) ->
-    step_ul e K (eff_lock l) ->
-    l \notindom L ->
-    step ((T, G, L), log) ((T[t := (state_running, K void, d, c)], G, L[l := (ls_held t, c)]), log & event_lock t l)
 | StepRelease : forall T T' G G' (L L' : locks) t e d c c' c'' K l log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_unlock l) ->
@@ -212,6 +211,7 @@ Definition wf_cfg (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, L) =>
       wf_graph G /\
+      graph_indom G root_commit /\
       (forall t ts e d c, binds T t (ts, e, d, c) -> graph_indom G c) /\
       (forall l ls c, binds L l (ls, c) -> graph_indom G c)
   end.

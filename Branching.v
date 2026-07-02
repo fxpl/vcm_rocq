@@ -19,6 +19,13 @@ Qed.
 
 Definition cfg : Type := threads * graph * locks.
 
+(* Locks default to free at the root commit: a never-acquired lock reads as
+   [(ls_free, root_commit)], the same as an explicitly-freed one whose
+   critical section has no prior history to merge with (mirrors
+   [SharedMemory.lock_read] / [Linear.lock_read]). *)
+Definition lock_read (L : locks) (l : lid) : (lock_state * commit) :=
+  read_default inhab_lock (ls_free, root_commit) L l.
+
 (* TODO: change h_new to c_new *)
 Definition do_commit (t : tid) (h_new : commit)
     (T : threads) (G : graph)
@@ -57,7 +64,7 @@ Definition pull_thread (t t' : tid) (h_new : commit)
 Definition pull_lock (t : tid) (l : lid) (h_new : commit)
     (T : threads) (G : graph) (L : locks)
     : threads * graph :=
-  let '(_, h) := L[l] in
+  let '(_, h) := lock_read L l in
   do_merge t h h_new T G.
 
 Inductive step : cfg -> cfg -> Prop :=
@@ -103,18 +110,16 @@ Inductive step : cfg -> cfg -> Prop :=
 | StepLock : forall T T' G G' L t e d h h' h'' K l,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_lock l) ->
-    binds L l (ls_free, h') ->
+    (* Locks default to [(ls_free, root_commit)] ([lock_read] is a total
+       read), so a never-acquired lock is already free -- merging with
+       [root_commit] (a universal ancestor with an empty diff) is always
+       conflict-free, so no separate "fresh lock" case is needed. *)
+    lock_read L l = (ls_free, h') ->
     conflict_free_merge d h h' G ->
     commit_fresh G h'' ->
     pull_lock t l h'' T G L = (T', G') ->
     binds T' t (state_running, te_exp e, d, h'') ->
     step (T, G, L) (T'[t := (state_running, K void, d, h'')], G', L[l := (ls_held t, h')])
-| StepLockFresh : forall T G L t e d h K l,
-    (* A never-acquired lock has no prior critical section to merge with. *)
-    binds T t (state_running, te_exp e, d, h) ->
-    step_ul e K (eff_lock l) ->
-    l \notindom L ->
-    step (T, G, L) (T[t := (state_running, K void, d, h)], G, L[l := (ls_held t, h)])
 | StepRelease : forall T T' G G' (L L' : locks) t e d h h' h'' K l,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_unlock l) ->

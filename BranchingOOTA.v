@@ -177,12 +177,6 @@ Proof.
           [ applys* Nth_app_l wHN
           | applys no_commit_event_snoc wHns; intros Hgt; simpl in Hgt; congruence
           | applys no_xwrite_snoc wHnw; intros vp; discriminate ]. }
-    + (* PlayLockFresh: no-op, D unchanged *)
-      forwards* (wm & wHN & wHns & wHnw): IHHplay.
-      exists wm. splits;
-        [ applys* Nth_app_l wHN
-        | applys no_commit_event_snoc wHns; intros _; simpl; auto
-        | applys no_xwrite_snoc wHnw; intros vp; discriminate ].
 Qed.
 
 (* The least commit event of [t] in the interval [(a, b]]: given SOME commit of
@@ -292,7 +286,6 @@ Proof.
            apply indom_update_of_indom; (typeclass || (rewrite <- Hdeq; exact Hin0)).
         -- rewrite read_update_neq; [ exact Hin0 | congruence ].
       * (* lock (PlayLock) : D unchanged *) exact Hin0.
-      * (* lock (PlayLockFresh) : D unchanged *) exact Hin0.
       * (* unlock ut ul : a commit of ut; if [t = ut] excluded by [Hncl] *)
         destruct (classic (t = ut)) as [Hut | Hut].
         -- subst ut. exfalso. applys Hncl (length log) (event_unlock t ul); try nat_math.

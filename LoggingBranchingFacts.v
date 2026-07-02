@@ -109,7 +109,7 @@ Proof.
     + rew_dom. introv Hdom. rew_set in *.
       branches; auto_star.
       forwards*: indom_empty_inv.
-    + intros. splits; introv contra;
+    + introv contra.
       forwards*: indom_empty_inv.
 Qed.
 
@@ -120,6 +120,7 @@ Proof.
   introv. unfolds init_cfg, graph_root, empty_graph.
   splits.
   - apply init_graph_wf.
+  - unfolds graph_indom. rew_dom. rew_set. auto.
   - unfolds graph_indom.
     introv Hbinds.
     asserts ->: (t = t_root).
@@ -193,7 +194,7 @@ Theorem step_preserves_wf_cfg :
     wf_cfg cfg'.
 Proof.
   destruct cfg as ((T & G) & L).
-  introv (Hwf & HdomT & HdomL) Hstep.
+  introv (Hwf & HrootIndom & HdomT & HdomL) Hstep.
   inverts Hstep.
   - splits~.
     introv Hbinds.
@@ -271,10 +272,20 @@ Proof.
       * forwards~ Hbinds': binds_update_neq_inv Hbinds.
         forwards* Hbinds'': binds_update_neq_inv Hbinds'.
   - unfolds pull_lock, do_merge.
-    replace (L[l0]) with (ls_free, c') in H10 by forwards*: read_of_binds l0.
+    match goal with Hpre : lock_read L l0 = (ls_free, c') |- _ => rename Hpre into Hread end.
+    asserts Hc'indom: (graph_indom G c').
+    { asserts Hread': (lock_read L l0 = (ls_free, c')). { exact Hread. }
+      unfold lock_read, read_default in Hread'.
+      destruct (classic (l0 \indom L)) as [Hindom|Hnotin].
+      - asserts Hb: (binds L l0 (ls_free, c')).
+        { applys binds_of_indom_read Hindom. case_if* in Hread'. }
+        applys HdomL Hb.
+      - case_if* in Hread'. }
+    rewrite Hread in H10.
     replace (T[t]) with (state_running, te_exp e, d, c) in H10 by forwards*: read_of_binds T t.
     inverts H10. splits.
     + apply* graph_merge_wf.
+    + apply* graph_merge_indom.
     + introv Hbinds.
       destruct (classic (t = t0)).
       * subst.
@@ -286,26 +297,13 @@ Proof.
       destruct (classic (l = l0)).
       * subst.
         forwards~ Heq: binds_update_same_inv Hbinds.
-        inverts* Heq.
-      * forwards* Hbinds': binds_update_neq_inv Hbinds.
-  - splits~.
-    + introv Hbinds.
-      destruct (classic (t = t0)).
-      * subst.
-        forwards~ Heq: binds_update_same_inv Hbinds.
-        inverts* Heq.
-      * forwards*: binds_update_neq_inv Hbinds.
-    + introv Hbinds.
-      destruct (classic (l = l0)).
-      * subst.
-        forwards~ Heq: binds_update_same_inv Hbinds.
-        inverts* Heq.
       * forwards* Hbinds': binds_update_neq_inv Hbinds.
   - unfolds push_lock, do_commit.
     replace (T[t]) with (state_running, te_exp e, d, c) in H9 by forwards*: read_of_binds T t.
     replace (L[l0]) with (ls_held t, c') in H9 by forwards*: read_of_binds l0.
     inverts H9. splits.
     + apply* graph_commit_wf.
+    + apply* graph_commit_indom.
     + introv Hbinds.
       destruct (classic (t = t0)).
       * subst.
@@ -376,26 +374,31 @@ Proof.
     asserts Htended: (mem (event_end t') log).
     { apply Hdend. eauto. }
     apply* wf_log_join_last.
-  - (* StepLock: append [event_lock t l] *)
+  - (* StepLock: append [event_lock t l] -- [lock_read] unifies the
+       "already touched" and "never touched" (defaulting to
+       [(ls_free, root_commit)]) cases into one constructor, so this case
+       covers both of the old [StepLock]/[StepLockFresh] proofs below. *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & Hdlock & Hdunlock & _).
     asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     asserts Hlfree: (LibList.filter (fun e => touches_lock l e) log = nil \/
                      exists t'' log'', LibList.filter (fun e => touches_lock l e) log = log'' & event_unlock t'' l).
-    { right. apply* Hdunlock. }
-    apply* wf_log_snoc_lock.
-  - (* StepLockFresh: append [event_lock t l] *)
-    destruct Hdesc as (_ & _ & _ & Hdrunning & Hdlock & Hdunlock & _).
-    asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
-    { apply* Hdrunning. }
-    asserts Hlfree: (LibList.filter (fun e => touches_lock l e) log = nil \/
-                     exists t'' log'', LibList.filter (fun e => touches_lock l e) log = log'' & event_unlock t'' l).
-    { left. destruct (last_case (LibList.filter (fun e => touches_lock l e) log)) as [Hnil | (x & xs' & Heqf)].
+    { match goal with Hpre : lock_read L l = (ls_free, ?cc) |- _ => rename Hpre into Hread end.
+      unfold lock_read, read_default in Hread.
+      destruct (classic (l \indom L)) as [Hindom|Hnotin].
+      - right. asserts Hb: (binds L l (ls_free, c')).
+        { applys binds_of_indom_read Hindom. case_if* in Hread. }
+        apply* Hdunlock.
+      - left. destruct (last_case (LibList.filter (fun e => touches_lock l e) log)) as [Hnil | (x & xs' & Heqf)].
         + exact Hnil.
         + exfalso. forwards [(t' & ->) | (t' & ->)]: filter_touches_lock_last_inv Heqf.
-          * forwards (c' & Hb): (proj1 (Hdlock t' l)). { exists xs'. exact Heqf. }
+          * asserts Hex: (exists log', LibList.filter (fun e => touches_lock l e) log = log' & event_lock t' l).
+            { exists xs'. exact Heqf. }
+            destruct (proj1 (Hdlock t' l) Hex) as (cw & Hb).
             lets* Hin: (indom_of_binds Hb).
-          * forwards (c' & Hb): (proj1 (Hdunlock l)). { exists t' xs'. exact Heqf. }
+          * asserts Hex: (exists t'' log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t'' l).
+            { exists t' xs'. exact Heqf. }
+            destruct (proj1 (Hdunlock l) Hex) as (cw & Hb).
             lets* Hin: (indom_of_binds Hb). }
     apply* wf_log_snoc_lock.
   - (* StepRelease: append [event_unlock t l] *)
@@ -1167,12 +1170,14 @@ Proof.
         rew_dom.
         rew_set in Hmem. rew_set.
         branches; auto_star.
-  - (* StepLock: log' = log & event_lock t l, T' = T[t := ...], L' = L[l := held t] *)
+  - (* StepLock: log' = log & event_lock t l, T' = T[t := ...], L' = L[l := held t] --
+       [lock_read] unifies the "already touched"/"never touched" cases into one
+       constructor, so this proof covers both of the old StepLock/StepLockFresh
+       cases; only the replay conjunct (7) genuinely branches on [l \indom L]. *)
     lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
+    match goal with Hpre : lock_read L l = (ls_free, c') |- _ => rename Hpre into Hread end.
     unfolds pull_lock, do_merge.
-    asserts Hl: (L[l] = (ls_free, c')).
-    { apply* read_of_binds. }
-    replace (L[l]) with (ls_free, c') in H8.
+    rewrite Hread in H8.
     asserts Ht: (T[t] = (state_running, te_exp e, d, c)).
     { apply* read_of_binds. }
     replace (T[t]) with (state_running, te_exp e, d, c) in H8.
@@ -1227,18 +1232,25 @@ Proof.
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (ts_old & e_old & Hbinds_delta): Hdelta Htin.
       forwards~ Heq: binds_inj Hbinds_delta H3.
-      asserts Hlin: (l \indom L). { apply* indom_of_binds. }
-      forwards (ls & Hbinds_l): Hlocks Hlin.
-      forwards~ Heq': binds_inj Hbinds_l H5.
+      asserts HLCeq: (lc_read LC l = c').
+      { asserts Hread': (lock_read L l = (ls_free, c')). { exact Hread. }
+        unfold lock_read, read_default in Hread'.
+        destruct (classic (l \indom L)) as [Hindom|Hnotin].
+        - asserts Hb: (binds L l (ls_free, c')).
+          { applys binds_of_indom_read Hindom. case_if* in Hread'. }
+          forwards (ls0 & Hbinds_l0): Hlocks Hindom.
+          forwards~ Heql: binds_inj Hb Hbinds_l0.
+        - case_if* in Hread'. inverts Hread'.
+          asserts Hlcnotin: (l \notindom LC).
+          { intro Hin. apply Hnotin. apply* HdomLC. }
+          unfold lc_read. apply read_default_notindom. exact Hlcnotin. }
       rewrite~ update_update.
       exists D (TC[t := c'']) LC. eexists. splits*.
       * applys PlaySnoc Hplay.
-        apply (PlayLock _ _ _ _ _ _ c c' c''); auto.
-        -- inverts Heq.
-           apply* binds_of_indom_read.
-        -- inverts Heq'.
-           apply* binds_of_indom_read.
-           apply* HdomLC.
+        rewrite <- HLCeq.
+        apply (PlayLock _ _ _ _ _ _ c c''); auto.
+        inverts Heq.
+        apply* binds_of_indom_read.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq_t0].
         -- asserts~ Hd_t: (D[t] = d).
@@ -1253,9 +1265,7 @@ Proof.
            exists ts' e''. apply~ binds_update_neq.
       * intros l0 Hin.
         destruct (classic (l0 = l)) as [->|Hneq_l].
-        -- forwards* HleqL: binds_inj Hbinds_l.
-           asserts~ HLC_l: (LC[l] = c').
-           rewrite HLC_l. exists (ls_held t). apply binds_update_same.
+        -- rewrite <- HLCeq. exists (ls_held t). apply binds_update_same.
         -- forwards~ Hin1: indom_update_inv Hin.
            destruct~ Hin1 as [->|Hin1].
            forwards (ls0' & Hbinds_l'): Hlocks l0 Hin1.
@@ -1264,83 +1274,7 @@ Proof.
         rew_dom. rew_set in Hmem. branches; auto_star.
       * introv Hmem. rew_dom.
         rew_set in Hmem. rew_set. branches; auto_star.
-      * intros. splits; introv Hmem; rew_dom;
-        rew_set in *; try branches; try apply* HdomLC.
-        left. apply* HdomLC.
-  - (* StepLockFresh: log' = log & event_lock t l, T' = T[t := K void, d, c], G unchanged *)
-    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
-    asserts (Hsmem & Henmem): (mem (event_start t) log /\ ~mem (event_end t) log).
-    { apply (Hdrunning t). eauto. }
-    asserts* HtinX: (t \indom T).
-    splits.
-    + applys* describes_spawned_inplace.
-    + applys* describes_new_inplace.
-    + applys* describes_ended_inplace.
-    + applys* describes_running_inplace.
-    + (* 5. Locked locks *)
-      intros t0 l0. rew_listx. cases_if as Hcase.
-      * unfold touches_lock in Hcase. subst. rew_list. split.
-        -- introv (log' & Hfilt).
-           apply last_eq_last_inv in Hfilt. destruct Hfilt as [_ Heq]. inverts Heq.
-           exists c. apply binds_update_same.
-        -- intros (h2 & Hbinds).
-           apply binds_update_same_inv in Hbinds. inverts Hbinds.
-           exists~ (LibList.filter (fun e => touches_lock l e) log).
-      * unfold touches_lock in Hcase. rew_list. split.
-        -- introv (log' & Hfilt).
-           forwards ((h2 & Hbinds) & Hbinds'): (Hdlock t0 l0). { exists log'. exact Hfilt. }
-           exists h2. apply~ binds_update_neq.
-        -- intros (h2 & Hbinds).
-           forwards~ Hbinds': binds_update_neq_inv Hbinds.
-           apply (Hdlock t0 l0). exists h2. exact Hbinds'.
-    + (* 6. Unlocked locks: l now held *)
-      intros l0. rew_listx. cases_if as Hcase.
-      * unfold touches_lock in Hcase. subst. rew_list. split.
-        -- introv (t0 & log' & Hfilt).
-           apply last_eq_last_inv in Hfilt. destruct Hfilt as [_ Heq]. congruence.
-        -- introv (h2 & Hbinds).
-           apply binds_update_same_inv in Hbinds. congruence.
-      * unfold touches_lock in Hcase. rew_list. split.
-        -- introv (t0 & log' & Hfilt).
-           forwards (h2 & Hbinds): (proj1 (Hdunlock l0)). { exists t0 log'. exact Hfilt. }
-           exists h2. apply~ binds_update_neq.
-        -- intros (h2 & Hbinds).
-           forwards~ Hbinds': binds_update_neq_inv Hbinds.
-           forwards (t0 & log' & Hfilt): (proj2 (Hdunlock l0)). { exists h2. exact Hbinds'. }
-           exists t0 log'. exact Hfilt.
-    + (* 7. Replay: PlayLockFresh records LC[l := TC[t]] *)
-      destruct Hdplay as (D & TC & LC & CH & Hplay & Hdelta & Hlocks & HdomD & HdomTC & HdomLC).
-      asserts Htin: (t \indom T). { apply* indom_of_binds. }
-      forwards (ts_old & e_old & Hbinds_delta): Hdelta Htin.
-      match goal with Hbt : binds T t (state_running, te_exp e, d, c) |- _ =>
-        forwards~ Heq: binds_inj Hbinds_delta Hbt end.
-      asserts Hlnc: (l \notindom LC).
-      { match goal with Hnl : l \notindom L |- _ => intros Hin; apply Hnl; applys* HdomLC end. }
-      asserts~ Hd_t: (D[t] = d).
-      asserts~ Htc_t: (TC[t] = c).
-      exists D TC (LC[l := TC[t]]). eexists. splits*.
-      * applys PlaySnoc Hplay. apply PlayLockFresh; [ applys HdomTC Htin | exact Hlnc ].
-      * intros t0 Hin.
-        destruct (classic (t0 = t)) as [->|Hneq_t0].
-        -- rewrite Hd_t. rewrite Htc_t.
-           exists state_running (K void). apply binds_update_same.
-        -- forwards~ Hin1: indom_update_inv Hin.
-           destruct~ Hin1 as [->|Hin1].
-           forwards (ts' & e'' & Hbinds'): Hdelta t0 Hin1.
-           exists ts' e''. apply~ binds_update_neq.
-      * intros l0 Hin.
-        destruct (classic (l0 = l)) as [->|Hneq_l].
-        -- rewrite read_update_same. rewrite Htc_t. exists (ls_held t). apply binds_update_same.
-        -- forwards~ Hin1: indom_update_inv Hin.
-           destruct~ Hin1 as [->|Hin1].
-           rewrite~ read_update_neq.
-           forwards (ls0' & Hbinds_l'): Hlocks l0 Hin1.
-           exists ls0'. apply~ binds_update_neq.
-      * introv Hmem. rew_dom. rew_set in Hmem. branches; auto_star.
-      * introv Hmem. rew_dom. rew_set in Hmem. branches; auto_star.
-      * intros. splits; introv Hmem; rew_dom;
-          rew_set in *; branches;
-          try solve[left; apply* HdomLC| subst*].
+      * introv Hmem. forwards Hin: HdomLC Hmem. rew_dom. rew_set. auto.
   - (* StepRelease: log' = log & event_unlock t l, T' = T[t := ...], L' = L'[l := free] *)
     lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     unfolds push_lock, do_commit.
@@ -1420,14 +1354,18 @@ Proof.
            exists ts' e''. apply~ binds_update_neq.
       * intros l0 Hin.
         destruct (classic (l0 = l)) as [->|Hneq_l].
-        -- rewrite read_update_same.
+        -- asserts Heql: (lc_read (LC[l := c'']) l = c'').
+           { unfold lc_read. apply read_default_update_same. }
+           rewrite Heql.
            exists (ls_free). apply binds_update_same.
         -- forwards~ Hin1: indom_update_inv Hin.
            destruct~ Hin1 as [->|Hin1].
            forwards~ Hin2: indom_update_inv Hin1.
            destruct~ Hin2 as [->|Hin2].
            forwards (ls0' & Hbinds_l'): Hlocks l0 Hin2.
-           rewrite~ read_update_neq.
+           asserts Heql: (lc_read (LC[l := c'']) l0 = lc_read LC l0).
+           { unfold lc_read. apply read_default_update_neq. congruence. }
+           rewrite Heql.
            exists ls0'. apply~ binds_update_neq. apply~ binds_update_neq.
       * introv Hmem.
         rew_dom. rew_set in Hmem. rew_set.
@@ -1435,7 +1373,9 @@ Proof.
       * introv Hmem.
         rew_dom. rew_set in Hmem. rew_set.
         branches; auto.
-      * intros. splits; introv Hmem; rew_dom;
-          rew_set in *; repeat branches;
-          try solve[repeat left; apply* HdomLC| subst*].
+      * introv Hmem.
+        forwards Hmem1: indom_update_inv Hmem; [typeclass|].
+        destruct Hmem1 as [->|Hmem1].
+        -- apply indom_update_same; typeclass.
+        -- apply* indom_update_of_indom. apply* indom_update_of_indom.
 Qed.

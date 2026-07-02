@@ -116,6 +116,36 @@ Ltac rew_dom :=
       [| solve[symmetry; apply dom_update] ]
   end.
 
+(* A total read with an *explicit* default: unlike [Inhab]'s [arbitrary]
+   (opaque -- extracted via choice from a mere inhabitedness proof, so it
+   can't be shown equal to any particular value), [dflt] here is a concrete
+   value we choose, making [read_default_notindom] usable to pin down what a
+   never-touched key reads as (e.g. locks defaulting to [ls_free]). *)
+Definition read_default {A B} (IB : Inhab B) (dflt : B) (M : map A B) (k : A) : B :=
+  If k \indom M then M[k] else dflt.
+
+Lemma read_default_indom : forall {A B} {IB : Inhab B} {dflt : B} {M : map A B} {k : A},
+    k \indom M -> read_default IB dflt M k = M[k].
+Proof. introv Hin. unfold read_default. case_if; [reflexivity | false*]. Qed.
+
+Lemma read_default_notindom : forall {A B} {IB : Inhab B} {dflt : B} {M : map A B} {k : A},
+    k \notindom M -> read_default IB dflt M k = dflt.
+Proof. introv Hnin. unfold read_default. case_if; [false* | reflexivity]. Qed.
+
+Lemma read_default_update_same : forall {A B} {IB : Inhab B} {dflt : B} {M : map A B} {k : A} {v : B},
+    read_default IB dflt M[k:=v] k = v.
+Proof. intros. unfold read_default. case_if; [|rew_dom; rew_set in C; false*]. rewrite~ read_update_same. Qed.
+
+Lemma read_default_update_neq : forall {A B} {IB : Inhab B} {dflt : B} {M : map A B} {k k' : A} {v : B},
+    k <> k' ->
+    read_default IB dflt M[k:=v] k' = read_default IB dflt M k'.
+Proof.
+  introv Hneq. unfold read_default. case_if.
+  - rew_dom. rew_set in C. branches; subst*. cases_if*.
+    rewrite~ read_update_neq.
+  - cases_if*. rew_dom. rew_set in C. false*.
+Qed.
+
 Lemma mem_le_sum : forall (n : nat) (l : list nat),
   mem n l -> n <= fold_right plus 0 l.
 Proof.

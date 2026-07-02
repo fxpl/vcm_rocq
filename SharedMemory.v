@@ -7,6 +7,13 @@ Definition heap := map var val.
 Definition locks := map lid lock_state.
 Definition cfg := (threads * heap * locks)%type.
 
+(* Locks default to free: a never-acquired lock reads as [ls_free], the same
+   as an explicitly-freed one. This makes [lock_read] a total read, unlike
+   [Inhab]'s opaque [arbitrary], so it can be shown equal to [ls_free] when
+   the lock is unbound ([read_default_notindom]). *)
+Definition lock_read (L : locks) (l : lid) : lock_state :=
+  read_default inhab_lock_state ls_free L l.
+
 Inductive step : cfg -> cfg -> Prop :=
 | StepStart : forall T H L t e,
     binds T t (state_new, e) ->
@@ -37,13 +44,12 @@ Inductive step : cfg -> cfg -> Prop :=
 | StepLock : forall (T : threads) H (L : locks) t e K l,
     binds T t (state_running, te_exp e) ->
     step_ul e K (eff_lock l) ->
-    (* a free lock, or one that has never been acquired (hence not in [L]) *)
-    (binds L l ls_free \/ l \notindom L) ->
+    lock_read L l = ls_free ->
     step (T, H, L) (T[t := (state_running, K void)], H, L[l := ls_held t])
 | StepRelease : forall (T : threads) H (L : locks) t e K l,
     binds T t (state_running, te_exp e) ->
     step_ul e K (eff_unlock l) ->
-    binds L l (ls_held t) ->
+    lock_read L l = ls_held t ->
     step (T, H, L) (T[t := (state_running, K void)], H, L[l := ls_free])
 .
 
@@ -62,17 +68,17 @@ Inductive step : cfg -> cfg -> Prop :=
 Definition enabled (H : heap) (L : locks) (t : tid) (a : eff) : Prop :=
   match a with
   | eff_read x   => x \indom H
-  | eff_unlock l => binds L l (ls_held t)
+  | eff_unlock l => lock_read L l = ls_held t
   | _ => True
   end.
 
 (* A *blocking* effect: joining a thread that has not terminated, or acquiring a
-   lock that is neither free nor never-acquired. These are the legitimate
-   sources of deadlock. *)
+   lock that is currently held. These are the legitimate sources of deadlock
+   (locks default to free, so there is no "never acquired" case). *)
 Definition blocked (T : threads) (L : locks) (a : eff) : Prop :=
   match a with
   | eff_join t'  => ~ exists r, binds T t' (state_terminated, te_ret r)
-  | eff_lock l   => ~ (binds L l ls_free \/ l \notindom L)
+  | eff_lock l   => lock_read L l <> ls_free
   | _ => False
   end.
 
