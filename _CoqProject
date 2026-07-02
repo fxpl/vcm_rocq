@@ -11,6 +11,7 @@ LogFacts.v
 LoggingSharedMemory.v
 LoggingSharedMemoryFacts.v
 Linear.v
+LinearFacts.v
 LoggingLinear.v
 LoggingLinearFacts.v
 LinearEquivLemmas.v
@@ -19,6 +20,7 @@ LinearOOTA.v
 Graph.v
 GraphFacts.v
 Branching.v
+BranchingFacts.v
 LoggingBranching.v
 LoggingBranchingFacts.v
 BranchingEquivLemmas.v
