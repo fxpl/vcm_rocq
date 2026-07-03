@@ -27,10 +27,25 @@ Definition init_play_cfg : deltas * commits * graph * commit :=
 Inductive play_event :
   event -> (deltas * commits * graph * commit) -> (deltas * commits * graph * commit) -> Prop :=
 | PlayRead : forall D TC G g t x v,
+    x \notin Volatiles ->
     play_event (event_read t x v) (D, TC, G, g) (D, TC, G, g)
+| PlayReadVolatile : forall D TC G g t x v,
+    (* a volatile read is a pull: fast-forward the actor's commit to [g],
+       matching [Linear.StepReadVolatile] *)
+    x \in Volatiles ->
+    play_event (event_read t x v) (D, TC, G, g) (D, TC[t := g], G, g)
 | PlayWrite : forall D TC G g t x v d,
+    x \notin Volatiles ->
     binds D t d ->
     play_event (event_write t x v) (D, TC, G, g) (D[t := d[x := v]], TC, G, g)
+| PlayWriteVolatile : forall D TC G g g' t x v d,
+    (* a volatile write is a pull then push: fold the write into the diff and
+       commit it immediately onto [g], matching [Linear.StepWriteVolatile] *)
+    x \in Volatiles ->
+    binds D t d ->
+    commit_fresh G g' ->
+    play_event (event_write t x v) (D, TC, G, g)
+      (D[t := empty], TC[t := g'], graph_commit G g g' (d[x := v]), g')
 | PlayStart : forall D TC G g t,
     play_event (event_start t) (D, TC, G, g) (D, TC[t := g], G, g)
 | PlayEnd : forall D TC G g g' t d,
@@ -142,18 +157,36 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 | StepReadLocal : forall T G g L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
+    x \notin Volatiles ->
     binds d x v ->
     step ((T, G, g, L), log) ((T[t := (state_running, K (ret_val v), d, c)], G, g, L), log & event_read t x v)
 | StepReadGlobal : forall T G g L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
+    x \notin Volatiles ->
     x \notindom d ->
     is_latest_value G c x v ->
     step ((T, G, g, L), log) ((T[t := (state_running, K (ret_val v), d, c)], G, g, L), log & event_read t x v)
+| StepReadVolatile : forall T G g L t e d c K x v log,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_read x) ->
+    x \in Volatiles ->
+    lin_conflict_free d c g G ->
+    is_latest_value G g x v ->
+    step ((T, G, g, L), log) ((T[t := (state_running, K (ret_val v), d, g)], G, g, L), log & event_read t x v)
 | StepWrite : forall T G g L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_write x v) ->
+    x \notin Volatiles ->
     step ((T, G, g, L), log) ((T[t := (state_running, K void, d[x := v], c)], G, g, L), log & event_write t x v)
+| StepWriteVolatile : forall T T' G G' g g' L t e d c K x v log,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_write x v) ->
+    x \in Volatiles ->
+    lin_conflict_free (d[x := v]) c g G ->
+    commit_fresh G g' ->
+    global_commit t g g' (T[t := (state_running, te_exp e, d[x := v], c)]) G = (T', G') ->
+    step ((T, G, g, L), log) ((T'[t := (state_running, K void, empty, g')], G', g', L), log & event_write t x v)
 | StepSpawn : forall T T' G G' g g' L t (t' : tid) e d c K e' log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_spawn e') ->

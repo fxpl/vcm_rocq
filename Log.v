@@ -78,6 +78,15 @@ Inductive hb (log : log) : nat -> nat -> Prop :=
     LibList.Nth n log (event_join t1 t2) ->
     m < n ->
     hb log m n
+| HbVolatile : forall m n t1 t2 x v v',
+    (* A write to a volatile variable is ordered before every later read of
+       it, regardless of thread -- this is the synchronisation edge that
+       distinguishes a volatile from a plain variable. *)
+    x \in Volatiles ->
+    LibList.Nth m log (event_write t1 x v) ->
+    LibList.Nth n log (event_read t2 x v') ->
+    m < n ->
+    hb log m n
 | HbTrans : forall m n k,
     (* Transitivity *)
     hb log m k ->
@@ -156,21 +165,31 @@ Definition conflict_free (log : log) : Prop :=
 
 (* The events that commit a thread's delta, making its local changes visible to
    other threads ("sync out"). These are exactly the source events of every
-   cross-thread happens-before edge. *)
+   cross-thread happens-before edge -- which is why a write to a *volatile*
+   variable counts too: [HbVolatile] makes it the source of a cross-thread
+   edge to every later read of it, so [hb_preserves_thread] needs it
+   classified here, matching the operational "pull, then push" semantics of a
+   volatile write (see [Linear]/[Branching]). A write to a non-volatile
+   variable stays purely local (no [hb] edge reaches out of the thread), so
+   it is not a commit event. *)
 Definition is_commit_event (e : event) : Prop :=
   match e with
   | event_unlock _ _
   | event_spawn _ _
   | event_end _ => True
+  | event_write _ x _ => x \in Volatiles
   | _ => False
   end.
 
 (* The events that merge other threads' changes in without committing the
-   thread's own delta. These keep the delta intact. *)
+   thread's own delta. These keep the delta intact -- a read of a volatile
+   variable belongs here too, matching the operational "pull" it performs
+   (see [Linear]/[Branching]). *)
 Definition is_merge_event (e : event) : Prop :=
   match e with
   | event_lock _ _
   | event_join _ _ => True
+  | event_read _ x _ => x \in Volatiles
   | _ => False
   end.
 

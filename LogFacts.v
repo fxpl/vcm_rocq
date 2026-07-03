@@ -543,6 +543,9 @@ Proof.
   - applys HbLock; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
   - applys HbSpawn; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
   - applys HbJoin; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
+  - forwards H0': Nth_app_l H0.
+    forwards H1': Nth_app_l H1.
+    applys HbVolatile H H0' H1' H2.
   - applys* HbTrans.
 Qed.
 
@@ -576,6 +579,11 @@ Proof.
     inverts Hdisj1; [| unpack; nat_math].
     inverts Hdisj2; [| unpack; nat_math].
     applys* HbJoin.
+  - forwards* Hdisj1: Nth_app_inv m.
+    forwards* Hdisj2: Nth_app_inv n.
+    inverts Hdisj1; [| unpack; nat_math].
+    inverts Hdisj2; [| unpack; nat_math].
+    applys* HbVolatile.
   - hint hb_lt.
     asserts* Hlt': (k < n).
     applys* HbTrans.
@@ -633,6 +641,7 @@ Proof.
     | n m lt1 lt2 ll HNsrc HNtgt Hlt
     | m n st1 st2 HNsrc HNtgt Hlt
     | m n jt1 jt2 HNsrc HNtgt Hlt
+    | m n vt1 vt2 vx vv vv' Hvol HNsrc HNtgt Hlt
     | m n mid Hmk IHmk Hkn IHkn ];
     introv Hm Hgt Hns Hn.
   - (* HbPo: same thread *)
@@ -648,6 +657,10 @@ Proof.
   - (* HbJoin: source [event_end jt2] is a sync_out of t *)
     forwards Heq: Nth_functional Hm HNsrc. subst em.
     false (Hns m (event_end jt2)); [ nat_math | assumption | assumption | simpl; exact I ].
+  - (* HbVolatile: source [event_write vt1 vx vv] is a sync_out of t, since
+       [vx] is volatile *)
+    forwards Heq: Nth_functional Hm HNsrc. subst em.
+    false (Hns m (event_write vt1 vx vv)); [ nat_math | assumption | assumption | simpl; exact Hvol ].
   - (* HbTrans: chain through the intermediate index [mid] *)
     forwards (ek & Hek): hb_Nth_r Hmk.
     forwards Hgek: IHmk Hm Hgt Hns Hek.

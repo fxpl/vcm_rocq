@@ -18,18 +18,38 @@ Import Branching.
    never-touched lock's [lock_read] defaults to it), every thread's and
    lock's commit pointer is already in the graph (needed to justify
    [graph_commit_wf] / [graph_merge_wf] when that thread/lock is next
-   touched), and a terminated thread always carries a return value with an
-   empty staging area (it became terminated only via [StepEnd]). *)
+   touched), a terminated thread always carries a return value with an
+   empty staging area (it became terminated only via [StepEnd]), every
+   write of a volatile variable [x] is an ancestor of [x]'s current pointer
+   [vc_read V x] (every volatile write is folded into [V[x]] by
+   [StepWriteVolatile], and [V[x]] only ever advances forward, so no earlier
+   write can be "ahead" of it), and -- crucially, since dominance alone does
+   not give existence -- [vc_read V x] itself always has a well-defined
+   latest value whenever [x] has been written at all (again maintained via
+   [StepWriteVolatile]: the freshly written commit trivially IS that latest
+   value, by [is_latest_value_graph_commit_fresh_writer]). This last
+   conjunct is what lets [progress_aux] show that a pre-pull
+   [is_latest_value] cannot survive in isolation: if none exists after
+   merging [h] with [vc_read V x], none can have existed at [vc_read V x]
+   alone either (dominance forces every writer below it), so none exists at
+   [h] to begin with -- [is_latest_value_graph_merge_fresh] packages exactly
+   this "existence at the merge's dominant parent survives the merge"
+   argument. *)
 Definition wf_cfg (cfg : cfg) : Prop :=
   match cfg with
-  | (T, G, L) =>
+  | (T, G, L, V) =>
       LibMap.finite T /\
       wf_graph G /\
       graph_indom G root_commit /\
       (forall t e d c, binds T t (state_terminated, e, d, c) ->
          exists r, e = te_ret r /\ d = empty) /\
       (forall t ts e d c, binds T t (ts, e, d, c) -> graph_indom G c) /\
-      (forall l ls c, binds L l (ls, c) -> graph_indom G c)
+      (forall l ls c, binds L l (ls, c) -> graph_indom G c) /\
+      (forall x c, binds V x c -> graph_indom G c) /\
+      (forall x t ts e d c, x \in Volatiles -> binds T t (ts, e, d, c) -> x \notindom d) /\
+      (forall x c v, x \in Volatiles -> graph_writes G c x v -> ancestor G c (vc_read V x)) /\
+      (forall x c v, x \in Volatiles -> graph_writes G c x v ->
+         exists v', is_latest_value G (vc_read V x) x v')
   end.
 
 (* ===================================================================== *)
@@ -68,7 +88,7 @@ Definition blocked (T : threads) (L : locks) (a : eff) : Prop :=
    [progress] reports separately. *)
 Definition ul_progress (cfg : cfg) : Prop :=
   match cfg with
-  | (T, G, L) =>
+  | (T, G, L, V) =>
       forall t e d h,
         binds T t (state_running, te_exp e, d, h) ->
         exists K a, step_ul e K a
@@ -80,7 +100,7 @@ Definition ul_progress (cfg : cfg) : Prop :=
    itself hold. *)
 Definition forbidden (cfg : cfg) : Prop :=
   match cfg with
-  | (T, G, L) =>
+  | (T, G, L, V) =>
       exists t e d h K a,
         binds T t (state_running, te_exp e, d, h) /\
         step_ul e K a /\
@@ -95,7 +115,7 @@ Definition forbidden (cfg : cfg) : Prop :=
    two histories being merged. *)
 Definition conflict_detected (cfg : cfg) : Prop :=
   match cfg with
-  | (T, G, L) =>
+  | (T, G, L, V) =>
       exists t e d h K,
         binds T t (state_running, te_exp e, d, h) /\
         ((exists t' r d' c',
@@ -106,13 +126,23 @@ Definition conflict_detected (cfg : cfg) : Prop :=
          (exists l h',
              step_ul e K (eff_lock l) /\
              lock_read L l = (ls_free, h') /\
-             ~ conflict_free_merge d h h' G))
+             ~ conflict_free_merge d h h' G)
+         \/
+         (exists x,
+             step_ul e K (eff_read x) /\
+             x \in Volatiles /\
+             ~conflict_free_merge d h (vc_read V x) G)
+         \/
+         (exists x v,
+             step_ul e K (eff_write x v) /\
+             x \in Volatiles /\
+             ~conflict_free_merge d h (vc_read V x) G))
   end.
 
 (* A thread has terminated. *)
 Definition terminated (cfg : cfg) (t : tid) : Prop :=
   match cfg with
-  | (T, _, _) => exists r c, binds T t (state_terminated, te_ret r, empty, c)
+  | (T, _, _, _) => exists r c, binds T t (state_terminated, te_ret r, empty, c)
   end.
 
 (* A running thread is *inert* when it is still computing, can take a step,
@@ -120,7 +150,7 @@ Definition terminated (cfg : cfg) (t : tid) : Prop :=
    or a lock on a held lock). *)
 Definition inert (cfg : cfg) (t : tid) : Prop :=
   match cfg with
-  | (T, _, L) =>
+  | (T, _, L, _) =>
       exists e d h,
         binds T t (state_running, te_exp e, d, h) /\
         (exists K a, step_ul e K a) /\
@@ -130,7 +160,7 @@ Definition inert (cfg : cfg) (t : tid) : Prop :=
 (* The configuration is *done* when every thread has terminated. *)
 Definition done (cfg : cfg) : Prop :=
   match cfg with
-  | (T, _, _) => forall t, t \indom T -> terminated cfg t
+  | (T, _, _, _) => forall t, t \indom T -> terminated cfg t
   end.
 
 (* The configuration is *deadlocked* when every thread is terminated or
@@ -138,7 +168,7 @@ Definition done (cfg : cfg) : Prop :=
    [done]). *)
 Definition deadlocked (cfg : cfg) : Prop :=
   match cfg with
-  | (T, _, _) =>
+  | (T, _, _, _) =>
       (forall t, t \indom T -> terminated cfg t \/ inert cfg t) /\
       (exists t, t \indom T /\ inert cfg t)
   end.
@@ -228,6 +258,15 @@ Proof.
   applys finite_do_merge Heq Hfin.
 Qed.
 
+Lemma finite_pull_volatile :
+  forall t l h_new T G V T' G',
+    pull_volatile t l h_new T G V = (T', G') ->
+    LibSet.finite (dom T) -> LibSet.finite (dom T').
+Proof.
+  introv Heq Hfin. unfolds pull_volatile, do_merge. destruct (vc_read V l);
+    applys finite_do_merge Heq Hfin.
+Qed.
+
 Lemma finite_push_lock :
   forall t l h_new T G L T' G' L',
     push_lock t l h_new T G L = (T', G', L') ->
@@ -240,14 +279,26 @@ Proof.
   applys finite_do_commit Hdc Hfin.
 Qed.
 
+Lemma finite_push_volatile :
+  forall t l h_new T G V T' G' V',
+    push_volatile t l h_new T G V = (T', G', V') ->
+    LibSet.finite (dom T) -> LibSet.finite (dom T').
+Proof.
+  introv Heq Hfin. unfolds push_volatile.
+  destruct (do_commit t h_new T G) as [T'' G''] eqn:Hdc.
+  destruct (V[l]);
+    inverts Heq;
+    applys finite_do_commit Hdc Hfin.
+Qed.
+
 (* A finite thread domain stays finite under a step: every rule either
    updates existing threads in place (domain unchanged) or spawns exactly
    one new thread ([StepSpawn], adding a single element). *)
 Lemma step_preserves_finite :
-  forall T G L cfg',
+  forall T G L V cfg',
     LibSet.finite (dom T) ->
-    step (T, G, L) cfg' ->
-    match cfg' with (T', _, _) => LibSet.finite (dom T') end.
+    step (T, G, L, V) cfg' ->
+    match cfg' with (T', _, _, _) => LibSet.finite (dom T') end.
 Proof.
   introv Hfin Hstep.
   hint LibSet.finite_single.
@@ -260,7 +311,20 @@ Proof.
     rew_dom. autos.
   - (* StepReadLocal *) rew_dom. autos.
   - (* StepReadGlobal *) rew_dom. autos.
+  - (* StepReadVolatile *)
+    match goal with H : pull_volatile _ _ _ _ _ _ = (_, _) |- _ =>
+      forwards Hfin': finite_pull_volatile H Hfin end.
+    rew_dom. autos.
   - (* StepWrite *) rew_dom. autos.
+  - (* StepWriteVolatile *)
+    match goal with H : pull_volatile _ _ _ _ _ _ = (_, _) |- _ =>
+      forwards Hfin': finite_pull_volatile H Hfin end.
+    asserts Hfin0:
+      (LibSet.finite (dom T'[t:=(state_running, te_exp e, d[x:=v], h')])).
+    { rew_dom. autos. }
+    match goal with H : push_volatile _ _ _ _ _ _ = (_, _, _) |- _ =>
+      forwards Hfin'': finite_push_volatile H Hfin0 end.
+    rew_dom. autos.
   - (* StepSpawn *)
     asserts Hfin0:
       (LibSet.finite (dom (T[t := (state_running, K t', d, h)][t' := (state_new, te_exp e', empty, 0)]))).
@@ -280,6 +344,128 @@ Proof.
     rew_dom. autos.
 Qed.
 
+(* A step's fresh commit never writes a volatile variable (its diff is some
+   thread's staging area, which -- by [Hvd] -- never holds one), so an
+   ancestor-of-[vc_read] fact about a volatile writer survives a
+   [graph_commit] with [V] unchanged. *)
+Lemma vwa_preserved_commit :
+  forall G V c cf d,
+    (forall x c0 v, x \in Volatiles -> graph_writes G c0 x v -> ancestor G c0 (vc_read V x)) ->
+    (forall x, x \in Volatiles -> x \notindom d) ->
+    forall x c0 v,
+      x \in Volatiles -> graph_writes (graph_commit G c cf d) c0 x v ->
+      ancestor (graph_commit G c cf d) c0 (vc_read V x).
+Proof.
+  introv Hvwa Hnovol Hxvol Hgw.
+  destruct (classic (c0 = cf)) as [->|Hne].
+  - forwards Hbd: graph_writes_graph_commit_same Hgw.
+    exfalso. applys Hnovol Hxvol. applys indom_of_binds Hbd; typeclass.
+  - forwards Hgw': graph_writes_graph_commit_inv Hne Hgw.
+    forwards Hanc: Hvwa Hxvol Hgw'.
+    applys ancestor_graph_commit Hanc.
+Qed.
+
+(* A merge's fresh commit writes nothing at all, so likewise a
+   [graph_merge] with [V] unchanged preserves the invariant. *)
+Lemma vwa_preserved_merge :
+  forall G V p1 p2 cf,
+    (forall x c0 v, x \in Volatiles -> graph_writes G c0 x v -> ancestor G c0 (vc_read V x)) ->
+    forall x c0 v,
+      x \in Volatiles -> graph_writes (graph_merge G p1 p2 cf) c0 x v ->
+      ancestor (graph_merge G p1 p2 cf) c0 (vc_read V x).
+Proof.
+  introv Hvwa Hxvol Hgw.
+  destruct (classic (c0 = cf)) as [->|Hne].
+  - false. applys graph_writes_graph_merge_same_false Hgw.
+  - forwards Hgw': graph_writes_graph_merge_inv Hne Hgw.
+    forwards Hanc: Hvwa Hxvol Hgw'.
+    applys ancestor_graph_merge Hanc.
+Qed.
+
+(* [vc_read V x]'s graph membership, derived the same way at every call site:
+   either [x] is already recorded ([HdomV]) or it defaults to [root_commit]
+   ([HrootIndom]). Factored out since [exwa_preserved_commit]/[_merge] both
+   need it internally. *)
+Lemma vc_read_graph_indom_cfg :
+  forall G V x,
+    (forall x0 c0, binds V x0 c0 -> graph_indom G c0) ->
+    graph_indom G root_commit ->
+    graph_indom G (vc_read V x).
+Proof.
+  introv HdomV HrootIndom.
+  destruct (classic (x \indom V)) as [Hindom|Hnotin].
+  - asserts Heq: (vc_read V x = V[x]).
+    { transitivity (V[x]); [exact (read_default_indom Hindom) | autos]. }
+    rewrite Heq. asserts Hb: (binds V x V[x]). { applys* binds_of_indom_read Hindom. }
+    applys* HdomV.
+  - asserts Heq: (vc_read V x = root_commit).
+    { exact (read_default_notindom Hnotin). }
+    rewrite Heq. exact HrootIndom.
+Qed.
+
+(* The commit tracking [x]'s latest value keeps having one across a
+   [graph_commit]: PROVIDED the fresh commit's diff does not write [x] itself
+   ([Hnovol], a per-[x] hypothesis -- not "no volatile is in [d]" globally, so
+   this also covers a diff that writes some OTHER volatile, e.g. the
+   [push_volatile] commit in [StepWriteVolatile]), [x]'s value survives via
+   [is_latest_value_graph_commit_mono]. *)
+Lemma exwa_preserved_commit :
+  forall G V c cf d,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G cf ->
+    (forall x0 c0, binds V x0 c0 -> graph_indom G c0) ->
+    graph_indom G root_commit ->
+    (forall x c0 v, x \in Volatiles -> graph_writes G c0 x v ->
+       exists v', is_latest_value G (vc_read V x) x v') ->
+    forall x c0 v,
+      x \notindom d ->
+      x \in Volatiles -> graph_writes (graph_commit G c cf d) c0 x v ->
+      exists v', is_latest_value (graph_commit G c cf d) (vc_read V x) x v'.
+Proof.
+  introv Hedge Hfresh HdomV HrootIndom Hexwa Hnovol Hxvol Hgw.
+  destruct (classic (c0 = cf)) as [->|Hne].
+  - forwards Hbd: graph_writes_graph_commit_same Hgw.
+    exfalso. applys Hnovol. applys indom_of_binds Hbd; typeclass.
+  - forwards Hgw': graph_writes_graph_commit_inv Hne Hgw.
+    forwards (v' & Hval): Hexwa Hxvol Hgw'.
+    exists v'.
+    asserts Hvcdom: (graph_indom G (vc_read V x)).
+    { applys vc_read_graph_indom_cfg HdomV HrootIndom. }
+    asserts Hvcne: (vc_read V x <> cf).
+    { intro Heq. rewrite Heq in Hvcdom. applys commit_fresh_not_indom Hfresh Hvcdom. }
+    asserts Hnovold: (forall v0, ~ binds d x v0).
+    { introv Hbd0. applys Hnovol. applys indom_of_binds Hbd0; typeclass. }
+    applys is_latest_value_graph_commit_mono Hedge Hfresh Hvcne Hnovold Hval.
+Qed.
+
+(* Likewise across a [graph_merge]: its fresh commit writes nothing at all
+   ([graph_writes_graph_merge_same_false]), so no side condition on a diff is
+   even needed. *)
+Lemma exwa_preserved_merge :
+  forall G V p1 p2 cf,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G cf ->
+    (forall x0 c0, binds V x0 c0 -> graph_indom G c0) ->
+    graph_indom G root_commit ->
+    (forall x c0 v, x \in Volatiles -> graph_writes G c0 x v ->
+       exists v', is_latest_value G (vc_read V x) x v') ->
+    forall x c0 v,
+      x \in Volatiles -> graph_writes (graph_merge G p1 p2 cf) c0 x v ->
+      exists v', is_latest_value (graph_merge G p1 p2 cf) (vc_read V x) x v'.
+Proof.
+  introv Hedge Hfresh HdomV HrootIndom Hexwa Hxvol Hgw.
+  destruct (classic (c0 = cf)) as [->|Hne].
+  - false. applys graph_writes_graph_merge_same_false Hgw.
+  - forwards Hgw': graph_writes_graph_merge_inv Hne Hgw.
+    forwards (v' & Hval): Hexwa Hxvol Hgw'.
+    exists v'.
+    asserts Hvcdom: (graph_indom G (vc_read V x)).
+    { applys vc_read_graph_indom_cfg HdomV HrootIndom. }
+    asserts Hvcne: (vc_read V x <> cf).
+    { intro Heq. rewrite Heq in Hvcdom. applys commit_fresh_not_indom Hfresh Hvcdom. }
+    applys is_latest_value_graph_merge_mono Hedge Hfresh Hvcne Hval.
+Qed.
+
 (* [wf_cfg] is preserved by [step]: finiteness ([step_preserves_finite]),
    well-formedness and [root_commit]-membership of the graph (every graph
    change is a [graph_commit]/[graph_merge] onto a fresh commit, from a
@@ -295,14 +481,16 @@ Theorem step_preserves_wf_cfg :
     step cfg cfg' ->
     wf_cfg cfg'.
 Proof.
-  introv Hwfc Hstep. destruct cfg as ((T & G) & L).
-  destruct Hwfc as (Hfin & Hwf & HrootIndom & Hterm & HdomT & HdomL).
+  introv Hwfc Hstep. destruct cfg as (((T & G) & L) & V).
+  destruct Hwfc as (Hfin & Hwf & HrootIndom & Hterm & HdomT & HdomL & HdomV & Hvd & Hvwa & Hexwa).
+  lets (_ & _ & Hedge): Hwf.
   hint LibSet.finite_single.
   hint LibSet.finite_union.
+  forwards* Hfin':step_preserves_finite Hstep.
   inverts Hstep.
   - (* StepStart *)
-    splits.
-    + unfolds finite. rew_dom. autos.
+    splits 10.
+    + autos.
     + exact Hwf.
     + exact HrootIndom.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
@@ -312,14 +500,22 @@ Proof.
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq. applys* HdomT.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* HdomT.
     + exact HdomL.
+    + exact HdomV.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts* Hbinds'.
+      * forwards* Heq: binds_inj Hbinds. typeclass.
+    + exact Hvwa.
+    + exact Hexwa.
   - (* StepEnd *)
     match goal with H : do_commit _ _ _ _ = (_, _) |- _ => rename H into Hdc end.
     unfolds do_commit.
     match goal with H : binds T t (state_running, te_ret r, ?d0, ?h0) |- _ =>
       replace (T[t]) with (state_running, te_ret r, d0, h0) in Hdc by (symmetry; applys* read_of_binds) end.
     inverts Hdc.
-    splits.
-    + unfolds finite. rew_dom. autos.
+    splits 10.
+    + autos.
     + apply* graph_commit_wf.
     + apply* graph_commit_indom.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
@@ -333,9 +529,23 @@ Proof.
         forwards Hbinds'': binds_update_neq_inv Hbinds' Hne.
         apply* graph_commit_indom.
     + introv Hbinds. apply* graph_commit_indom.
+    + introv Hbinds. apply* graph_commit_indom.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts Hbinds'.
+        applys indom_empty_inv.
+      * forwards* Hbinds'': binds_update_neq_inv Hbinds' C.
+    + asserts HnoVolInD: (forall x0, x0 \in Volatiles -> x0 \notindom d).
+      { introv Hxvol0. applys Hvd Hxvol0. eassumption. }
+      applys vwa_preserved_commit Hvwa HnoVolInD.
+    + asserts HnoVolInD: (forall x0, x0 \in Volatiles -> x0 \notindom d).
+      { introv Hxvol0. applys Hvd Hxvol0. eassumption. }
+      introv Hxvol Hgw.
+      applys* (>> exwa_preserved_commit Hedge HdomV HrootIndom Hexwa (HnoVolInD x Hxvol) Hxvol Hgw).
   - (* StepReadLocal *)
-    splits.
-    + unfolds finite. rew_dom. autos.
+    splits 10.
+    + autos.
     + exact Hwf.
     + exact HrootIndom.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
@@ -345,9 +555,17 @@ Proof.
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq. applys* HdomT.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* HdomT.
     + exact HdomL.
+    + exact HdomV.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts* Hbinds'.
+      * auto_star.
+    + exact Hvwa.
+    + exact Hexwa.
   - (* StepReadGlobal *)
-    splits.
-    + unfolds finite. rew_dom. autos.
+    splits 10.
+    + autos.
     + exact Hwf.
     + exact HrootIndom.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
@@ -357,8 +575,57 @@ Proof.
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq. applys* HdomT.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* HdomT.
     + exact HdomL.
+    + exact HdomV.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts* Hbinds'.
+      * auto_star.
+    + exact Hvwa.
+    + exact Hexwa.
+  - (* StepReadVolatile *)
+    match goal with H : pull_volatile _ _ _ _ _ _ = (_, _) |- _ => rename H into Hpv end.
+    asserts Hvcindom: (graph_indom G (vc_read V x)).
+    {
+      destruct (classic (x \indom V)) as [Hindom|Hnotin].
+      - asserts Heq: (vc_read V x = V[x]).
+        { transitivity (V[x]); [exact (read_default_indom Hindom) | autos]. }
+        rewrite Heq.
+        asserts Hb: (binds V x V[x]). { applys* binds_of_indom_read Hindom. }
+        applys* HdomV.
+      - asserts Heq: (vc_read V x = root_commit).
+        { exact (read_default_notindom Hnotin). }
+        rewrite Heq. exact HrootIndom.
+    }
+    unfolds pull_volatile, do_merge.
+    match goal with H : binds T t (state_running, te_exp e, ?d0, ?h0) |- _ =>
+      replace (T[t]) with (state_running, te_exp e, d0, h0) in Hpv by (symmetry; applys* read_of_binds) end.
+    inverts Hpv.
+    splits 10.
+    + autos.
+    + apply* graph_merge_wf.
+    + apply* graph_merge_indom.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
+        forwards Hbinds'': binds_update_neq_inv Hbinds' Hne. applys* Hterm.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+        apply* graph_merge_indom_same.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
+        forwards Hbinds'': binds_update_neq_inv Hbinds' Hne.
+        apply* graph_merge_indom.
+    + introv Hbinds. apply* graph_merge_indom.
+    + introv Hbinds. apply* graph_merge_indom.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts* Hbinds'.
+      * forwards* Hbinds'': binds_update_neq_inv Hbinds'.
+    + applys vwa_preserved_merge Hvwa.
+    + applys* exwa_preserved_merge Hedge HdomV HrootIndom Hexwa.
   - (* StepWrite *)
-    splits.
+    splits 10.
     + unfolds finite. rew_dom. autos.
     + exact Hwf.
     + exact HrootIndom.
@@ -369,6 +636,157 @@ Proof.
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq. applys* HdomT.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* HdomT.
     + exact HdomL.
+    + exact HdomV.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts Hbinds'.
+        rew_dom. intros contra. rew_set in contra.
+        branches; auto_star.
+        apply* Hvd.
+      * auto_star.
+    + exact Hvwa.
+    + exact Hexwa.
+  - (* StepWriteVolatile *)
+    match goal with H : pull_volatile _ _ _ _ _ _ = (_, _) |- _ => rename H into Hpv end.
+    asserts Hvcindom: (graph_indom G (vc_read V x)).
+    {
+      destruct (classic (x \indom V)) as [Hindom|Hnotin].
+      - asserts Heq: (vc_read V x = V[x]).
+        { transitivity (V[x]); [exact (read_default_indom Hindom) | autos]. }
+        rewrite Heq.
+        asserts Hb: (binds V x V[x]). { applys* binds_of_indom_read Hindom. }
+        applys* HdomV.
+      - asserts Heq: (vc_read V x = root_commit).
+        { exact (read_default_notindom Hnotin). }
+        rewrite Heq. exact HrootIndom.
+    }
+    unfolds pull_volatile, do_merge.
+    match goal with H : binds T t (state_running, te_exp e, ?d0, ?h0) |- _ =>
+      replace (T[t]) with (state_running, te_exp e, d0, h0) in Hpv by (symmetry; applys* read_of_binds) end.
+    inverts Hpv.
+    match goal with H : push_volatile _ _ _ _ _ _ = (_, _, _) |- _ => rename H into Hpv end.
+    unfolds push_volatile, do_commit.
+    rewrite read_update_same in Hpv.
+    inverts Hpv.
+    splits 10.
+    + unfolds finite. rew_dom. autos.
+    + apply* graph_commit_wf.
+      apply* graph_merge_wf.
+    + apply* graph_commit_indom.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
+        forwards Hbinds'': binds_update_neq_inv Hbinds' Hne.
+        do 2 apply binds_update_neq_inv in Hbinds''; autos.
+        applys* Hterm.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+        apply* graph_commit_indom_same.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
+        forwards Hbinds'': binds_update_neq_inv Hbinds' Hne.
+        forwards Hbinds''': binds_update_neq_inv Hbinds'' Hne.
+        forwards Hbinds'''': binds_update_neq_inv Hbinds''' Hne.
+        apply graph_commit_indom.
+        apply graph_merge_indom.
+        apply* HdomT.
+    + introv Hbinds. apply graph_commit_indom.
+      apply* graph_merge_indom.
+    + introv Hbinds. destruct (classic (x0 = x)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+        apply* graph_commit_indom_same.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
+        apply* graph_commit_indom.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts Hbinds'.
+        applys indom_empty_inv.
+      * do 3 apply binds_update_neq_inv in Hbinds'; auto_star.
+    + (* the just-written [x] now points at the fresh commit [h'']: an old
+         [x]-writer reaches it via [(old writer) -> (vc_read V x) -> h' -> h'']
+         (the two merge/commit edges); any OTHER volatile [x0] is untouched,
+         and its writers cannot be [h'']/[h'] (whose own diffs -- [d[x:=v]] and
+         nothing, respectively -- carry no OTHER volatile, by [Hvd]/merge). *)
+      asserts HnoVolInD: (forall x1, x1 \in Volatiles -> x1 \notindom d).
+      { introv Hxvol1. applys Hvd Hxvol1. eassumption. }
+      intros x0 c0 v0 Hxvol0 Hgw0.
+      destruct (classic (x0 = x)) as [->|Hnex0].
+      * asserts Hveq: (vc_read (V[x := h'']) x = h'').
+        { unfold vc_read. apply read_default_update_same. }
+        rewrite Hveq.
+        destruct (classic (c0 = h'')) as [->|Hnec].
+        -- apply ancestor_refl.
+        -- forwards Hgw1: graph_writes_graph_commit_inv Hnec Hgw0.
+           destruct (classic (c0 = h')) as [->|Hnec'].
+           ++ false. applys graph_writes_graph_merge_same_false Hgw1.
+           ++ forwards Hgw2: graph_writes_graph_merge_inv Hnec' Hgw1.
+              forwards Hanc0: Hvwa Hxvol0 Hgw2.
+              asserts Hanc1: (ancestor (graph_merge G (vc_read V x) h h') c0 (vc_read V x)).
+              { applys ancestor_graph_merge Hanc0. }
+              asserts Hanc2: (ancestor (graph_merge G (vc_read V x) h h') (vc_read V x) h').
+              { applys ancestor_graph_merge_edge_r. }
+              asserts Hanc3: (ancestor (graph_merge G (vc_read V x) h h') c0 h').
+              { applys ancestor_trans Hanc1 Hanc2. }
+              asserts Hanc4:
+                (ancestor (graph_commit (graph_merge G (vc_read V x) h h') h' h'' (d[x := v])) c0 h').
+              { applys ancestor_graph_commit Hanc3. }
+              asserts Hanc5:
+                (ancestor (graph_commit (graph_merge G (vc_read V x) h h') h' h'' (d[x := v])) h' h'').
+              { applys ancestor_graph_commit_edge. }
+              applys ancestor_trans Hanc4 Hanc5.
+      * asserts Hveq: (vc_read (V[x := h'']) x0 = vc_read V x0).
+        { unfold vc_read. apply read_default_update_neq. intro Heq. applys Hnex0. symmetry. exact Heq. }
+        rewrite Hveq.
+        destruct (classic (c0 = h'')) as [->|Hnec].
+        -- forwards Hbd: graph_writes_graph_commit_same Hgw0.
+           forwards Hbd': binds_update_neq_inv Hbd Hnex0.
+           exfalso. applys HnoVolInD Hxvol0. applys indom_of_binds Hbd'; typeclass.
+        -- forwards Hgw1: graph_writes_graph_commit_inv Hnec Hgw0.
+           destruct (classic (c0 = h')) as [->|Hnec'].
+           ++ false. applys graph_writes_graph_merge_same_false Hgw1.
+           ++ forwards Hgw2: graph_writes_graph_merge_inv Hnec' Hgw1.
+              forwards Hanc0: Hvwa Hxvol0 Hgw2.
+              applys ancestor_graph_commit. applys ancestor_graph_merge Hanc0.
+    + (* the just-written [x] now has [is_latest_value] trivially at the fresh
+         [h'']: it is the writer itself
+         ([is_latest_value_graph_commit_fresh_writer]). Any OTHER volatile
+         [x0] is untouched: lift the OLD existence witness through the
+         (unwritten, at [x0]) merge-then-commit layers via
+         [exwa_preserved_merge] then [exwa_preserved_commit]. *)
+      asserts HnoVolInD: (forall x1, x1 \in Volatiles -> x1 \notindom d).
+      { introv Hxvol1. applys Hvd Hxvol1. eassumption. }
+      asserts Hmergewf: (wf_graph (graph_merge G (vc_read V x) h h')).
+      { applys* graph_merge_wf. }
+      lets (_ & _ & Hedgemerge): Hmergewf.
+      match goal with H : commit_fresh (graph_merge G (vc_read V x) h h') h'' |- _ =>
+        rename H into Hfresh2 end.
+      intros x0 c0 v0 Hxvol0 Hgw0.
+      destruct (classic (x0 = x)) as [->|Hnex0].
+      * asserts Hveq: (vc_read (V[x := h'']) x = h'').
+        { unfold vc_read. apply read_default_update_same. }
+        rewrite Hveq.
+        exists v.
+        asserts Hh'indom: (graph_indom (graph_merge G (vc_read V x) h h') h').
+        { applys graph_merge_indom_same. }
+        applys* is_latest_value_graph_commit_fresh_writer Hedgemerge Hh'indom.
+        apply binds_update_same.
+      * asserts Hveq: (vc_read (V[x := h'']) x0 = vc_read V x0).
+        { unfold vc_read. apply read_default_update_neq. intro Heq. applys Hnex0. symmetry. exact Heq. }
+        rewrite Hveq.
+        asserts HexwaM: (forall x1 c1 v1, x1 \in Volatiles ->
+                           graph_writes (graph_merge G (vc_read V x) h h') c1 x1 v1 ->
+                           exists v', is_latest_value (graph_merge G (vc_read V x) h h') (vc_read V x1) x1 v').
+        { applys* exwa_preserved_merge Hedge HdomV HrootIndom Hexwa. }
+        asserts Hnovol0: (x0 \notindom (d[x := v])).
+        { intro Hin. destruct (indom_update_inv Hin) as [Hc | Hd].
+          - applys Hnex0 Hc.
+          - applys HnoVolInD Hxvol0 Hd. }
+        asserts HdomVm: (forall x1 c1, binds V x1 c1 -> graph_indom (graph_merge G (vc_read V x) h h') c1).
+        { introv Hbd. applys graph_merge_indom. applys* HdomV Hbd. }
+        asserts HrootIndomm: (graph_indom (graph_merge G (vc_read V x) h h') root_commit).
+        { applys* graph_merge_indom. }
+        applys* (>> exwa_preserved_commit Hedgemerge Hfresh2 HdomVm HrootIndomm HexwaM Hnovol0 Hxvol0 Hgw0).
   - (* StepSpawn *)
     match goal with H : push_thread _ _ _ _ _ = (_, _) |- _ => rename H into Hpt end.
     asserts Hneq: (t <> t').
@@ -377,7 +795,7 @@ Proof.
     rewrite~ read_update_neq in Hpt. rewrite read_update_same in Hpt.
     rewrite~ read_update_neq in Hpt. rewrite read_update_same in Hpt.
     inverts Hpt.
-    splits.
+    splits 10.
     + asserts Hfin0:
         (LibSet.finite (dom (T[t := (state_running, K t', d, h)][t' := (state_new, te_exp e', empty, 0)]))).
       { unfolds finite. rew_dom. autos. }
@@ -405,6 +823,24 @@ Proof.
            forwards Hbinds4: binds_update_neq_inv Hbinds3 Hne.
            apply* graph_commit_indom.
     + introv Hbinds. apply* graph_commit_indom.
+    + introv Hbinds. apply* graph_commit_indom.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts Hbinds'.
+        applys indom_empty_inv.
+      * forwards Hbinds'': binds_update_inv Hbinds'.
+        case_if as C'.
+        -- subst. inverts Hbinds''. applys indom_empty_inv.
+        -- do 2 apply binds_update_neq_inv in Hbinds''; autos.
+           auto_star.
+    + asserts HnoVolInD: (forall x0, x0 \in Volatiles -> x0 \notindom d).
+      { introv Hxvol0. applys Hvd Hxvol0. eassumption. }
+      applys vwa_preserved_commit Hvwa HnoVolInD.
+    + asserts HnoVolInD: (forall x0, x0 \in Volatiles -> x0 \notindom d).
+      { introv Hxvol0. applys Hvd Hxvol0. eassumption. }
+      introv Hxvol Hgw.
+      applys* (>> exwa_preserved_commit Hedge HdomV HrootIndom Hexwa (HnoVolInD x Hxvol) Hxvol Hgw).
   - (* StepJoin *)
     match goal with H : pull_thread _ _ _ _ _ = (_, _) |- _ => rename H into Hpt end.
     unfolds pull_thread, do_merge.
@@ -413,7 +849,7 @@ Proof.
     replace (T[t]) with (state_running, te_exp e, d, h) in Hpt
       by (symmetry; applys* read_of_binds).
     inverts Hpt.
-    splits.
+    splits 10.
     + unfolds finite. rew_dom. autos.
     + apply* graph_merge_wf.
     + apply* graph_merge_indom.
@@ -428,6 +864,14 @@ Proof.
         forwards Hbinds'': binds_update_neq_inv Hbinds' Hne.
         apply* graph_merge_indom.
     + introv Hbinds. apply* graph_merge_indom.
+    + introv Hbinds. apply* graph_merge_indom.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts* Hbinds'.
+      * forwards* Hbinds'': binds_update_neq_inv Hbinds' C.
+    + applys vwa_preserved_merge Hvwa.
+    + applys* exwa_preserved_merge Hedge HdomV HrootIndom Hexwa.
   - (* StepLock: [lock_read] unifies the "already touched" and "never
        touched" (defaulting to [(ls_free, root_commit)]) cases into one
        constructor. *)
@@ -450,7 +894,7 @@ Proof.
     match goal with H : binds T t (state_running, te_exp e, ?d0, ?h0) |- _ =>
       replace (T[t]) with (state_running, te_exp e, d0, h0) in Hpl by (symmetry; applys* read_of_binds) end.
     inverts Hpl.
-    splits.
+    splits 10.
     + unfolds finite. rew_dom. autos.
     + apply* graph_merge_wf.
     + apply* graph_merge_indom.
@@ -469,6 +913,14 @@ Proof.
         apply* graph_merge_indom.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
         apply* graph_merge_indom.
+    + introv Hbinds. apply* graph_merge_indom.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts* Hbinds'.
+      * forwards* Hbinds'': binds_update_neq_inv Hbinds' C.
+    + applys vwa_preserved_merge Hvwa.
+    + applys* exwa_preserved_merge Hedge HdomV HrootIndom Hexwa.
   - (* StepRelease: the thread already holds the lock, so its commit is
        already known to be in the graph via [HdomL]. *)
     match goal with H : push_lock _ _ _ _ _ _ = (_, _, _) |- _ => rename H into Hpl end.
@@ -478,7 +930,7 @@ Proof.
     match goal with H : binds L l0 (ls_held t, ?c0) |- _ =>
       replace (L[l0]) with (ls_held t, c0) in Hpl by (symmetry; applys* read_of_binds) end.
     inverts Hpl.
-    splits.
+    splits 10.
     + unfolds finite. rew_dom. autos.
     + apply* graph_commit_wf.
     + apply* graph_commit_indom.
@@ -498,6 +950,19 @@ Proof.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
         forwards Hbinds'': binds_update_neq_inv Hbinds' Hne.
         apply* graph_commit_indom.
+    + introv Hbinds. apply* graph_commit_indom.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts Hbinds'. applys indom_empty_inv.
+      * forwards* Hbinds'': binds_update_neq_inv Hbinds' C.
+    + asserts HnoVolInD: (forall x0, x0 \in Volatiles -> x0 \notindom d).
+      { introv Hxvol0. applys Hvd Hxvol0. eassumption. }
+      applys vwa_preserved_commit Hvwa HnoVolInD.
+    + asserts HnoVolInD: (forall x0, x0 \in Volatiles -> x0 \notindom d).
+      { introv Hxvol0. applys Hvd Hxvol0. eassumption. }
+      introv Hxvol Hgw.
+      applys* (>> exwa_preserved_commit Hedge HdomV HrootIndom Hexwa (HnoVolInD x Hxvol) Hxvol Hgw).
 Qed.
 
 (* ===================================================================== *)
@@ -548,17 +1013,18 @@ Proof. introv Hb1 Hb2. exact (@binds_inj lid ll (lock_state * commit) Branching.
    is terminated-or-inert, or some thread can take a step, or the
    configuration is forbidden, or a synchronising thread's merge conflicts. *)
 Lemma progress_aux :
-  forall T G L (l : list tid),
-    ul_progress (T, G, L) ->
-    wf_cfg (T, G, L) ->
+  forall T G L V (l : list tid),
+    ul_progress (T, G, L, V) ->
+    wf_cfg (T, G, L, V) ->
     (forall t, mem t l -> t \indom T ->
-       terminated (T, G, L) t \/ inert (T, G, L) t)
-    \/ (exists cfg', step (T, G, L) cfg')
-    \/ forbidden (T, G, L)
-    \/ conflict_detected (T, G, L).
+       terminated (T, G, L, V) t \/ inert (T, G, L, V) t)
+    \/ (exists cfg', step (T, G, L, V) cfg')
+    \/ forbidden (T, G, L, V)
+    \/ conflict_detected (T, G, L, V).
 Proof.
   introv Hulp Hwfc.
-  lets (Hfin & Hwf & HrootIndom & Hterm & HdomT & HdomL): Hwfc.
+  lets (Hfin & Hwf & HrootIndom & Hterm & HdomT & HdomL & HdomV & Hvd & Hvwa & Hexwa): Hwfc.
+  lets (_ & _ & Hedge): Hwf.
   induction l as [| a l IH].
   - left. introv Hmem. inverts Hmem.
   - destruct IH as [Hall | [Hstep | [Hforb | Hconf]]];
@@ -616,19 +1082,119 @@ Proof.
                  --- right. right. right.
                      exists a e d h K. split; [exact Hbth |].
                      left. exists t r1 empty_diff c0. splits*.
-              ** (* read: local (in [d]) or global ([is_latest_value]),
-                    otherwise forbidden *)
-                 destruct (classic (x \indom d)) as [Hxd | Hxnd].
-                 --- right. left. asserts Hbv: (binds d x (d[x])).
-                     { applys binds_of_indom_read Hxd. reflexivity. }
-                     exists. applys StepReadLocal Hbth Hul Hbv.
-                 --- destruct (classic (exists v, is_latest_value G h x v)) as [(v & Hlv) | Hnlv].
-                     +++ right. left. exists. applys StepReadGlobal Hbth Hul Hxnd Hlv.
-                     +++ right. right. left.
-                         exists a e d h K (eff_read x). splits*.
-                         simpl. rew_logic. splits*.
-              ** (* write *)
-                 right. left. exists. applys StepWrite Hbth Hul.
+              ** (* read: volatile or normal *)
+                 destruct (classic (x \in Volatiles)) as [Hvol | Hnvol].
+                 --- (* volatile read: split on whether the merge is conflict-free *)
+                     destruct (classic (conflict_free_merge d h (vc_read V x) G)) as [Hcfm | Hncfm].
+                     +++ forwards (c'' & Hfresh): exists_commit_fresh Hwf.
+                         asserts (T' & G' & Hpull & Hbinds''):
+                           (exists T' G', pull_volatile a x c'' T G V = (T', G') /\
+                                          binds T' a (state_running, te_exp e, d, c'')).
+                         {
+                           exists (T[a := (state_running, te_exp e, d, c'')])
+                                  (graph_merge G (vc_read V x) h c'').
+                           split.
+                           - unfold pull_volatile, do_merge.
+                             replace (T[a]) with (state_running, te_exp e, d, h).
+                             reflexivity.
+                           - apply binds_update_same.
+                         }
+                         (* split on whether there is a latest value *)
+                         destruct (classic (exists v, is_latest_value G' c'' x v)) as [(v & Hlv)| Hnex].
+                         *** right. left.
+                             exists. applys* StepReadVolatile.
+                         *** right. right. left.
+                             exists a e d h K (eff_read x). splits; auto.
+                             unfolds pull_volatile, do_merge.
+                             replace (T[a]) with (state_running, te_exp e, d, h) in Hpull.
+                             inverts Hpull.
+                             simpl. rew_logic. split; [applys* Hvd|].
+                             (* [contra] gives SOME writer of [x] visible at [h]; by
+                                [Hexwa] (dominance is not enough on its own -- see
+                                [wf_cfg]) [vc_read V x] itself then has a well-defined
+                                latest value, and [is_latest_value_graph_merge_fresh]
+                                (the merge's dominant-parent existence survives the
+                                merge) carries it onto [c'']. This does not need to
+                                match [contra]'s own value [v]: only EXISTENCE at
+                                [c''] is needed to contradict [Hnex]. *)
+                             intros v contra. apply Hnex.
+                             forwards (c & Hwrites & Hdomc & Hanc): is_latest_value_writer_indom contra.
+                             forwards* (v0 & Hval0): Hexwa Hwrites.
+                             asserts Hp1dom: (graph_indom G (vc_read V x)).
+                             { applys vc_read_graph_indom_cfg HdomV HrootIndom. }
+                             asserts Hp2dom: (graph_indom G h). { applys* HdomT. }
+                             exists v0.
+                             applys* is_latest_value_graph_merge_fresh Hedge Hfresh Hp1dom Hp2dom Hval0.
+                     +++ right. right. right.
+                         exists a e d h K. splits~.
+                         right. right. left.
+                         exists x. splits*.
+                 --- (* normal read: local (in [d]) or global ([is_latest_value]),
+                        otherwise forbidden *)
+                   destruct (classic (x \indom d)) as [Hxd | Hxnd].
+                   +++ right. left. asserts Hbv: (binds d x (d[x])).
+                       { applys binds_of_indom_read Hxd. reflexivity. }
+                       exists. applys StepReadLocal Hbth Hul Hnvol Hbv.
+                   +++ destruct (classic (exists v, is_latest_value G h x v)) as [(v & Hlv) | Hnlv].
+                       *** right. left. exists. applys StepReadGlobal Hbth Hul Hnvol Hxnd Hlv.
+                       *** right. right. left.
+                           exists a e d h K (eff_read x). splits*.
+                           simpl. rew_logic. splits*.
+              ** (* write: volatile or normal *)
+                 destruct (classic (x \in Volatiles)) as [Hvol | Hnvol].
+                 --- (* volatile write: split on whether the merge is conflict-free;
+                        no [is_latest_value] obligation here (unlike the read side),
+                        so the conflict-free case is purely mechanical: pull, then
+                        push the folded-in write. *)
+                     destruct (classic (conflict_free_merge d h (vc_read V x) G)) as [Hcfm | Hncfm].
+                     +++ right. left.
+                         forwards (c'' & Hfresh): exists_commit_fresh Hwf.
+                         asserts (T' & G' & Hpull & Hbinds'):
+                           (exists T' G', pull_volatile a x c'' T G V = (T', G') /\
+                                          binds T' a (state_running, te_exp e, d, c'')).
+                         { exists (T[a := (state_running, te_exp e, d, c'')])
+                                  (graph_merge G (vc_read V x) h c'').
+                           split.
+                           - unfold pull_volatile, do_merge.
+                             replace (T[a]) with (state_running, te_exp e, d, h).
+                             reflexivity.
+                           - apply binds_update_same.
+                         }
+                         asserts Hp1dom: (graph_indom G (vc_read V x)).
+                         { destruct (classic (x \indom V)) as [Hindom|Hnotin].
+                           - asserts Heq: (vc_read V x = V[x]).
+                             { transitivity (V[x]); [exact (read_default_indom Hindom) | autos]. }
+                             rewrite Heq.
+                             asserts Hb: (binds V x V[x]). { applys* binds_of_indom_read Hindom. }
+                             applys* HdomV.
+                           - asserts Heq: (vc_read V x = root_commit).
+                             { exact (read_default_notindom Hnotin). }
+                             rewrite Heq. exact HrootIndom. }
+                         asserts Hp2dom: (graph_indom G h). { applys* HdomT. }
+                         forwards Hwf': graph_merge_wf Hwf Hfresh Hp1dom Hp2dom.
+                         forwards (c''' & Hfresh2): exists_commit_fresh Hwf'.
+                         asserts (T'' & G'' & VC' & Hpush & Hbinds''):
+                           (exists T'' G'' VC',
+                              push_volatile a x c'''
+                                (T'[a := (state_running, te_exp e, d[x := v], c'')]) G' V
+                              = (T'', G'', VC') /\
+                              binds T'' a (state_running, te_exp e, empty, c''')).
+                         { exists.
+                           split.
+                           - unfold push_volatile, do_commit.
+                             rewrite read_update_same.
+                             reflexivity.
+                           - apply binds_update_same.
+                         }
+                         exists. applys* StepWriteVolatile.
+                         unfolds pull_volatile, do_merge.
+                         replace (T[a]) with (state_running, te_exp e, d, h) in Hpull.
+                         inverts* Hpull.
+                     +++ right. right. right.
+                         exists a e d h K. splits~.
+                         right. right. right.
+                         exists x v. splits*.
+                 --- right. left. exists. applys StepWrite Hbth Hul Hnvol.
               ** (* lock: not blocked => free (or never-acquired); then
                     split on whether the merge is conflict-free *)
                  rew_logic in Hnbl.
@@ -654,7 +1220,7 @@ Proof.
                      exists. applys (>> StepLock Hbth Hul Hlr Hcfm Hfresh Hpull Hbinds'').
                  --- right. right. right.
                      exists a e d h K. split; [exact Hbth |].
-                     right. exists l0 (snd (lock_read L l0)).
+                     right. left. exists l0 (snd (lock_read L l0)).
                      splits.
                      +++ exact Hul.
                      +++ destruct (lock_read L l0) as [ls hc] eqn:E. simpl in Hnbl. simpl.
@@ -725,25 +1291,25 @@ Proof.
 Qed.
 
 Theorem progress :
-  forall T G L,
-    ul_progress (T, G, L) ->
-    wf_cfg (T, G, L) ->
-    done (T, G, L)
-    \/ deadlocked (T, G, L)
-    \/ (exists cfg', step (T, G, L) cfg')
-    \/ forbidden (T, G, L)
-    \/ conflict_detected (T, G, L).
+  forall T G L V,
+    ul_progress (T, G, L, V) ->
+    wf_cfg (T, G, L, V) ->
+    done (T, G, L, V)
+    \/ deadlocked (T, G, L, V)
+    \/ (exists cfg', step (T, G, L, V) cfg')
+    \/ forbidden (T, G, L, V)
+    \/ conflict_detected (T, G, L, V).
 Proof.
   introv Hulp Hwfc.
   lets (Hfin & _): Hwfc.
   lets (l & Hcov): finite_inv_list_covers Hfin.
-  forwards Hres: (progress_aux T G L l Hulp Hwfc).
+  forwards Hres: (progress_aux T G L V l Hulp Hwfc).
   destruct Hres as [Hall | [Hstep | [Hforb | Hconf]]].
   - (* every thread in [dom T] is terminated or inert (via the cover [l]) *)
     asserts Hdi: (forall t, t \indom T ->
-                            terminated (T, G, L) t \/ inert (T, G, L) t).
+                            terminated (T, G, L, V) t \/ inert (T, G, L, V) t).
     { introv Hin. applys* Hall. }
-    destruct (classic (exists t, t \indom T /\ inert (T, G, L) t)) as [Hi | Hni].
+    destruct (classic (exists t, t \indom T /\ inert (T, G, L, V) t)) as [Hi | Hni].
     + (* some thread is inert: deadlocked *)
       right. left. split*.
     + (* no inert thread: every thread is terminated, i.e. done *)

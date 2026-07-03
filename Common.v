@@ -37,6 +37,15 @@ Definition lid := nat.
 (* variable *)
 Definition var := nat.
 
+(* The (fixed) set of variables treated as volatile. Under sequential
+   consistency ([SharedMemory]) a volatile is indistinguishable from any
+   other variable -- this set only matters to the versioned semantics
+   ([Linear]/[Branching]), where reading/writing one additionally
+   synchronises with the shared commit graph, and to the log's
+   happens-before relation ([Log.hb]), where a volatile write happens-before
+   every later read of it regardless of thread. *)
+Parameter Volatiles : set var.
+
 Inductive ret : Type :=
 | ret_val (v : val)
 | ret_exc (e : exc)

@@ -28,6 +28,20 @@ Proof.
   typeclass.
 Qed.
 
+(* A commit's data pins the value of any variable it writes: two [graph_writes]
+   facts about the SAME commit agree on the value. *)
+Lemma graph_writes_inj :
+  forall G c x v1 v2,
+    graph_writes G c x v1 ->
+    graph_writes G c x v2 ->
+    v1 = v2.
+Proof.
+  introv (d1 & Hb1 & Hbd1) (d2 & Hb2 & Hbd2).
+  forwards ->: graph_binds_inj Hb1 Hb2.
+  applys* binds_inj.
+  typeclass.
+Qed.
+
 Lemma graph_binds_to_indom :
   forall G h d,
     graph_binds G h d ->
@@ -143,7 +157,7 @@ Hint Resolve graph_writes_to_indom : vcm.
 Lemma is_latest_value_writer_indom :
   forall G i v c,
     is_latest_value G c i v ->
-    exists c, graph_writes G c i v /\ graph_indom G c /\ ancestor G c c.
+    exists c', graph_writes G c' i v /\ graph_indom G c' /\ ancestor G c' c.
 Proof.
   introv (c' & Hwrites & Hanc & _). exists c'. splits*.
 Qed.
@@ -796,3 +810,165 @@ Proof.
 Qed.
 
 Hint Resolve max_ancestor_commit : vcm.
+
+(* Inverting an ancestry path that lands exactly on the fresh merge commit [h]:
+   its only incoming edges are [(p2,h)] and [(p1,h)] ([wf_graph]/[commit_fresh]
+   rule out any pre-existing edge into [h]), so any path into [h] other than the
+   trivial [x = h] must pass through [p1] or [p2]. Companion to
+   [ancestor_graph_merge_inv], which instead handles targets *other* than [h]. *)
+Lemma ancestor_graph_merge_into_fresh_inv :
+  forall G p1 p2 h x,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G h ->
+    graph_indom G p1 ->
+    graph_indom G p2 ->
+    ancestor (graph_merge G p1 p2 h) x h ->
+    x = h \/ ancestor G x p1 \/ ancestor G x p2.
+Proof.
+  introv Hedge Hfresh Hp1dom Hp2dom Hanc.
+  inverts Hanc as Hsub Hstep.
+  - left. reflexivity.
+  - right. destruct G as (C & P). unfold graph_merge in Hstep. rew_set in Hstep.
+    asserts Hsink: (forall z, ancestor (C, P) h z -> z = h).
+    { introv Hz. applys commit_fresh_sink Hedge Hfresh Hz. }
+    asserts Hp1neq: (p1 <> h). { intro Heqp. subst p1. applys commit_fresh_not_indom Hfresh Hp1dom. }
+    asserts Hp2neq: (p2 <> h). { intro Heqp. subst p2. applys commit_fresh_not_indom Hfresh Hp2dom. }
+    destruct Hstep as [Heq | [Heq | HstepP]].
+    + inverts Heq. right. applys ancestor_graph_merge_inv Hsink Hp2neq Hsub.
+    + inverts Heq. left. applys ancestor_graph_merge_inv Hsink Hp1neq Hsub.
+    + exfalso. forwards (_ & Hhindom): Hedge HstepP. applys commit_fresh_not_indom Hfresh Hhindom.
+Qed.
+
+(* Merging a fresh commit [h] between [p1] (the current maximal-writer location
+   of [i]) and [p2] cannot introduce or hide a more recent [i]-write, PROVIDED
+   every [i]-writer in [G] is already an ancestor of [p1] -- so [is_latest_value]
+   transfers from [p1] onto [h] itself (not just onto old, off-to-the-side
+   commits, as [is_latest_value_graph_merge_mono] does). *)
+Lemma is_latest_value_graph_merge_fresh :
+  forall G p1 p2 h i v,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G h ->
+    graph_indom G p1 ->
+    graph_indom G p2 ->
+    is_latest_value G p1 i v ->
+    (forall c v', graph_writes G c i v' -> ancestor G c p1) ->
+    is_latest_value (graph_merge G p1 p2 h) h i v.
+Proof.
+  introv Hedge Hfresh Hp1dom Hp2dom Hval Hdom.
+  destruct Hval as (cw & Hgw & Hancw1 & Hmax).
+  asserts Hcwdom: (graph_indom G cw). { applys graph_writes_to_indom Hgw. }
+  asserts Hsink: (forall z, ancestor G h z -> z = h).
+  { introv Hz. applys commit_fresh_sink Hedge Hfresh Hz. }
+  asserts Hcwneq: (cw <> h). { intro Heq. subst cw. applys commit_fresh_not_indom Hfresh Hcwdom. }
+  exists cw. splits.
+  - applys~ graph_writes_graph_merge.
+  - apply ancestor_trans with (c' := p1).
+    + applys~ ancestor_graph_merge.
+    + applys ancestor_graph_merge_edge_r.
+  - introv Hw3 Hanc1 Hanc2.
+    destruct (classic (c'' = h)) as [-> | Hc3neq].
+    { false; applys graph_writes_graph_merge_same_false Hw3. }
+    forwards Hw3G: graph_writes_graph_merge_inv Hc3neq Hw3.
+    forwards Hanc1G: ancestor_graph_merge_inv Hsink Hc3neq Hanc1.
+    forwards Hdisj: ancestor_graph_merge_into_fresh_inv Hedge Hfresh Hp1dom Hp2dom Hanc2.
+    destruct Hdisj as [Heq | [Hancp1 | Hancp2]].
+    + false; applys Hc3neq Heq.
+    + applys Hmax Hw3G Hanc1G Hancp1.
+    + forwards Hancp1': Hdom Hw3G.
+      applys Hmax Hw3G Hanc1G Hancp1'.
+Qed.
+
+(* Forward preservation of [is_latest_value] at an OLD commit [h] across a
+   single [graph_commit] onto a fresh commit [cf], PROVIDED the freshly
+   committed diff [d] does not write [i] (so [cf] cannot become a competing
+   [i]-writer). Since [cf] is fresh, it is a sink in [G] ([commit_fresh_sink]):
+   any new-graph ancestry into (or out of, past) an old commit [<> cf] already
+   existed in [G], so both the witness and maximality transfer unchanged. *)
+Lemma is_latest_value_graph_commit_mono :
+  forall G c cf d h i v,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G cf ->
+    h <> cf ->
+    (forall v', ~ binds d i v') ->
+    is_latest_value G h i v ->
+    is_latest_value (graph_commit G c cf d) h i v.
+Proof.
+  introv Hedge Hfresh Hneq Hnw (cc & Hw & Hanc & Hmax).
+  asserts Hccneq: (cc <> cf).
+  { intro Heq. subst cc. forwards Hdom: graph_writes_to_indom Hw.
+    applys commit_fresh_not_indom Hfresh Hdom. }
+  asserts Hsink: (forall z, ancestor G cf z -> z = cf).
+  { applys commit_fresh_sink Hedge Hfresh. }
+  exists cc. splits.
+  { applys~ graph_writes_graph_commit. }
+  { applys~ ancestor_graph_commit. }
+  { intros cc2 v2 Hw2 Hanc1 Hanc2.
+    asserts Hcc2neq: (cc2 <> cf).
+    { intro Heq. subst cc2.
+      forwards Hbd: graph_writes_graph_commit_same Hw2.
+      applys Hnw Hbd. }
+    forwards Hw2_G: graph_writes_graph_commit_inv Hcc2neq Hw2.
+    forwards Hanc1_G: ancestor_graph_commit_inv Hsink Hcc2neq Hanc1.
+    forwards Hanc2_G: ancestor_graph_commit_inv Hsink Hneq Hanc2.
+    applys Hmax Hw2_G Hanc1_G Hanc2_G. }
+Qed.
+
+(* The [graph_merge] counterpart: a merge commit carries no data at all, so it
+   is unconditionally not an [i]-writer ([graph_writes_graph_merge_same_false]) --
+   no side-condition on a diff is needed. *)
+Lemma is_latest_value_graph_merge_mono :
+  forall G p1 p2 cf h i v,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G cf ->
+    h <> cf ->
+    is_latest_value G h i v ->
+    is_latest_value (graph_merge G p1 p2 cf) h i v.
+Proof.
+  introv Hedge Hfresh Hneq (cc & Hw & Hanc & Hmax).
+  asserts Hccneq: (cc <> cf).
+  { intro Heq. subst cc. forwards Hdom: graph_writes_to_indom Hw.
+    applys commit_fresh_not_indom Hfresh Hdom. }
+  asserts Hsink: (forall z, ancestor G cf z -> z = cf).
+  { applys commit_fresh_sink Hedge Hfresh. }
+  exists cc. splits.
+  { applys~ graph_writes_graph_merge. }
+  { applys~ ancestor_graph_merge. }
+  { intros cc2 v2 Hw2 Hanc1 Hanc2.
+    asserts Hcc2neq: (cc2 <> cf).
+    { intro Heq. subst cc2.
+      forwards: graph_writes_graph_merge_same_false Hw2. false. }
+    forwards Hw2_G: graph_writes_graph_merge_inv Hcc2neq Hw2.
+    forwards Hanc1_G: ancestor_graph_merge_inv Hsink Hcc2neq Hanc1.
+    forwards Hanc2_G: ancestor_graph_merge_inv Hsink Hneq Hanc2.
+    applys Hmax Hw2_G Hanc1_G Hanc2_G. }
+Qed.
+
+(* A freshly committed commit [cf], carrying diff [d] with [binds d i v], is
+   immediately the latest [i]-value: it is a sink in the NEW graph (all of
+   [graph_commit]'s new edges point INTO [cf] -- the only one, [(c, cf)], has
+   [cf] as its TARGET, not its source -- and [cf]'s old edges are none, since
+   it was fresh), so no candidate writer can be both its ancestor and its
+   proper descendant unless it equals [cf] itself. *)
+Lemma is_latest_value_graph_commit_fresh_writer :
+  forall G c cf d i v,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G cf ->
+    graph_indom G c ->
+    binds d i v ->
+    is_latest_value (graph_commit G c cf d) cf i v.
+Proof.
+  introv Hedge Hfresh Hcdom Hbd.
+  exists cf. splits.
+  { exists d. split.
+    { unfold graph_binds, graph_commit. destruct G as (C & P). apply binds_update_same. }
+    { exact Hbd. } }
+  { apply ancestor_refl. }
+  { intros cc2 v2 Hw2 Hanc1 Hanc2.
+    forwards Heqcc: ancestor_no_out_edge Hanc1.
+    { intros y Hey. destruct G as (C & P). unfolds graph_edge, graph_commit.
+      rew_set in Hey.
+      destruct Hey as [Heq | HeP].
+      { inverts Heq. applys commit_fresh_not_indom Hfresh Hcdom. }
+      { forwards (Ha & _): Hedge HeP. applys commit_fresh_not_indom Hfresh Ha. } }
+    exact Heqcc. }
+Qed.

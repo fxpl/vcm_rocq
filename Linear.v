@@ -73,19 +73,49 @@ Inductive step : cfg -> cfg -> Prop :=
 | StepReadLocal : forall T G g L t e d c K x v,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
+    x \notin Volatiles ->
     binds d x v ->
     step (T, G, g, L) (T[t := (state_running, K (ret_val v), d, c)], G, g, L)
 | StepReadGlobal : forall T G g L t e d c K x v,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
+    x \notin Volatiles ->
     x \notindom d ->
     (* a thread reads the latest value visible at its own commit *)
     is_latest_value G c x v ->
     step (T, G, g, L) (T[t := (state_running, K (ret_val v), d, c)], G, g, L)
+| StepReadVolatile : forall T G g L t e d c K x v,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_read x) ->
+    x \in Volatiles ->
+    (* reading a volatile is a *pull*: check conflict-freedom and fast-forward
+       to the current global head [g] (a volatile is never left pending in
+       [d] -- every write to one is immediately pushed, see
+       [StepWriteVolatile] -- so there is no local case to consider), then
+       read the latest value visible there. *)
+    lin_conflict_free d c g G ->
+    is_latest_value G g x v ->
+    step (T, G, g, L) (T[t := (state_running, K (ret_val v), d, g)], G, g, L)
 | StepWrite : forall T G g L t e d c K x v,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_write x v) ->
+    x \notin Volatiles ->
     step (T, G, g, L) (T[t := (state_running, K void, d[x := v], c)], G, g, L)
+| StepWriteVolatile : forall T T' G G' g g' L t e d c K x v,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_write x v) ->
+    x \in Volatiles ->
+    (* writing a volatile is a *pull, then push*: the write is folded into
+       the diff, checked for conflict-freedom against the current global
+       head [g], then immediately committed onto it (flushing the whole
+       diff, exactly like [StepEnd]/[StepRelease] already do), producing a
+       fresh commit [g'] that becomes both the actor's commit and the new
+       global head. *)
+    (* TODO: Do NOT include x in delta here *)
+    lin_conflict_free (d[x := v]) c g G ->
+    commit_fresh G g' ->
+    global_commit t g g' (T[t := (state_running, te_exp e, d[x := v], c)]) G = (T', G') ->
+    step (T, G, g, L) (T'[t := (state_running, K void, empty, g')], G', g', L)
 | StepSpawn : forall T T' G G' g g' L t (t' : tid) e d c K e',
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_spawn e') ->
