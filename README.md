@@ -4,7 +4,7 @@ This repository contains the Rocq mechanisation for the paper "Synchronisation I
 
 ## Building
 
-This project can be built by running `rocq makefile -f _CoqProject -o Makefile´ followed by `make`.
+This project can be built by running `rocq makefile -f _CoqProject -o Makefile` followed by `make`.
 
 It builds with Rocq 9.1.1 and depends on [TLC](https://github.com/charguer/tlc).
 
