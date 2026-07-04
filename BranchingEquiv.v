@@ -283,7 +283,7 @@ Lemma matching_locks_describes :
     end.
 Proof.
   introv HdescSh HdescB.
-  destruct cfgSh as ((TSh & HSh) & LSh). destruct cfgB as (((TB & G) & LB) & VC).
+  destruct cfgSh as ((TSh & HSh) & LSh). destruct cfgB as (((TB & G) & LB) & VB).
   destruct HdescSh as (_ & _ & _ & _ & HShlocked & HShfree & _).
   destruct HdescB as (_ & _ & _ & _ & HBlocked & HBfree & _).
   intros l ls. destruct ls as [ | t].
@@ -316,7 +316,7 @@ Theorem branching_complete :
       end.
 Proof.
   introv Hwf HdescSh HdescB Hthr Hcf Hstep.
-  destruct cfgB as [[(T & G) L] VC].
+  destruct cfgB as [[(T & G) L] V].
   forwards HwfB: describes_wf_cfg HdescB.
   destruct HwfB as (HwfG & HwfRoot & _ & Hlockcommits & _).
   forwards Hlck: matching_locks_describes HdescSh HdescB.
@@ -342,7 +342,7 @@ Proof.
     destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
     apply Hwrite in H6 as (t' & log'0 & Hfilter).
     destruct HdescB as (_ & _ & _ & Hrun & _ & _ &
-      (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvol & HdomD & HdomTC & HdomLC & HdomVVC)).
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvol & HdomD & HdomTC & HdomLC & HdomVC)).
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
@@ -353,12 +353,12 @@ Proof.
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
-      asserts HVCeq: (vc_read VC x = vc_read VVC x). { applys vc_read_VC_VVC_eq Hvol HdomVVC. }
-      asserts Hmerge: (conflict_free_merge (D[t]) (TC[t]) (vc_read VC x) G).
+      asserts HVCeq: (vc_read V x = vc_read VC x). { applys vc_read_V_VC_eq Hvol HdomVC. }
+      asserts Hmerge: (conflict_free_merge (D[t]) (TC[t]) (vc_read V x) G).
       { rewrite HVCeq. applys (>> conflict_free_merge_holds Hwf Hcflog Hplay Hdt HtTC Hcdom). }
       forwards (c'' & Hfresh): exists_commit_fresh HwfG.
-      asserts Hpull: (pull_volatile t x c'' T G VC = (T[t := (state_running, te_exp e, D[t], c'')],
-                                                       graph_merge G (vc_read VC x) (TC[t]) c'')).
+      asserts Hpull: (pull_volatile t x c'' T G V = (T[t := (state_running, te_exp e, D[t], c'')],
+                                                       graph_merge G (vc_read V x) (TC[t]) c'')).
       { unfolds pull_volatile, do_merge.
         forwards Hread: read_of_binds Hbinds.
         replace T[t] with (state_running, te_exp e, D[t], TC[t]).
@@ -366,27 +366,27 @@ Proof.
       asserts Hbinds'': (binds (T[t := (state_running, te_exp e, D[t], c'')]) t
                             (state_running, te_exp e, D[t], c'')).
       { apply binds_update_same. }
-      asserts Hcneq0: (vc_read VVC x <> c'').
+      asserts Hcneq0: (vc_read VC x <> c'').
       { intro Heq. rewrite Heq in Hcdom. applys commit_fresh_not_indom Hfresh Hcdom. }
       (* OPEN DESIGN QUESTION (see final report): after the pull, the merge's
          OWN fresh commit [c''] must be shown [is_latest_value G' c'' x v] for
          the SharedMemory value [v] (from [Hwrite]/[Hfilter]).
-         [vc_read_is_latest_value] gives [is_latest_value G (vc_read VVC x) x v0]
+         [vc_read_is_latest_value] gives [is_latest_value G (vc_read VC x) x v0]
          BEFORE the pull, at the volatile's OWN stored commit -- but
          [is_latest_value_graph_merge_mono] only forward-preserves
          [is_latest_value] at an OLD, UNRELATED commit; it does not apply to the
          merge's own fresh node [c''] (whose value must instead be inherited
-         from whichever of its two parents -- [vc_read VVC x] or [TC[t]] -- is
+         from whichever of its two parents -- [vc_read VC x] or [TC[t]] -- is
          the maximal writer). This needs a new lemma of the shape "the merge of
          two conflict-free-merge-related parents' [is_latest_value] transfers to
          the fresh child", relying on [TC[t]]'s volatile writes (if any) always
-         being dominated by [vc_read VVC x] (every prior pull already merged it
+         being dominated by [vc_read VC x] (every prior pull already merged it
          in). Not yet built -- admitted here pending that lemma. *)
       asserts Hexfilter: (exists tw log', LibList.filter (fun e => writes_variable x e) log = log' & event_write tw x v).
       { exists t' log'0. exact Hfilter. }
       forwards Hlv0: (>> is_latest_value_after_volatile_pull Hwf Hcflog Hplay Hdt HtTC
         Hfresh Hcneq0 Hxvol Hexfilter).
-      asserts Hlv: (is_latest_value (graph_merge G (vc_read VC x) (TC[t]) c'') c'' x v).
+      asserts Hlv: (is_latest_value (graph_merge G (vc_read V x) (TC[t]) c'') c'' x v).
       { rewrite HVCeq. exact Hlv0. }
       exists. split;
         [ applys (>> LoggingBranching.StepReadVolatile Hbinds H5 Hxvol Hmerge Hfresh Hpull Hbinds'' Hlv)
@@ -408,7 +408,7 @@ Proof.
         exists. split; [ applys LoggingBranching.StepReadGlobal Hbinds; [ eassumption | exact Hnv | exact Hnin | exact Hlv ] | simpls* ]. }
   + (* StepWrite *)
     destruct HdescB as (_ & _ & _ & _ & _ & _ &
-      (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvol & HdomD & HdomTC & HdomLC & HdomVVC)).
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvol & HdomD & HdomTC & HdomLC & HdomVC)).
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
@@ -423,12 +423,12 @@ Proof.
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
-      asserts HVCeq: (vc_read VC x = vc_read VVC x). { applys vc_read_VC_VVC_eq Hvol HdomVVC. }
-      asserts Hmerge: (conflict_free_merge (D[t]) (TC[t]) (vc_read VC x) G).
+      asserts HVCeq: (vc_read V x = vc_read VC x). { applys vc_read_V_VC_eq Hvol HdomVC. }
+      asserts Hmerge: (conflict_free_merge (D[t]) (TC[t]) (vc_read V x) G).
       { rewrite HVCeq. applys (>> conflict_free_merge_holds Hwf Hcflog Hplay Hdt HtTC Hcdom). }
       forwards (c' & Hfresh1): exists_commit_fresh HwfG.
-      asserts Hpull: (pull_volatile t x c' T G VC = (T[t := (state_running, te_exp e, D[t], c')],
-                                                       graph_merge G (vc_read VC x) (TC[t]) c')).
+      asserts Hpull: (pull_volatile t x c' T G V = (T[t := (state_running, te_exp e, D[t], c')],
+                                                       graph_merge G (vc_read V x) (TC[t]) c')).
       { unfolds pull_volatile, do_merge.
         forwards Hread: read_of_binds Hbinds.
         replace T[t] with (state_running, te_exp e, D[t], TC[t]).
@@ -439,18 +439,18 @@ Proof.
       forwards Hpgwf: play_log_graph_wf Hplay.
       destruct Hpgwf as (_ & HTCindomAll & _ & _ & _).
       asserts HTCindom: (graph_indom G (TC[t])). { applys HTCindomAll HtTC. }
-      asserts HVCindomG: (graph_indom G (vc_read VC x)). { rewrite HVCeq. exact Hcdom. }
-      asserts HwfG': (wf_graph (graph_merge G (vc_read VC x) (TC[t]) c')).
+      asserts HVCindomG: (graph_indom G (vc_read V x)). { rewrite HVCeq. exact Hcdom. }
+      asserts HwfG': (wf_graph (graph_merge G (vc_read V x) (TC[t]) c')).
       { applys graph_merge_wf HwfG Hfresh1 HVCindomG HTCindom. }
       forwards (c'' & Hfresh2): exists_commit_fresh HwfG'.
       asserts Hpush:
         (push_volatile t x c''
            (T[t := (state_running, te_exp e, D[t], c')][t := (state_running, te_exp e, D[t][x := v], c')])
-           (graph_merge G (vc_read VC x) (TC[t]) c') VC
+           (graph_merge G (vc_read V x) (TC[t]) c') V
          = (T[t := (state_running, te_exp e, D[t], c')][t := (state_running, te_exp e, D[t][x := v], c')]
               [t := (state_running, te_exp e, empty, c'')],
-            graph_commit (graph_merge G (vc_read VC x) (TC[t]) c') c' c'' (D[t][x := v]),
-            VC[x := c''])).
+            graph_commit (graph_merge G (vc_read V x) (TC[t]) c') c' c'' (D[t][x := v]),
+            V[x := c''])).
       { unfold push_volatile, do_commit. rewrite read_update_same. reflexivity. }
       exists. splits;
         [ applys (>> LoggingBranching.StepWriteVolatile Hbinds H5 Hxvol Hmerge Hfresh1 Hpull Hbinds' Hfresh2 Hpush)
@@ -506,7 +506,7 @@ Proof.
     asserts Hmerge: (conflict_free_merge d' c' c G).
     {
       destruct HdescB as (_ & _ & _ & _ & _ & _ &
-        (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
+        (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds').
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -546,7 +546,7 @@ Proof.
     asserts Hmerge: (conflict_free_merge d c c' G).
     {
       destruct HdescB as (_ & _ & _ & _ & _ & _ &
-        (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
+        (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -617,7 +617,7 @@ Theorem branching_sound :
 Proof.
   introv Hwf HdescSh HdescB Hthr Hcf Hstep.
   destruct cfgSh as ((Tsh & Hp) & Lsh).
-  destruct cfgB as [[(T & G) L] VC].
+  destruct cfgB as [[(T & G) L] V].
   forwards Hlck: matching_locks_describes HdescSh HdescB.
   forwards HwfB: describes_wf_cfg HdescB.
   destruct HwfB as (HwfG & HwfRoot & _ & Hlockcommits & _).
@@ -639,7 +639,7 @@ Proof.
     exists. split.
     { constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & Hstart & _ & _ & (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
+      destruct HdescB as (_ & _ & _ & Hstart & _ & _ & (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       apply Hwrite.
@@ -653,7 +653,7 @@ Proof.
     {
       constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & Hrun & _ & _ & (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
+      destruct HdescB as (_ & _ & _ & Hrun & _ & _ & (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       forwards* Heq: binds_inj Hbinds'.
@@ -680,7 +680,7 @@ Proof.
        which is exactly what [Hwrite] needs. *)
     destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
     destruct HdescB as (_ & _ & _ & Hrun & _ & _ &
-      (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvol & HdomD & HdomTC & HdomLC & HdomVVC)).
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvol & HdomD & HdomTC & HdomLC & HdomVC)).
     forwards~ (ts & e' & Hbinds'): Hdelta t.
     asserts* ->: (d = D[t]).
     forwards* Heq: binds_inj Hbinds'.
@@ -689,14 +689,14 @@ Proof.
     match goal with Hxvol0 : x \in Volatiles |- _ => rename Hxvol0 into Hxvol end.
     match goal with Hfr0 : commit_fresh G c'' |- _ => rename Hfr0 into Hfresh end.
     match goal with Hlv0 : is_latest_value G' c'' x v |- _ => rename Hlv0 into Hlv end.
-    match goal with Hp0 : pull_volatile t x c'' T G VC = (T', G') |- _ => rename Hp0 into Hpull end.
+    match goal with Hp0 : pull_volatile t x c'' T G V = (T', G') |- _ => rename Hp0 into Hpull end.
     unfold pull_volatile, do_merge in Hpull.
     rewrite (read_of_binds Hbinds') in Hpull. cbn in Hpull. inverts Hpull.
     asserts* Hdt: (t \indom D).
     asserts* HtTC: (t \indom TC).
-    asserts Hcdom: (graph_indom G (vc_read VVC x)). { applys vc_read_graph_indom Hplay. }
-    asserts HVCeq: (vc_read VC x = vc_read VVC x). { applys vc_read_VC_VVC_eq Hvol HdomVVC. }
-    asserts Hcneq: (vc_read VVC x <> c'').
+    asserts Hcdom: (graph_indom G (vc_read VC x)). { applys vc_read_graph_indom Hplay. }
+    asserts HVCeq: (vc_read V x = vc_read VC x). { applys vc_read_V_VC_eq Hvol HdomVC. }
+    asserts Hcneq: (vc_read VC x <> c'').
     { intro Heqc. rewrite Heqc in Hcdom. applys commit_fresh_not_indom Hfresh Hcdom. }
     rewrite HVCeq in Hlv.
     forwards Hcf': conflict_free_last_inv Hcf.
@@ -714,8 +714,8 @@ Proof.
        collapse, via repeated [update_update] (every update targets the same
        key [t]), onto a single update matching the SharedMemory side. *)
     match goal with Hb0 : binds T t (state_running, te_exp e, d, c) |- _ => rename Hb0 into Hbd0 end.
-    match goal with Hp0 : pull_volatile t x c' T G VC = (T', G') |- _ => rename Hp0 into Hpull end.
-    match goal with Hp0 : push_volatile t x c'' ?TT G' VC = (T'', G'', VC') |- _ => rename Hp0 into Hpush end.
+    match goal with Hp0 : pull_volatile t x c' T G V = (T', G') |- _ => rename Hp0 into Hpull end.
+    match goal with Hp0 : push_volatile t x c'' ?TT G' V = (T'', G'', V') |- _ => rename Hp0 into Hpush end.
     unfold pull_volatile, do_merge in Hpull.
     rewrite (read_of_binds Hbd0) in Hpull. cbn in Hpull. inverts Hpull.
     unfold push_volatile, do_commit in Hpush.

@@ -630,8 +630,7 @@ Theorem step_preserves_no_thin_air :
 Proof.
   introv Hwf Hdesc Hstep Hnta.
   inverts Hstep;
-    try (applys no_thin_air_snoc_nonread Hnta; intros; discriminate);
-    rename VC into V. (* TODO: remove once VC is called V *)
+    try (applys no_thin_air_snoc_nonread Hnta; intros; discriminate).
   - (* StepReadLocal: source is [t]'s own last uncommitted write [D[t][x]]. *)
     match goal with
     | Hb : binds _ _ (state_running, te_exp _, ?dd, _), Hd : binds ?dd _ _ |- _ =>
@@ -859,10 +858,10 @@ Proof.
     asserts HbTCc: (binds TC t (TC[t])).
     { applys binds_of_indom_read (HdomTC t HtinT); (reflexivity || typeclass). }
     (* [V] (the config's own volatile map) and [VC] (the replay's bookkeeping
-       map) agree on [vc_read] ([vc_read_VC_VVC_eq]), so the fresh commit
+       map) agree on [vc_read] ([vc_read_V_VC_eq]), so the fresh commit
        [G'] built by [pull_volatile] (using [V]) matches [PlayReadVolatile]'s
        own merge (using [VC]). *)
-    asserts HVCeq: (Branching.vc_read V x = vc_read VC x). { applys vc_read_VC_VVC_eq Hvol HdomV. }
+    asserts HVCeq: (Branching.vc_read V x = vc_read VC x). { applys vc_read_V_VC_eq Hvol HdomV. }
     asserts HG'eq: (G' = graph_merge G (vc_read VC x) (TC[t]) c'').
     { unfold Branching.pull_volatile, Branching.do_merge in H8.
       rewrite (read_of_binds HbT0) in H8. cbn in H8. inverts H8.

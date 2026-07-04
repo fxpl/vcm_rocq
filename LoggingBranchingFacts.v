@@ -201,7 +201,7 @@ Theorem step_preserves_wf_cfg :
     step (cfg, log) (cfg', log') ->
     wf_cfg cfg'.
 Proof.
-  destruct cfg as (((T & G) & L) & VC).
+  destruct cfg as (((T & G) & L) & V).
   introv (Hwf & HrootIndom & HdomT & HdomL & HdomVC) Hstep.
   inverts Hstep.
   - splits~.
@@ -242,7 +242,7 @@ Proof.
   - unfolds pull_volatile, do_merge.
     replace (T[t]) with (state_running, te_exp e, d, c) in H11 by forwards*: read_of_binds T t.
     inverts H11.
-    asserts Hvcindom: (graph_indom G (vc_read VC x)).
+    asserts Hvcindom: (graph_indom G (vc_read V x)).
     { unfold vc_read, read_default. case_if as Hcase.
       - applys HdomVC. applys* binds_of_indom_read.
       - auto_star. }
@@ -270,7 +270,7 @@ Proof.
     inverts H11.
     unfolds push_volatile, do_commit.
     rewrite~ read_update_same in H14.
-    asserts Hvcindom: (graph_indom G (vc_read VC x)).
+    asserts Hvcindom: (graph_indom G (vc_read V x)).
     { unfold vc_read, read_default. case_if as Hcase.
       - applys HdomVC. applys* binds_of_indom_read.
       - auto_star. }
@@ -735,9 +735,9 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
-      exists D TC LC VVC. eexists. splits*.
-      * (* play_log (log & event_start t) ... = (D, TC, G, LC, VVC): PlayStart is a no-op *)
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVCC).
+      exists D TC LC VC. eexists. splits*.
+      * (* play_log (log & event_start t) ... = (D, TC, G, LC, VC): PlayStart is a no-op *)
         applys PlaySnoc Hplay. apply PlayStart.
       * (* Thread deltas: staging areas and commits unchanged by StepStart *)
         intros t0 Hin.
@@ -819,13 +819,13 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVCC).
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (ts_old & e_old & Hbinds_delta): Hdelta t Htin.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      exists (D[t := empty]) (TC[t := c']) LC VVC. eexists. splits*.
+      exists (D[t := empty]) (TC[t := c']) LC VC. eexists. splits*.
       * applys PlaySnoc Hplay.
         apply (PlayEnd _ _ _ _ _ _ c c' d); auto.
         -- apply HdomTC in Htin. erewrite* binds_eq_indom_read.
@@ -866,8 +866,8 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
-      exists D TC LC VVC. eexists. splits*.
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVCC).
+      exists D TC LC VC. eexists. splits*.
       * applys PlaySnoc Hplay. applys* PlayRead.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
@@ -903,8 +903,8 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
-      exists D TC LC VVC. eexists. splits*.
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVCC).
+      exists D TC LC VC. eexists. splits*.
       * applys PlaySnoc Hplay. applys* PlayRead.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
@@ -941,20 +941,20 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVCC).
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (ts_old & e_old & Hbinds_delta): Hdelta t Htin.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      asserts Hvceq: (vc_read VC x = vc_read VVC x).
+      asserts Hvceq: (vc_read V x = vc_read VC x).
       { unfold vc_read at 1. unfold read_default at 1.
         case_if as Hxin.
         - forwards*: read_of_binds (Hvolbind x Hxin).
         - unfold vc_read, read_default. case_if as Hxin'.
-          + false Hxin. apply* HdomVVC.
+          + false Hxin. apply* HdomVCC.
           + reflexivity. }
-      exists D (TC[t := c'']) LC VVC. eexists. splits*.
+      exists D (TC[t := c'']) LC VC. eexists. splits*.
       * applys PlaySnoc Hplay.
         rewrite Hvceq.
         apply (PlayReadVolatile _ _ _ _ _ t x v c c''); auto.
@@ -992,13 +992,13 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVC).
       asserts Htin: (t \indom T). { apply* indom_of_binds.  }
       forwards (ts_old & e_old & Hbinds_delta): Hdelta t Htin.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      exists (D[t := d[x := v]]) TC LC VVC. eexists. splits*.
+      exists (D[t := d[x := v]]) TC LC VC. eexists. splits*.
       * applys PlaySnoc Hplay.
         apply (PlayWrite _ _ _ _ _ _ _ _ d); auto.
         asserts* Hmem: (t \indom T).
@@ -1039,21 +1039,21 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVC).
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (ts_old & e_old & Hbinds_delta): Hdelta t Htin.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      asserts Hvceq: (vc_read VC x = vc_read VVC x).
+      asserts Hvceq: (vc_read V x = vc_read VC x).
       { unfold vc_read at 1. unfold read_default at 1.
         case_if as Hxin.
         - forwards*: read_of_binds (Hvolbind x Hxin).
         - unfold vc_read, read_default. case_if as Hxin'.
-          + false Hxin. apply* HdomVVC.
+          + false Hxin. apply* HdomVC.
           + reflexivity. }
       rewrite Hvceq in H10.
-      exists (D[t := empty]) (TC[t := c'']) LC (VVC[x := c'']). eexists. splits*.
+      exists (D[t := empty]) (TC[t := c'']) LC (VC[x := c'']). eexists. splits*.
       * applys PlaySnoc Hplay.
         rewrite Hvceq.
         apply (PlayWriteVolatile _ _ _ _ _ t x v d c c' c''); auto.
@@ -1082,13 +1082,13 @@ Proof.
            apply~ binds_update_neq. apply~ binds_update_neq.
       * intros y Hin.
         destruct (classic (y = x)) as [->|Hneq_y].
-        -- asserts Heqv: (vc_read (VVC[x := c'']) x = c'').
+        -- asserts Heqv: (vc_read (VC[x := c'']) x = c'').
            { unfold vc_read. apply read_default_update_same. }
            rewrite Heqv. apply binds_update_same.
         -- forwards Hin1: indom_update_inv Hin. typeclass.
            destruct Hin1 as [->|Hin1]. { congruence. }
            forwards~ Hb: Hvolbind y Hin1.
-           asserts Heqv: (vc_read (VVC[x := c'']) y = vc_read VVC y).
+           asserts Heqv: (vc_read (VC[x := c'']) y = vc_read VC y).
            { unfold vc_read. apply read_default_update_neq. congruence. }
            rewrite Heqv. apply~ binds_update_neq.
       * introv Hmem.
@@ -1269,13 +1269,13 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVC).
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (ts_old & e_old & Hbinds_delta): Hdelta t Htin.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      exists (D[t := empty][t' := empty]) (TC[t := c'][t' := c']) LC VVC. eexists. splits*.
+      exists (D[t := empty][t' := empty]) (TC[t := c'][t' := c']) LC VC. eexists. splits*.
       * applys PlaySnoc Hplay.
         apply (PlaySpawn _ _ _ _ _ _ _ c c' d); auto.
         -- apply HdomTC in Htin. erewrite* binds_eq_indom_read.
@@ -1344,14 +1344,14 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVC).
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       asserts Htin': (t' \indom T). { apply* indom_of_binds. }
       forwards (ts_old & e_old & Hbinds_delta): Hdelta t Htin.
       forwards (ts_old' & e_old' & Hbinds_delta'): Hdelta t' Htin'.
       forwards* Heq: binds_inj H3 Hbinds_delta.
       forwards* Heq': binds_inj H5 Hbinds_delta'.
-      exists D (TC[t := c'']) LC VVC. eexists. splits*.
+      exists D (TC[t := c'']) LC VC. eexists. splits*.
       * applys PlaySnoc Hplay.
         apply (PlayJoin _ _ _ _ _ _ _ c c' c''); auto.
         -- inverts Heq.
@@ -1436,7 +1436,7 @@ Proof.
            forwards (t0 & log' & Hfilt): (proj2 (Hdunlock l0)). { exists h2. exact Hbinds'. }
            exists t0 log'. exact Hfilt.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVC).
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (ts_old & e_old & Hbinds_delta): Hdelta Htin.
       forwards~ Heq: binds_inj Hbinds_delta H3.
@@ -1453,7 +1453,7 @@ Proof.
           { intro Hin. apply Hnotin. apply* HdomLC. }
           unfold lc_read. apply read_default_notindom. exact Hlcnotin. }
       rewrite~ update_update.
-      exists D (TC[t := c'']) LC VVC. eexists. splits*.
+      exists D (TC[t := c'']) LC VC. eexists. splits*.
       * applys PlaySnoc Hplay.
         rewrite <- HLCeq.
         apply (PlayLock _ _ _ _ _ _ _ c c''); auto.
@@ -1536,7 +1536,7 @@ Proof.
            forwards (t0 & log' & Hfilt): (proj2 (Hdunlock l0)). { exists h2. exact Hbinds1. }
            exists t0 log'. exact Hfilt.
     + (* 7. Replay *)
-      destruct Hdplay as (D & TC & LC & VVC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVVC).
+      destruct Hdplay as (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvolbind & HdomD & HdomTC & HdomLC & HdomVC).
       apply binds_update_same_inv in H8. inverts H8.
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (ts_old & e_old & Hbinds_delta): Hdelta Htin.
@@ -1544,7 +1544,7 @@ Proof.
       asserts Hlin: (l \indom L). { apply* indom_of_binds. }
       forwards (ls & Hbinds_l): Hlocks Hlin.
       forwards~ Heq': binds_inj H5 Hbinds_l.
-      exists (D[t := empty]) (TC[t := c'']) (LC[l := c'']) VVC. eexists. splits*.
+      exists (D[t := empty]) (TC[t := c'']) (LC[l := c'']) VC. eexists. splits*.
       * applys PlaySnoc Hplay.
         apply (PlayUnlock _ _ _ _ _ _ _ c c'' d); auto.
         -- inverts Heq.

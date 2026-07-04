@@ -33,8 +33,8 @@ Definition lock_read (L : locks) (l : lid) : (lock_state * commit) :=
   read_default inhab_lock (ls_free, root_commit) L l.
 
 (* A never-touched volatile defaults to [root_commit], mirroring [lock_read]. *)
-Definition vc_read (VC : volatiles) (x : var) : commit :=
-  read_default _ root_commit VC x.
+Definition vc_read (V : volatiles) (x : var) : commit :=
+  read_default _ root_commit V x.
 
 (* TODO: change h_new to c_new *)
 Definition do_commit (t : tid) (h_new : commit)
@@ -80,77 +80,77 @@ Definition pull_lock (t : tid) (l : lid) (h_new : commit)
 (* Reading a volatile is a *pull*: merge its stored commit into the thread's
    own branch, exactly like [pull_lock]. *)
 Definition pull_volatile (t : tid) (x : var) (h_new : commit)
-    (T : threads) (G : graph) (VC : volatiles)
+    (T : threads) (G : graph) (V : volatiles)
     : threads * graph :=
-  let h := vc_read VC x in
+  let h := vc_read V x in
   do_merge t h h_new T G.
 
 (* Writing a volatile *pushes*: commit the thread's diff (folding in the new
    write) and record the fresh commit as [x]'s new stored commit, exactly
    like [push_lock]. *)
 Definition push_volatile (t : tid) (x : var) (h_new : commit)
-    (T : threads) (G : graph) (VC : volatiles)
+    (T : threads) (G : graph) (V : volatiles)
     : threads * graph * volatiles :=
   let '(T', G') := do_commit t h_new T G in
-  (T', G', VC[x := h_new]).
+  (T', G', V[x := h_new]).
 
 Inductive step : cfg -> cfg -> Prop :=
-| StepStart : forall T G L VC t e d h,
+| StepStart : forall T G L V t e d h,
     binds T t (state_new, e, d, h) ->
-    step (T, G, L, VC) (T[t := (state_running, e, d, h)], G, L, VC)
-| StepEnd : forall T T' G G' L VC t r d h h',
+    step (T, G, L, V) (T[t := (state_running, e, d, h)], G, L, V)
+| StepEnd : forall T T' G G' L V t r d h h',
     binds T t (state_running, te_ret r, d, h) ->
     commit_fresh G h' ->
     do_commit t h' T G = (T', G') ->
-    step (T, G, L, VC) (T'[t := (state_terminated, te_ret r, empty, h')], G', L, VC)
-| StepReadLocal : forall T G L VC t e d h K x v,
+    step (T, G, L, V) (T'[t := (state_terminated, te_ret r, empty, h')], G', L, V)
+| StepReadLocal : forall T G L V t e d h K x v,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_read x) ->
     x \notin Volatiles ->
     binds d x v ->
-    step (T, G, L, VC) (T[t := (state_running, K (ret_val v), d, h)], G, L, VC)
-| StepReadGlobal : forall T G L VC t e d h K x v,
+    step (T, G, L, V) (T[t := (state_running, K (ret_val v), d, h)], G, L, V)
+| StepReadGlobal : forall T G L V t e d h K x v,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_read x) ->
     x \notin Volatiles ->
     x \notindom d ->
     is_latest_value G h x v ->
-    step (T, G, L, VC) (T[t := (state_running, K (ret_val v), d, h)], G, L, VC)
-| StepReadVolatile : forall T T' G G' L VC t e d h h'' K x v,
+    step (T, G, L, V) (T[t := (state_running, K (ret_val v), d, h)], G, L, V)
+| StepReadVolatile : forall T T' G G' L V t e d h h'' K x v,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_read x) ->
     x \in Volatiles ->
-    conflict_free_merge d h (vc_read VC x) G ->
+    conflict_free_merge d h (vc_read V x) G ->
     commit_fresh G h'' ->
-    pull_volatile t x h'' T G VC = (T', G') ->
+    pull_volatile t x h'' T G V = (T', G') ->
     binds T' t (state_running, te_exp e, d, h'') ->
     (* the value visible after pulling in [x]'s stored commit *)
     is_latest_value G' h'' x v ->
-    step (T, G, L, VC) (T'[t := (state_running, K (ret_val v), d, h'')], G', L, VC)
-| StepWrite : forall T G L VC t e d h K x v,
+    step (T, G, L, V) (T'[t := (state_running, K (ret_val v), d, h'')], G', L, V)
+| StepWrite : forall T G L V t e d h K x v,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_write x v) ->
     x \notin Volatiles ->
-    step (T, G, L, VC) (T[t := (state_running, K void, d[x := v], h)], G, L, VC)
-| StepWriteVolatile : forall T T' T'' G G' G'' L VC VC' t e d h h' h'' K x v,
+    step (T, G, L, V) (T[t := (state_running, K void, d[x := v], h)], G, L, V)
+| StepWriteVolatile : forall T T' T'' G G' G'' L V V' t e d h h' h'' K x v,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_write x v) ->
     x \in Volatiles ->
-    conflict_free_merge d h (vc_read VC x) G ->
+    conflict_free_merge d h (vc_read V x) G ->
     commit_fresh G h' ->
-    pull_volatile t x h' T G VC = (T', G') ->
+    pull_volatile t x h' T G V = (T', G') ->
     binds T' t (state_running, te_exp e, d, h') ->
     commit_fresh G' h'' ->
-    push_volatile t x h'' (T'[t := (state_running, te_exp e, d[x := v], h')]) G' VC = (T'', G'', VC') ->
-    step (T, G, L, VC) (T''[t := (state_running, K void, empty, h'')], G'', L, VC')
- | StepSpawn : forall T T' G G' L VC t (t' : tid) e d h h' K e',
+    push_volatile t x h'' (T'[t := (state_running, te_exp e, d[x := v], h')]) G' V = (T'', G'', V') ->
+    step (T, G, L, V) (T''[t := (state_running, K void, empty, h'')], G'', L, V')
+ | StepSpawn : forall T T' G G' L V t (t' : tid) e d h h' K e',
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_spawn e') ->
     t' \notindom T ->
     commit_fresh G h' ->
     push_thread t t' h' (T[t := (state_running, K t', d, h)][t' := (state_new, te_exp e', empty, 0)]) G = (T', G') ->
-    step (T, G, L, VC) (T', G', L, VC)
-| StepJoin : forall T T' G G' L VC t t' e d h h' h'' K r,
+    step (T, G, L, V) (T', G', L, V)
+| StepJoin : forall T T' G G' L V t t' e d h h' h'' K r,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_join t') ->
     binds T t' (state_terminated, te_ret r, empty, h') ->
@@ -158,8 +158,8 @@ Inductive step : cfg -> cfg -> Prop :=
     commit_fresh G h'' ->
     pull_thread t t' h'' T G = (T', G') ->
     binds T' t (state_running, te_exp e, d, h'') ->
-    step (T, G, L, VC) (T'[t := (state_running, K r, d, h'')], G', L, VC)
-| StepLock : forall T T' G G' L VC t e d h h' h'' K l,
+    step (T, G, L, V) (T'[t := (state_running, K r, d, h'')], G', L, V)
+| StepLock : forall T T' G G' L V t e d h h' h'' K l,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_lock l) ->
     (* Locks default to [(ls_free, root_commit)] ([lock_read] is a total
@@ -171,13 +171,13 @@ Inductive step : cfg -> cfg -> Prop :=
     commit_fresh G h'' ->
     pull_lock t l h'' T G L = (T', G') ->
     binds T' t (state_running, te_exp e, d, h'') ->
-    step (T, G, L, VC) (T'[t := (state_running, K void, d, h'')], G', L[l := (ls_held t, h')], VC)
-| StepRelease : forall T T' G G' (L L' : locks) VC t e d h h' h'' K l,
+    step (T, G, L, V) (T'[t := (state_running, K void, d, h'')], G', L[l := (ls_held t, h')], V)
+| StepRelease : forall T T' G G' (L L' : locks) V t e d h h' h'' K l,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_unlock l) ->
     binds L l (ls_held t, h') ->
     commit_fresh G h'' ->
     push_lock t l h'' T G L = (T', G', L') ->
     binds T' t (state_running, te_exp e, empty, h'') ->
-    step (T, G, L, VC) (T'[t := (state_running, K void, empty, h'')], G', L'[l := (ls_free, h'')], VC)
+    step (T, G, L, V) (T'[t := (state_running, K void, empty, h'')], G', L'[l := (ls_free, h'')], V)
 .
