@@ -111,8 +111,7 @@ Inductive step : cfg -> cfg -> Prop :=
        diff, exactly like [StepEnd]/[StepRelease] already do), producing a
        fresh commit [g'] that becomes both the actor's commit and the new
        global head. *)
-    (* TODO: Do NOT include x in delta here *)
-    lin_conflict_free (d[x := v]) c g G ->
+    lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' (T[t := (state_running, te_exp e, d[x := v], c)]) G = (T', G') ->
     step (T, G, g, L) (T'[t := (state_running, K void, empty, g')], G', g', L)

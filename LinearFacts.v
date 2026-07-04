@@ -37,18 +37,23 @@ Definition wf_cfg (cfg : cfg) : Prop :=
 (* ===================================================================== *)
 
 (* An effect is *enabled* for thread [t] (staging diff [d], commit pointer
-   [c]) when its non-blocking precondition holds: a read must be visible
-   either locally (in [d]) or globally (as the latest committed value at
-   [c]); an unlock must target a lock [t] itself holds (locks carry no
-   commit in this model -- synchronisation goes entirely through the global
-   head [g], so this is exactly [SharedMemory]'s notion). Writes, spawns,
-   joins and locks have no such precondition -- whether a join/lock can
-   actually fire is the *blocking* question below, and whether *any*
-   synchronising step (end/spawn/join/lock/release) can fire *without* a
-   conflict is the separate [conflict_detected] question. *)
-Definition enabled (G : graph) (L : locks) (t : tid) (d : diff) (c : commit) (a : eff) : Prop :=
+   [c], global head [g]) when its non-blocking precondition holds. A
+   NON-volatile read must be visible either locally (in [d]) or globally (as
+   the latest committed value at [c]). A VOLATILE read is never staged in
+   [d] ([StepWriteVolatile] always pushes immediately), and it is read at the
+   CURRENT global head [g], not at the thread's own (possibly stale) [c] --
+   this is the only place [enabled] needs to know [g] at all. An unlock must
+   target a lock [t] itself holds (locks carry no commit in this model --
+   synchronisation goes entirely through the global head [g], so this is
+   exactly [SharedMemory]'s notion). Writes, spawns, joins and locks have no
+   such precondition -- whether a join/lock can actually fire is the
+   *blocking* question below, and whether *any* synchronising or
+   volatile-touching step can fire *without* a conflict is the separate
+   [conflict_detected] question. *)
+Definition enabled (G : graph) (L : locks) (t : tid) (d : diff) (c g : commit) (a : eff) : Prop :=
   match a with
-  | eff_read x   => x \indom d \/ exists v, is_latest_value G c x v
+  | eff_read x   => (x \in Volatiles /\ exists v, is_latest_value G g x v)
+                     \/ (x \notin Volatiles /\ (x \indom d \/ exists v, is_latest_value G c x v))
   | eff_unlock l => lock_read L l = ls_held t
   | _ => True
   end.
@@ -79,30 +84,31 @@ Definition ul_progress (cfg : cfg) : Prop :=
 
 (* A thread is *forbidden* from stepping when the underlying language offers
    a reduction to an effect that is not enabled: a read that is visible
-   neither locally nor globally, or an unlock of a lock the thread does not
-   itself hold. *)
+   neither locally nor globally (nor, for a volatile, at the current global
+   head), or an unlock of a lock the thread does not itself hold. *)
 Definition forbidden (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, g, L) =>
       exists t e d c K a,
         binds T t (state_running, te_exp e, d, c) /\
         step_ul e K a /\
-        ~ enabled G L t d c a
+        ~ enabled G L t d c g a
   end.
 
 (* A thread is poised to synchronise with the global branch -- return
    (commit its final diff), spawn (commit and hand the child a snapshot),
-   join a terminated thread, acquire a free lock, or release a held one --
-   but the commit that synchronisation would perform is not conflict-free
-   ([lin_conflict_free]: some variable it wrote was also written, on the
+   join a terminated thread, acquire a free lock, release a held one, read a
+   volatile (a pull), or write a volatile (a pull, then push) -- but the
+   pull/commit that synchronisation would perform is not conflict-free
+   ([lin_conflict_free]: some variable it touches was also written, on the
    global branch, since its own commit [c]). This is the other
    (non-[forbidden]) way a thread can get stuck: not a deadlock (the
    blocking precondition, if any, is satisfied), not a language-level
    violation (the effect is enabled), but a genuine write-write race against
    the single global branch. Unlike [Branching] (where only [join]/[lock]
-   perform a check beyond blocking), *every* synchronising operation here
-   checks [lin_conflict_free], since they all commit onto the one shared
-   branch. *)
+   perform a check beyond blocking), *every* synchronising or
+   volatile-touching operation here checks [lin_conflict_free], since they
+   all pull from / commit onto the one shared branch. *)
 Definition conflict_detected (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, g, L) =>
@@ -117,7 +123,9 @@ Definition conflict_detected (cfg : cfg) : Prop :=
              (exists t' r d' c', step_ul e K (eff_join t') /\
                                   binds T t' (state_terminated, te_ret r, d', c')) \/
              (exists l, step_ul e K (eff_lock l) /\ lock_read L l = ls_free) \/
-             (exists l, step_ul e K (eff_unlock l) /\ lock_read L l = ls_held t)) /\
+             (exists l, step_ul e K (eff_unlock l) /\ lock_read L l = ls_held t) \/
+             (exists x, step_ul e K (eff_read x) /\ x \in Volatiles) \/
+             (exists x v, step_ul e K (eff_write x v) /\ x \in Volatiles)) /\
             ~ lin_conflict_free d c g G)
   end.
 
@@ -256,7 +264,14 @@ Proof.
     rew_dom. autos.
   - (* StepReadLocal *) rew_dom. autos.
   - (* StepReadGlobal *) rew_dom. autos.
+  - (* StepReadVolatile *) rew_dom. autos.
   - (* StepWrite *) rew_dom. autos.
+  - (* StepWriteVolatile *)
+    asserts Hfin0: (LibSet.finite (dom (T[t := (state_running, te_exp e, d[x := v], c)]))).
+    { rew_dom. autos. }
+    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ =>
+      forwards Hfin': finite_global_commit H Hfin0 end.
+    rew_dom. autos.
   - (* StepSpawn *)
     asserts Hfin0:
       (LibSet.finite (dom (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, g')]))).
@@ -323,6 +338,14 @@ Proof.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+  - (* StepReadVolatile *)
+    splits.
+    + unfolds finite. rew_dom. autos.
+    + exact Hwf.
+    + exact HrootG.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
   - (* StepWrite *)
     splits.
     + unfolds finite. rew_dom. autos.
@@ -331,6 +354,25 @@ Proof.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+  - (* StepWriteVolatile *)
+    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
+    asserts Hbt: (binds (T[t := (state_running, te_exp e, d[x := v], c)]) t
+                    (state_running, te_exp e, d[x := v], c)).
+    { applys binds_update_same. }
+    rewrite (global_commit_eq g g' Hbt) in Hgc.
+    inverts Hgc.
+    splits.
+    + asserts Hfin0:
+        (LibSet.finite (dom (T[t := (state_running, te_exp e, d[x := v], c)]))).
+      { unfolds finite. rew_dom. autos. }
+      unfolds finite. rew_dom. autos.
+    + apply* graph_commit_wf.
+    + apply* graph_commit_indom_same.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
+        forwards Hbinds'': binds_update_neq_inv Hbinds' Hne.
+        forwards Hbinds3: binds_update_neq_inv Hbinds'' Hne. applys* Hterm.
   - (* StepSpawn *)
     match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
     asserts Hneq: (t <> t').
@@ -453,19 +495,51 @@ Proof.
                      +++ exact Hbth.
                      +++ right. left. exists t r1 empty_diff c0. split; [exact Hul | exact Hbr].
                      +++ exact Hncfm.
-              ** (* read: local (in [d]) or global ([is_latest_value]),
-                    otherwise forbidden *)
-                 destruct (classic (x \indom d)) as [Hxd | Hxnd].
-                 --- right. left. asserts Hbv: (binds d x (d[x])).
-                     { applys binds_of_indom_read Hxd. reflexivity. }
-                     exists. applys StepReadLocal Hbth Hul Hbv.
-                 --- destruct (classic (exists v, is_latest_value G c x v)) as [(v & Hlv) | Hnlv].
-                     +++ right. left. exists. applys StepReadGlobal Hbth Hul Hxnd Hlv.
-                     +++ right. right. left.
-                         exists a e d c K (eff_read x). splits*.
-                         simpl. rew_logic. splits*.
-              ** (* write *)
-                 right. left. exists. applys StepWrite Hbth Hul.
+              ** (* read: volatile (a pull, conflict-checked, then read at
+                    the global head [g]) or normal (local in [d], or global
+                    at [c]); otherwise forbidden / conflict-detected *)
+                 destruct (classic (x \in Volatiles)) as [Hxvol | Hxnvol].
+                 --- (* volatile: split on conflict-freedom of the pull,
+                        then on whether [g] has a latest value *)
+                     destruct (classic (lin_conflict_free d c g G)) as [Hcfm | Hncfm].
+                     +++ destruct (classic (exists v, is_latest_value G g x v)) as [(v & Hlv) | Hnlv].
+                         *** right. left. exists. applys StepReadVolatile Hbth Hul Hxvol Hcfm Hlv.
+                         *** right. right. left.
+                             exists a e d c K (eff_read x). splits*.
+                             simpl. rew_logic. splits*.
+                     +++ right. right. right.
+                         exists a d c. right. exists e K. splits.
+                         *** exact Hbth.
+                         *** right; right; right; right; left. exists x. split; [exact Hul | exact Hxvol].
+                         *** exact Hncfm.
+                 --- (* normal: local (in [d]) or global ([is_latest_value]
+                        at [c]), otherwise forbidden *)
+                     destruct (classic (x \indom d)) as [Hxd | Hxnd].
+                     +++ right. left. asserts Hbv: (binds d x (d[x])).
+                         { applys binds_of_indom_read Hxd. reflexivity. }
+                         exists. applys StepReadLocal Hbth Hul Hxnvol Hbv.
+                     +++ destruct (classic (exists v, is_latest_value G c x v)) as [(v & Hlv) | Hnlv].
+                         *** right. left. exists. applys StepReadGlobal Hbth Hul Hxnvol Hxnd Hlv.
+                         *** right. right. left.
+                             exists a e d c K (eff_read x). splits*.
+                             simpl. rew_logic. splits*.
+              ** (* write: volatile (a pull-then-push, conflict-checked) or
+                    normal (always succeeds, staged into [d]) *)
+                 destruct (classic (x \in Volatiles)) as [Hxvol | Hxnvol].
+                 --- (* volatile: split on the conflict check *)
+                     destruct (classic (lin_conflict_free d c g G)) as [Hcfm | Hncfm].
+                     +++ right. left.
+                         forwards (g'' & Hfresh): exists_commit_fresh Hwf.
+                         destruct (global_commit a g g''
+                             (T[a := (state_running, te_exp e, d[x := v], c)]) G)
+                           as [T' G'] eqn:Heq.
+                         exists. applys (>> StepWriteVolatile Hbth Hul Hxvol Hcfm Hfresh Heq).
+                     +++ right. right. right.
+                         exists a d c. right. exists e K. splits.
+                         *** exact Hbth.
+                         *** right; right; right; right; right. exists x v. split; [exact Hul | exact Hxvol].
+                         *** exact Hncfm.
+                 --- right. left. exists. applys StepWrite Hbth Hul Hxnvol.
               ** (* lock: not blocked => free; then split on the conflict
                     check *)
                  rew_logic in Hnbl.
@@ -487,7 +561,7 @@ Proof.
                      +++ right. right. right.
                          exists a d c. right. exists e K. splits.
                          *** exact Hbth.
-                         *** right. right. right. exists l0. split; [exact Hul | exact Hheld].
+                         *** right. right. right. left. exists l0. split; [exact Hul | exact Hheld].
                          *** exact Hncfm.
                  --- right. right. left.
                      exists a e d c K (eff_unlock l0). splits*.

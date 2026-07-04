@@ -168,25 +168,74 @@ Proof.
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
     forwards Hcflog: conflict_free_last_inv Hcf.
-    destruct (classic (x \indom (D[t]))) as [Hin | Hnin].
-    * (* local (uncommitted) read: [x] is in [t]'s delta *)
+    destruct (classic (x \in Volatiles)) as [Hxvol | Hnv].
+    * (* volatile read: always a pull (fast-forward to [g]), regardless of
+         [D[t]] -- a volatile variable is never pending in a delta *)
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
-      asserts Hbdi: (binds (D[t]) x (D[t][x])).
-      { applys* binds_of_indom_read Hin. }
-      forwards (log'' & Hfilt2): conflict_free_last_local_write Hcflog Hplay Hdt Hbdi.
-      rewrite Hfilter in Hfilt2.
-      forwards (_ & Heqw): last_eq_last_inv Hfilt2. inverts Heqw.
-      exists. split; [ applys StepReadLocal Hbinds; [ eassumption | exact Hbdi ] |].
-      simpls*.
-    * (* global (committed) read: [x] is visible as the latest committed value *)
-      lets [_ Hback]: Hrun t. forwards* (Hms & Hmne): Hback.
-      asserts Hwfr: (wf_log (log & event_read t x v)). { applys wf_log_read_last Hms Hmne Hwf. }
-      forwards Hlv: last_global_write_latest_value Hcf Hwfr Hplay Hnin Hfilter.
-      exists. split; [ applys StepReadGlobal Hbinds; [ eassumption | exact Hnin | exact Hlv ] |].
-      simpls*.
+      asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
+      asserts Hlcf: (lin_conflict_free (D[t]) (TC[t]) g G).
+      { applys lin_conflict_free_holds Hwf Hcflog Hplay Hdt HtTC. }
+      asserts Hexfilter: (exists tw log', LibList.filter (fun e => writes_variable x e) log = log' & event_write tw x v).
+      { exists t' log'0. exact Hfilter. }
+      forwards Hlv: is_latest_value_after_volatile_pull Hwf Hcflog Hplay Hxvol Hexfilter.
+      exists. split;
+        [ applys StepReadVolatile Hbinds H5 Hxvol Hlcf Hlv
+        | simpls* ].
+    * (* non-volatile read: local (in [D[t]]) or global *)
+      destruct (classic (x \indom (D[t]))) as [Hin | Hnin].
+      { (* local (uncommitted) read: [x] is in [t]'s delta *)
+        asserts Hdt: (t \indom D). { applys HdomD Htin. }
+        asserts Hbdi: (binds (D[t]) x (D[t][x])).
+        { applys* binds_of_indom_read Hin. }
+        forwards (log'' & Hfilt2): conflict_free_last_local_write Hcflog Hplay Hdt Hbdi.
+        rewrite Hfilter in Hfilt2.
+        forwards (_ & Heqw): last_eq_last_inv Hfilt2. inverts Heqw.
+        exists. split; [ applys StepReadLocal Hbinds; [ eassumption | exact Hnv | exact Hbdi ] |].
+        simpls*. }
+      { (* global (committed) read: [x] is visible as the latest committed value *)
+        lets [_ Hback]: Hrun t. forwards* (Hms & Hmne): Hback.
+        asserts Hwfr: (wf_log (log & event_read t x v)). { applys wf_log_read_last Hms Hmne Hwf. }
+        forwards Hlv: (>> last_global_write_latest_value Hnv Hcf Hwfr Hplay Hnin Hfilter).
+        exists. split; [ applys StepReadGlobal Hbinds; [ eassumption | exact Hnv | exact Hnin | exact Hlv ] |].
+        simpls*. }
   - (* StepWrite *)
-    clears HdescSh HdescL.
-    exists. splits; [ constructors* | simpls*].
+    destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
+    lets Htin: (indom_of_binds Hbinds).
+    forwards (ts0 & e0 & Hbd): Hdelta Htin.
+    forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
+    forwards Hcflog: conflict_free_last_inv Hcf.
+    destruct (classic (x \in Volatiles)) as [Hxvol | Hnv].
+    * (* volatile write: conflict-check then commit in one step (no
+         [is_latest_value] obligation, unlike the read side -- purely
+         mechanical, mirroring [StepEnd]'s [global_commit] handling above but
+         on a diff pre-updated with [x := v]) *)
+      asserts Hdt: (t \indom D). { applys HdomD Htin. }
+      asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
+      asserts Hlcf: (lin_conflict_free (D[t]) (TC[t]) g G).
+      { applys lin_conflict_free_holds Hwf Hcflog Hplay Hdt HtTC. }
+      forwards (g' & Hfresh): exists_commit_fresh HwfG.
+      asserts (T' & G' & Heq): (exists T' G', global_commit t g g'
+          (T[t := (state_running, te_exp e, D[t][x := v], TC[t])]) G = (T', G')).
+      { unfolds global_commit. rewrite read_update_same. exists. reflexivity. }
+      asserts Hdom0: (t \indom (T0[t := (state_running, te_exp e)])).
+      { applys indom_update_same. typeclass. }
+      asserts Hmt1: (matching_threads (T0[t := (state_running, te_exp e)])
+                       (T[t := (state_running, te_exp e, D[t][x := v], TC[t])])).
+      { applys matching_threads_update_same Hsame. }
+      asserts Hmt2: (matching_threads (T0[t := (state_running, te_exp e)]) T').
+      { applys matching_threads_global_commit Hmt1 Hdom0 Heq. }
+      asserts Hmt3: (matching_threads (T0[t := (state_running, te_exp e)][t := (state_running, K void)])
+                       (T'[t := (state_running, K void, empty, g')])).
+      { applys matching_threads_update_same Hmt2. }
+      rewrite update_update in Hmt3.
+      exists (T'[t := (state_running, K void, empty, g')], G', g', L).
+      apply conj.
+      { eapply StepWriteVolatile;
+        [ exact Hbinds | exact H5 | exact Hxvol | exact Hlcf | exact Hfresh | exact Heq ]. }
+      { apply conj; [ exact Hmt3 | reflexivity ]. }
+      typeclass.
+    * (* non-volatile write: unconditional, as before *)
+      exists. splits; [ applys StepWrite Hbinds; [ eassumption | exact Hnv ] | simpls* ].
   - (* StepSpawn *)
     forwards (g' & Hfresh): exists_commit_fresh HwfG.
     asserts Hndom: (t' \notindom T).
@@ -362,9 +411,47 @@ Proof.
       applys* conflict_free_last_global_write Hcf Hwfr Hplay.
     * clears HdescSh HdescL.
       simpls*.
+  + (* StepReadVolatile: the SharedMemory side has no volatile distinction, so
+       this maps to a plain [SharedMemory.StepRead];
+       [is_latest_value_after_volatile_pull_inv] recovers the "last write in
+       the log" characterization [Hwrite] needs, from [is_latest_value]
+       evaluated at the global head [g] (not at [t]'s own, possibly stale,
+       commit -- there is no per-thread commit distinction to make here). *)
+    exists. split.
+    * constructors*.
+      destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
+      destruct HdescL as (_ & _ & _ & Hrun & _ & _ & (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
+      apply Hwrite.
+      forwards Hcf': conflict_free_last_inv Hcf.
+      applys* is_latest_value_after_volatile_pull_inv Hwf Hcf' Hplay.
+    * clears HdescSh HdescL.
+      simpls*.
   + (* StepWrite *)
     clears HdescSh HdescL.
     eexists. split; [ constructors* | simpls*].
+  + (* StepWriteVolatile: purely mechanical -- a [SharedMemory.StepWrite]
+       always matches (no [is_latest_value] obligation on the write side).
+       [matching_threads] needs the same explicit chain as [linear_complete]'s
+       [StepWrite] case: [T'] comes from a [global_commit] on a pre-updated
+       [T], so [simpl]/[auto]'s hint search can't bridge the double update
+       without an explicit [update_update] rewrite. *)
+    clears HdescSh HdescL.
+    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
+    asserts Hdom0: (t \indom (Tsh[t := (state_running, te_exp e)])).
+    { applys indom_update_same. typeclass. }
+    asserts Hmt1: (matching_threads (Tsh[t := (state_running, te_exp e)])
+                     (T[t := (state_running, te_exp e, d[x := v], c)])).
+    { applys matching_threads_update_same Hsame. }
+    asserts Hmt2: (matching_threads (Tsh[t := (state_running, te_exp e)]) T').
+    { applys matching_threads_global_commit Hmt1 Hdom0 Hgc. }
+    asserts Hmt3: (matching_threads (Tsh[t := (state_running, te_exp e)][t := (state_running, K void)])
+                     (T'[t := (state_running, K void, empty, g')])).
+    { applys matching_threads_update_same Hmt2. }
+    rewrite update_update in Hmt3.
+    eexists. split.
+    * constructors*.
+    * simpl. split; [ exact Hmt3 | reflexivity ].
+    * typeclass.
   + (* StepSpawn *)
     exists. split.
     * constructors*.

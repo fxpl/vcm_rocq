@@ -45,6 +45,11 @@ Proof.
       exists wm. split;
         [ applys* Nth_app_l wHN
         | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
+    + (* PlayReadVolatile: D unchanged (same as PlayRead) *)
+      forwards* (wm & wHN & wHns): IHHplay.
+      exists wm. split;
+        [ applys* Nth_app_l wHN
+        | applys no_commit_event_snoc wHns; intros _; simpl; auto ].
     + (* PlayWrite (event_write t0 x0 v0) *)
       destruct (classic (t = t0)) as [Het | Hneq].
       { subst t. rewrite read_update_same in Hbinds.
@@ -60,8 +65,9 @@ Proof.
             + subst ep. simpl. auto. }
         { (* different variable: carry the older write forward *)
           forwards Hbd: binds_update_neq_inv Hbinds Hnei.
-          lets Hin: (indom_of_binds H2).
-          asserts Hb': (binds (D'[t0]) x v). { forwards: read_of_binds H2. subst*. }
+          match goal with H : binds D' t0 d |- _ => rename H into HbindsDd end.
+          lets Hin: (indom_of_binds HbindsDd).
+          asserts Hb': (binds (D'[t0]) x v). { forwards: read_of_binds HbindsDd. subst*. }
           forwards* (wm & wHN & wHns): IHHplay.
           exists wm. split;
             [ applys* Nth_app_l wHN
@@ -73,6 +79,18 @@ Proof.
         exists wm. split;
           [ applys* Nth_app_l wHN
           | applys no_commit_event_snoc wHns; intros _; simpl; auto ]. }
+    + (* PlayWriteVolatile (event_write t0 x0 v0): flushes D[t0] (immediately
+         committed, same as PlayEnd/PlayUnlock) *)
+      destruct (classic (t = t0)) as [Het | Hneq].
+      { subst t. rewrite read_update_same in Hbinds.
+        lets Hi: (indom_of_binds Hbinds). forwards*: indom_empty_inv. }
+      { rewrite~ read_update_neq in Hbinds.
+        asserts Hin: (t \indom D').
+        { lets [Hc | Hd]: (indom_update_inv Hdom). congruence. exact Hd. }
+        forwards* (wm & wHN & wHns): IHHplay.
+        exists wm. split;
+          [ applys* Nth_app_l wHN
+          | applys no_commit_event_snoc wHns; intros Hgt; simpl in Hgt; congruence ]. }
     + (* PlayStart *)
       forwards* (wm & wHN & wHns): IHHplay.
       exists wm. split;
@@ -151,6 +169,9 @@ Proof.
     + (* PlayRead *)
       forwards* (log' & Hfilter): IHHplay.
       exists log'. rew_listx. cases_if. rew_list*.
+    + (* PlayReadVolatile: D unchanged (same as PlayRead) *)
+      forwards* (log' & Hfilter): IHHplay.
+      exists log'. rew_listx. cases_if. rew_list*.
     + (* PlayWrite *)
       destruct (classic (t = t0)).
       * subst. rewrite read_update_same in Hdelta.
@@ -159,8 +180,9 @@ Proof.
            forwards ->: binds_update_same_inv Hdelta.
            exists. rew_listx*. cases_if*.
         -- forwards~ Hdelta': binds_update_neq_inv Hdelta.
+           match goal with H : binds D' t0 d |- _ => rename H into HbindsDd end.
            asserts Hbinds: (binds D'[t0] x v).
-           { forwards : read_of_binds H2. subst*. }
+           { forwards : read_of_binds HbindsDd. subst*. }
            forwards* (log' & Hfilter): IHHplay.
            exists log'. rew_listx. cases_if. rew_list*.
       * rewrite~ read_update_neq in Hdelta.
@@ -185,6 +207,45 @@ Proof.
                 LibList.Nth p (log & event_write t0 x0 v0) ep ->
                 get_thread ep = t -> ~ is_commit_event ep).
            { applys no_commit_event_snoc Hns0. intros _; simpl; auto. }
+           asserts Hem: (get_thread (event_write t x0 v) = t). { reflexivity. }
+           forwards Hgt0: hb_preserves_thread Hhb HN0f Hem Hns0f Hnth.
+           simpl in Hgt0. congruence.
+        -- rew_list*.
+    + (* PlayWriteVolatile (event_write t0 x0 v0): flushes D[t0] ENTIRELY (the
+         just-written value is committed, not kept locally, unlike PlayWrite) *)
+      destruct (classic (t = t0)).
+      * (* t = t0: D[t0] just got flushed to empty -- [binds D''[t] x v] is
+           impossible since nothing survives locally *)
+        subst. rewrite read_update_same in Hdelta.
+        forwards contra: (indom_of_binds Hdelta). forwards*: indom_empty_inv.
+      * (* t <> t0: propagate through, ruling out [x = x0] via [conflict_free]
+           exactly as PlayWrite's [t <> t0] branch does -- [event_write t0 x0
+           v0] IS a commit event here (x0 is volatile), so [Hns0f]'s
+           obligation is closed via the [t <> t0] contradiction, not via
+           [~is_commit_event] being trivially true as in the non-volatile
+           case *)
+        rewrite~ read_update_neq in Hdelta.
+        asserts Hdom': (t \indom D').
+        { lets [Hc | Hd]: (indom_update_inv Hdom). congruence. exact Hd. }
+        forwards* (log' & Hfilter): IHHplay.
+        exists log'.
+        rew_listx. cases_if as Hwrites.
+        -- simpl in Hwrites. subst. false.
+           forwards (m0 & HN0 & Hns0): delta_is_uncommitted_write Hplay Hdom' Hdelta.
+           forwards Hlt0: Nth_inbound HN0.
+           asserts HN0f:
+             (LibList.Nth m0 (log & event_write t0 x0 v0) (event_write t x0 v)).
+           { applys* Nth_app_l. }
+           asserts Hnth:
+             (LibList.Nth (length log) (log & event_write t0 x0 v0) (event_write t0 x0 v0)).
+           { applys* Nth_app_r'. }
+           asserts Hacc: (accesses_variable x0 (event_write t0 x0 v0)). { reflexivity. }
+           forwards Hhb: Hcf HN0f Hnth Hacc Hlt0.
+           asserts Hns0f:
+             (forall p ep, m0 <= p ->
+                LibList.Nth p (log & event_write t0 x0 v0) ep ->
+                get_thread ep = t -> ~ is_commit_event ep).
+           { applys no_commit_event_snoc Hns0. intros Hgt; simpl in Hgt; congruence. }
            asserts Hem: (get_thread (event_write t x0 v) = t). { reflexivity. }
            forwards Hgt0: hb_preserves_thread Hhb HN0f Hem Hns0f Hnth.
            simpl in Hgt0. congruence.
@@ -261,6 +322,7 @@ Proof.
   introv Hpe Hin. inverts Hpe; try assumption.
   - apply indom_update_of_indom; (typeclass || assumption).
   - apply indom_update_of_indom; (typeclass || assumption).
+  - apply indom_update_of_indom; (typeclass || assumption).
   - apply indom_update_of_indom;
       (typeclass || (apply indom_update_of_indom; (typeclass || assumption))).
   - apply indom_update_of_indom; (typeclass || assumption).
@@ -278,7 +340,7 @@ Proof.
   - forwards [HN0 | (HmN & HemE)]: Nth_last_inv HNlog.
     + forwards Hin: (>> IHHplay (eq_refl : (D', TC', G', g') = (D', TC', G', g')) HN0).
       applys play_event_indom_D_mono H Hin.
-    + subst E. inverts H. apply indom_update_same; typeclass.
+    + subst E. inverts H; apply indom_update_same; typeclass.
 Qed.
 
 (* The last writer of [x] has flushed it: its write happens-before an event of a
@@ -334,7 +396,30 @@ Proof.
   destruct Hinv' as (Htot' & Hmax' & Hptr').
   inverts Hpe.
   - (* PlayRead *) exact (conj Htot' (conj Hmax' Hptr')).
+  - (* PlayReadVolatile: TCp[t := gp], graph unchanged (same as PlayStart) *)
+    unfold play_state_inv. splits; [ exact Htot' | exact Hmax' | ].
+    intros tq Htq. destruct (classic (tq = t)) as [->|Hne].
+    + rewrite read_update_same. apply ancestor_refl.
+    + rewrite read_update_neq; auto.
+      asserts Hin: (tq \indom TCp).
+      { asserts Hor: (tq = t \/ tq \indom TCp). { applys* indom_update_inv Htq. }
+        destruct Hor as [Heq|Hin]; [congruence|exact Hin]. }
+      applys Hptr' Hin.
   - (* PlayWrite *) exact (conj Htot' (conj Hmax' Hptr')).
+  - (* PlayWriteVolatile: graph_commit, head gp -> g', TCp[t := g'] (same as PlayEnd/PlayUnlock) *)
+    match goal with Hf : commit_fresh _ _ |- _ => rename Hf into Hfresh end.
+    unfold play_state_inv. splits.
+    + applys total_order_commit Htot' Hmax' Hfresh.
+    + intros c Hc. applys max_ancestor_commit Hmax' Hfresh Hc.
+    + intros tq Htq. destruct (classic (tq = t)) as [->|Hne].
+      * rewrite read_update_same. apply ancestor_refl.
+      * rewrite read_update_neq; auto.
+        asserts Hin: (tq \indom TCp).
+        { asserts Hor: (tq = t \/ tq \indom TCp). { applys* indom_update_inv Htq. }
+          destruct Hor as [Heq|Hin]; [congruence|exact Hin]. }
+        applys ancestor_trans.
+        -- applys ancestor_graph_commit. applys Hptr' Hin.
+        -- applys ancestor_graph_commit_edge.
   - (* PlayStart: TCp[t := gp], graph unchanged *)
     unfold play_state_inv. splits; [ exact Htot' | exact Hmax' | ].
     intros tq Htq. destruct (classic (tq = t)) as [->|Hne].
@@ -477,7 +562,17 @@ Proof.
   destruct Hinv as (Htot & Hmax & Hptr).
   inverts Hpe.
   - (* PlayRead *) apply ancestor_refl.
+  - (* PlayReadVolatile: TCp[t0 := gp], graph unchanged (same as PlayStart) *)
+    destruct (classic (t = t0)) as [->|Hne].
+    + rewrite read_update_same. applys Hptr Htin.
+    + rewrite read_update_neq; auto. apply ancestor_refl.
   - (* PlayWrite *) apply ancestor_refl.
+  - (* PlayWriteVolatile: graph_commit, TCp[t0 := g'] (same as PlayEnd) *)
+    destruct (classic (t = t0)) as [->|Hne].
+    + rewrite read_update_same.
+      applys ancestor_trans;
+        [ applys ancestor_graph_commit; applys Hptr Htin | applys ancestor_graph_commit_edge ].
+    + rewrite read_update_neq; auto. apply ancestor_refl.
   - (* PlayStart *)
     destruct (classic (t = t0)) as [->|Hne].
     + rewrite read_update_same. applys Hptr Htin.
@@ -595,6 +690,7 @@ Proof.
     | q p lt1 lt2 ll HNsrc HNtgt Hlt
     | p q st1 st2 HNsrc HNtgt Hlt
     | p q jt1 jt2 HNsrc HNtgt Hlt
+    | p q vt1 vt2 vx vv vv' Hxvol HNsrc HNtgt Hlt
     | p q k Hpk IHpk Hkq IHkq ];
     introv Hm Hgt Hn Hgne.
   - forwards Heq1: Nth_functional Hm HN1. forwards Heq2: Nth_functional Hn HN2.
@@ -611,6 +707,10 @@ Proof.
     exists p (event_end jt2). splits.
     + nat_math. + exact HNsrc. + simpls; exact Hgt. + simpl; exact I.
     + applys HbJoin HNsrc HNtgt Hlt.
+  - forwards Heq: Nth_functional Hm HNsrc. subst em.
+    exists p (event_write vt1 vx vv). splits.
+    + nat_math. + exact HNsrc. + simpls; exact Hgt. + simpl; exact Hxvol.
+    + applys HbVolatile Hxvol HNsrc HNtgt Hlt.
   - forwards (ek & HNk): hb_Nth_r Hpk.
     forwards Hltpk: hb_lt Hpk.
     destruct (classic (get_thread ek = t)) as [Hgek | Hgek].
@@ -641,9 +741,38 @@ Proof.
       forwards* Heq: binds_empty_false Hbinds.
   - rename H into Hpe.
     inverts Hpe.
-    (* PlayRead/Write/Start/Join/Lock: graph unchanged *)
-    1,2,3,6,7: (forwards* (tw & m0 & HN): IHHplay;
+    (* PlayRead/ReadVolatile/Write/Start/Join/Lock: graph unchanged *)
+    1,2,3,5,8,9: (forwards* (tw & m0 & HN): IHHplay;
                 exists tw m0; rew_list; applys Nth_app_l HN).
+    + (* PlayWriteVolatile: graph_commit of (d0[x0 := v0]) -- either [x] IS the
+         just-written variable [x0] (this event is directly the witness) or
+         it comes from [d0] via [delta_is_uncommitted_write] (same as
+         PlayEnd), since the committed diff carries the EXTRA update on top
+         of the underlying delta *)
+      match type of Hgw with
+      | graph_writes (graph_commit _ _ ?ccp (?dd0[?xx0 := ?vv0])) _ _ _ =>
+        destruct (classic (cx = ccp)) as [Hc | Hc];
+        [ subst cx;
+          forwards Hbdd: graph_writes_graph_commit_same Hgw;
+          destruct (classic (x = xx0)) as [Hxeq | Hxneq];
+          [ subst xx0;
+            forwards ->: binds_update_same_inv Hbdd;
+            (match goal with |- exists tw m, LibList.Nth m (?lg & event_write ?tt _ _) _ =>
+              exists tt (length lg) end);
+            applys* Nth_app_r'
+          | forwards Hbdd': binds_update_neq_inv Hbdd Hxneq;
+            (match goal with
+             | HbD : binds ?DD ?tt dd0, Hp : play_log _ _ (?DD, _, _, _) _ |- _ =>
+              lets HtD: (indom_of_binds HbD);
+              lets Hrd: (read_of_binds HbD);
+              rewrite <- Hrd in Hbdd';
+              forwards (m' & HNm' & Hns'): delta_is_uncommitted_write Hp HtD Hbdd';
+              exists tt m'; rew_list; applys Nth_app_l HNm'
+             end) ]
+        | forwards Hgw': graph_writes_graph_commit_inv Hc Hgw;
+          forwards* (tw & m0 & HN): IHHplay;
+          exists tw m0; rew_list; applys Nth_app_l HN ]
+      end.
     + (* PlayEnd: graph_commit *)
       match type of Hgw with
       | graph_writes (graph_commit _ _ ?ccp ?dd) _ _ _ =>
@@ -726,14 +855,18 @@ Proof.
 Qed.
 
 (* [9] Each graph write has a feeding flush: the commit [cx] is created by a
-   commit event in the log flushing a delta whose last write of [x] is [v]. *)
+   commit event in the log flushing a delta whose last write of [x] is [v].
+   [kw' <= f'] (weakened from [<], harmlessly: no caller inspects this fact
+   directly) accommodates [PlayWriteVolatile], where the write and its commit
+   are the SAME log event ([kw' = f']) -- unlike every other commit event,
+   which flushes writes staged in an EARLIER, separate event. *)
 Lemma graph_writes_flush :
   forall log D TC G g CH cx x v,
     play_log log init_play_cfg (D, TC, G, g) CH ->
     graph_writes G cx x v ->
     exists f' ef' tw' kw',
       LibList.Nth f' CH cx /\ LibList.Nth f' log ef' /\ get_thread ef' = tw' /\
-      is_commit_event ef' /\ kw' < f' /\ LibList.Nth kw' log (event_write tw' x v) /\
+      is_commit_event ef' /\ kw' <= f' /\ LibList.Nth kw' log (event_write tw' x v) /\
       (forall p ep, kw' <= p -> p < f' -> LibList.Nth p log ep -> get_thread ep = tw' ->
                     ~ is_commit_event ep).
 Proof.
@@ -750,13 +883,13 @@ Proof.
     assert (Hlift : forall (chx : commit) (Ex : event),
               (exists f' ef' tw' kw',
                  LibList.Nth f' CH cx /\ LibList.Nth f' log ef' /\ get_thread ef' = tw' /\
-                 is_commit_event ef' /\ kw' < f' /\ LibList.Nth kw' log (event_write tw' x v) /\
+                 is_commit_event ef' /\ kw' <= f' /\ LibList.Nth kw' log (event_write tw' x v) /\
                  (forall p ep, kw' <= p -> p < f' -> LibList.Nth p log ep -> get_thread ep = tw' ->
                                ~ is_commit_event ep)) ->
               exists f' ef' tw' kw',
                 LibList.Nth f' (CH & chx) cx /\
                 LibList.Nth f' (log & Ex) ef' /\ get_thread ef' = tw' /\
-                is_commit_event ef' /\ kw' < f' /\
+                is_commit_event ef' /\ kw' <= f' /\
                 LibList.Nth kw' (log & Ex) (event_write tw' x v) /\
                 (forall p ep, kw' <= p -> p < f' -> LibList.Nth p (log & Ex) ep ->
                               get_thread ep = tw' -> ~ is_commit_event ep)).
@@ -773,8 +906,54 @@ Proof.
         + applys Hcl0 Hp Hpf HNp0 Hgp.
         + forwards Hib: Nth_inbound HNflog0. nat_math. }
     inverts Hpe.
-    (* PlayRead/Write/Start/Join/Lock: graph unchanged *)
-    1,2,3,6,7: (applys Hlift; forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R).
+    (* PlayRead/ReadVolatile/Write/Start/Join/Lock: graph unchanged *)
+    1,2,3,5,8,9: (applys Hlift; forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R).
+    + (* PlayWriteVolatile: graph_commit of (d0[x0 := v0]) -- the write and its
+         commit COINCIDE in one event ([kw' = f' = length log]) when [x = x0];
+         otherwise same as PlayEnd via [delta_is_uncommitted_write] *)
+      match type of Hgw with
+      | graph_writes (graph_commit _ _ ?ccp (?dd0[?xx0 := ?vv0])) _ _ _ =>
+        match goal with H : xx0 \in Volatiles |- _ => rename H into Hxvol0 end;
+        destruct (classic (cx = ccp)) as [Hc | Hc];
+        [ subst cx;
+          forwards Hbdd: graph_writes_graph_commit_same Hgw;
+          destruct (classic (x = xx0)) as [Hxeq | Hxneq];
+          [ subst xx0;
+            forwards ->: binds_update_same_inv Hbdd;
+            (match goal with Hp : play_log _ _ _ _ |- _ => forwards Hlen: play_log_CH_length Hp end);
+            exists (length log) (event_write t x vv0) t (length log); splits;
+            [ cbn [get_thread]; rewrite read_update_same;
+              applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]
+            | applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]
+            | reflexivity
+            | simpl; exact Hxvol0
+            | nat_math
+            | applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]
+            | introv Hp0 Hpf HNp Hgp; nat_math ]
+          | forwards Hbdd': binds_update_neq_inv Hbdd Hxneq;
+            (match goal with
+             | HbD : binds ?DD ?tt dd0, Hp : play_log _ _ (?DD, _, _, _) _ |- _ =>
+              lets HtD: (indom_of_binds HbD);
+              lets Hrd: (read_of_binds HbD);
+              rewrite <- Hrd in Hbdd';
+              forwards (m' & HNm' & Hns'): delta_is_uncommitted_write Hp HtD Hbdd';
+              forwards Hlen: play_log_CH_length Hp;
+              forwards Hib': Nth_inbound HNm';
+              exists (length log) (event_write t xx0 vv0) tt m'; splits;
+              [ cbn [get_thread]; rewrite read_update_same;
+                applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]
+              | applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]
+              | reflexivity
+              | simpl; exact Hxvol0
+              | nat_math
+              | applys Nth_app_l HNm'
+              | introv Hp0 Hpf HNp Hgp;
+                forwards [HNp0 | (HpN & _)]: Nth_last_inv HNp;
+                [ applys Hns' Hp0 HNp0 Hgp | nat_math ] ]
+             end) ]
+        | forwards Hgw': graph_writes_graph_commit_inv Hc Hgw;
+          applys Hlift; forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R ]
+      end.
     + (* PlayEnd: graph_commit *)
       match type of Hgw with
       | graph_writes (graph_commit _ _ ?ccp ?dd) _ _ _ =>
@@ -883,6 +1062,7 @@ Proof.
     [ applys graph_commit_indom Hin
     | applys graph_commit_indom Hin
     | applys graph_commit_indom Hin
+    | applys graph_commit_indom Hin
     ].
 Qed.
 
@@ -902,16 +1082,16 @@ Lemma play_event_preserves_graph_wf :
 Proof.
   introv Hpe Hwf. destruct Hwf as (Hedge & Hdisj).
   inverts Hpe.
-  (* Read/Write/Start/Join/Lock: graph unchanged *)
-  1,2,3,6,7: (split;
+  (* Read/ReadVolatile/Write/Start/Join/Lock: graph unchanged *)
+  1,2,3,5,8,9: (split;
     [ exact Hedge
     | destruct Hdisj as [HDe | Hgi];
       [ try (left; assumption);
         subst Dp; exfalso;
         match goal with HbD : binds empty _ _ |- _ => applys binds_empty_false HbD; typeclass end
       | right; exact Hgi ] ]).
-  (* End/Spawn/Unlock: graph_commit *)
-  1,2,3: (
+  (* WriteVolatile/End/Spawn/Unlock: graph_commit *)
+  1,2,3,4: (
     destruct Gp as (C0 & P0);
     asserts Hgpd: (graph_indom (C0, P0) gp);
     [ destruct Hdisj as [HDe | Hgi];
@@ -949,6 +1129,10 @@ Lemma play_event_commit_new :
 Proof.
   introv Hpe Hce. inverts Hpe; cbn [is_commit_event get_thread] in *; try contradiction;
     destruct Gp as (C0 & P0).
+  - (* PlayWriteVolatile: [is_commit_event] doesn't reduce to [False] here (it
+       IS the volatile-write's own [x \in Volatiles]), so it isn't auto-closed
+       by [try contradiction] as PlayWrite's is -- same shape as PlayEnd/PlayUnlock *)
+    rewrite read_update_same. split; [ assumption | simpls; apply indom_update_same; typeclass ].
   - rewrite read_update_same. split; [ assumption | simpls; apply indom_update_same; typeclass ].
   - destruct (classic (t1 = t2)) as [Heqt | Hnet].
     + subst t2. rewrite read_update_same.
@@ -1197,6 +1381,55 @@ Proof.
       applys Hmax Hcmdom.
 Qed.
 
+(* The [HbVolatile] counterpart of [hb_lock_pointer_ancestor]/etc: a write to a
+   volatile variable is a commit event, so the reader's pointer (fast-forwarded
+   to the global head at read time) descends from the writer's just-created
+   commit, exactly as for lock/spawn/join edges. The only wrinkle: the event at
+   the read position [n] could a priori be either [PlayRead] or
+   [PlayReadVolatile] (both produce [event_read t2 x v']) -- but [PlayRead]
+   requires [x \notin Volatiles], contradicting the [x \in Volatiles] this
+   lemma already carries, so that case is vacuous. *)
+Lemma hb_volatile_pointer_ancestor :
+  forall log D TC G g CH m n t1 t2 x v v' cm cn,
+    x \in Volatiles ->
+    wf_log log ->
+    play_log log init_play_cfg (D, TC, G, g) CH ->
+    LibList.Nth m log (event_write t1 x v) ->
+    LibList.Nth n log (event_read t2 x v') ->
+    m < n ->
+    LibList.Nth m CH cm -> LibList.Nth n CH cn ->
+    ancestor G cm cn.
+Proof.
+  introv Hxvol Hwf Hplay. unfold empty_graph, root_commit in Hplay. gen m n t1 t2 v v' cm cn.
+  inductions Hplay; introv HNlogm HNlogn Hlt HNchm HNchn.
+  - inverts HNlogn.
+  - forwards Hlen: play_log_CH_length Hplay.
+    forwards Hwf0: wf_log_last_inv Hwf.
+    forwards [HNn0 | (HnN & HenE)]: Nth_last_inv HNlogn.
+    + forwards Hibn: Nth_inbound HNn0.
+      forwards [HNm0 | (HmN & _)]: Nth_last_inv HNlogm. 2:{ nat_math. }
+      forwards [HNchm0 | (HmNc & _)]: Nth_last_inv HNchm. 2:{ rewrite Hlen in HmNc. nat_math. }
+      forwards [HNchn0 | (HnNc & _)]: Nth_last_inv HNchn. 2:{ rewrite Hlen in HnNc. nat_math. }
+      asserts Hanc: (ancestor G' cm cn).
+      {
+        applys* IHHplay Hlt.
+      }
+      eapply play_event_graph_extends; eassumption.
+    + subst E.
+      forwards [HNm0 | (HmN & _)]: Nth_last_inv HNlogm. 2:{ nat_math. }
+      forwards [HNchm0 | (HmNc & _)]: Nth_last_inv HNchm. 2:{ rewrite Hlen in HmNc. nat_math. }
+      asserts Hce: (is_commit_event (event_write t1 x v)). { simpl. exact Hxvol. }
+      forwards Hcmdom: CH_commit_event_indom Hplay HNchm0 HNm0 Hce.
+      forwards [HNchn0 | (HnNc & Hcneq)]: Nth_last_inv HNchn.
+      { forwards Hib: Nth_inbound HNchn0. rewrite <- Hlen in HnN. nat_math. }
+      inverts H.
+      * (* PlayRead: contradicts [x \in Volatiles] *)
+        match goal with Hnv : x \notin Volatiles |- _ => false; applys Hnv Hxvol end.
+      * cbn [get_thread] in Hcneq. rewrite read_update_same in Hcneq. subst cn.
+        forwards Hinv: play_log_inv Hplay. destruct Hinv as (_ & Hmax & _).
+        applys Hmax Hcmdom.
+Qed.
+
 (* [6] A happens-before edge maps to graph ancestry between the recorded pointers. *)
 Lemma hb_pointer_ancestor :
   forall log D TC G g CH m n cm cn,
@@ -1213,6 +1446,7 @@ Proof.
     | n m t1 t2 l HNu HNl Hlt
     | m n t1 t2 HNs HNst Hlt
     | m n t1 t2 HNe HNj Hlt
+    | m n vt1 vt2 vx vv vv' Hxvol HNvw HNvr Hlt
     | m n k Hmk IHmk Hkn IHkn ];
     introv HNchm HNchn.
   - asserts Hle: (m <= n). { nat_math. }
@@ -1220,6 +1454,7 @@ Proof.
   - applys (>> hb_lock_pointer_ancestor Hwf Hplay HNu HNl Hlt HNchm HNchn).
   - applys (>> hb_spawn_pointer_ancestor Hwf Hplay HNs HNst Hlt HNchm HNchn).
   - applys (>> hb_join_pointer_ancestor Hwf Hplay HNe HNj Hlt HNchm HNchn).
+  - applys (>> hb_volatile_pointer_ancestor Hxvol Hwf Hplay HNvw HNvr Hlt HNchm HNchn).
   - forwards (ek & HNlogk): hb_Nth_r Hmk.
     forwards Hlenk: Nth_inbound HNlogk.
     forwards Hlench: play_log_CH_length Hplay.
@@ -1286,6 +1521,7 @@ Proof.
   introv Hpe Hgw. forwards Hin: graph_writes_to_indom Hgw.
   inverts Hpe; try assumption;
     [ apply graph_writes_graph_commit
+    | apply graph_writes_graph_commit
     | apply graph_writes_graph_commit
     | apply graph_writes_graph_commit
     ];
@@ -1369,11 +1605,15 @@ Proof.
         -- split; assumption.
         -- introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
            { applys Hnc Hg HNg0 Hgg. } { subst; simpl; auto. }
-      * (* read *) left; split.
+      * (* read (PlayRead): D unchanged *) left; split.
         -- split; assumption.
         -- introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
            { applys Hnc Hg HNg0 Hgg. } { subst; simpl; auto. }
-      * (* write wt wj ww *)
+      * (* read (PlayReadVolatile): D unchanged too -- identical proof *) left; split.
+        -- split; assumption.
+        -- introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
+           { applys Hnc Hg HNg0 Hgg. } { subst; simpl; auto. }
+      * (* write wt wj ww (PlayWrite): stays local in [tm]'s delta *)
         destruct (classic (wt = tm)) as [Hwt | Hwt].
         -- subst wt.
            destruct (classic (wj = x)) as [Hwj | Hwj].
@@ -1394,6 +1634,40 @@ Proof.
               ** introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
                  { applys Hnc Hg HNg0 Hgg. }
                  { subst ep; simpl; auto. }
+        -- left; split.
+           ++ split.
+              ** rewrite read_update_neq; [ exact Hidom | congruence ].
+              ** rewrite read_update_neq; [ exact Hival | congruence ].
+           ++ introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
+              { applys Hnc Hg HNg0 Hgg. } { subst; simpls; congruence. }
+      * (* write wt wj ww (PlayWriteVolatile): flushes [tm]'s WHOLE delta into a
+           fresh commit -- if [wt = tm], [x]'s pending value (if any, i.e.
+           [wj <> x] -- [wj = x] is excluded exactly as for PlayWrite) is
+           committed ALONGSIDE [wj], not merely overwritten, since
+           [graph_commit] commits the full updated diff [d[wj:=ww]] at once *)
+        destruct (classic (wt = tm)) as [Hwt | Hwt].
+        -- subst wt.
+           destruct (classic (wj = x)) as [Hwj | Hwj].
+           ++ subst wj. exfalso.
+              asserts HNE: (LibList.Nth (length log) (log & event_write tm x ww) (event_write tm x ww)).
+              { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
+              forwards Hle: Hlast HNE. nat_math.
+           ++ right. exists (length log) (event_write tm wj ww).
+              eexists. splits.
+              ** nat_math.
+              ** applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ].
+              ** reflexivity.
+              ** simpl; assumption.
+              ** applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ].
+              ** cbn [get_thread]. rewrite read_update_same.
+                 applys graph_writes_graph_commit_new.
+                 match goal with Hbd : binds _ tm ?dstg |- binds (?dstg[wj := ww]) _ _ =>
+                   forwards Hdeq: read_of_binds Hbd; rewrite <- Hdeq end.
+                 applys binds_update_neq; [ congruence | ].
+                 applys binds_of_indom_read Hidom Hival; typeclass.
+              ** introv Hg Hgflt HNg Hgg.
+                 forwards [HNg0 | (HgN & _)]: Nth_last_inv HNg.
+                 { applys Hnc Hg HNg0 Hgg. } { nat_math. }
         -- left; split.
            ++ split.
               ** rewrite read_update_neq; [ exact Hidom | congruence ].
@@ -1456,13 +1730,28 @@ Proof.
               { applys Hnc Hg HNg0 Hgg. } { subst; simpls; congruence. }
     + (* the write is the last (appended) event *)
       subst E. inverts H.
-      left. split.
-      * split.
-        -- rewrite read_update_same. apply indom_update_same; typeclass.
-        -- rewrite read_update_same. rewrite read_update_same. reflexivity.
-      * introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
-        { forwards Hglt: Nth_inbound HNg0. nat_math. }
-        { subst ep; simpl; auto. }
+      * (* PlayWrite: stays local -- [x] is exactly the value just written *)
+        left. split.
+        -- split.
+           ++ rewrite read_update_same. apply indom_update_same; typeclass.
+           ++ rewrite read_update_same. rewrite read_update_same. reflexivity.
+        -- introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
+           { forwards Hglt: Nth_inbound HNg0. nat_math. }
+           { subst ep; simpl; auto. }
+      * (* PlayWriteVolatile: this write IS its own commit -- [kw = f = m],
+           matching the [kw' <= f'] weakening in [graph_writes_flush]. Note:
+           the fresh commit is named [g] here (not [g']), since [g'] was
+           already claimed by this lemma's own top-level state pair. *)
+        right. exists (length log) (event_write tm x vm) g. splits.
+        -- nat_math.
+        -- applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ].
+        -- reflexivity.
+        -- simpl; assumption.
+        -- cbn [get_thread]; rewrite read_update_same;
+           applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ].
+        -- applys graph_writes_graph_commit_new.
+           apply binds_update_same.
+        -- introv Hg Hgflt HNg Hgg. nat_math.
 Qed.
 
 (* [13] The value a reader sees ([is_latest_value] at its pointer) is the last
@@ -1539,6 +1828,125 @@ Proof.
   applys* last_write_visible_commit.
 Qed.
 
+(* A volatile write event's own log position IS its commit's graph write:
+   Linear analog of Branching's [write_volatile_graph_writes], simplified
+   since a volatile write here commits directly (no merge). *)
+Lemma write_volatile_graph_writes :
+  forall log D TC G g CH t x v m cm,
+    play_log log init_play_cfg (D, TC, G, g) CH ->
+    x \in Volatiles ->
+    LibList.Nth m log (event_write t x v) ->
+    LibList.Nth m CH cm ->
+    graph_writes G cm x v.
+Proof.
+  introv Hplay Hxvol. gen m t v cm. inductions Hplay; introv HNlog HNch.
+  - inverts HNlog.
+  - rename H into Hpe.
+    forwards Hlen: play_log_CH_length Hplay.
+    forwards [HN0 | (HmN & HemE)]: Nth_last_inv HNlog.
+    + forwards Hib: Nth_inbound HN0.
+      forwards [HN0ch | (HmNch & _)]: Nth_last_inv HNch.
+      2:{ rewrite Hlen in HmNch. nat_math. }
+      forwards Hgw: (>> IHHplay (eq_refl init_play_cfg) (eq_refl (D', TC', G', g')) Hxvol HN0 HN0ch).
+      applys play_event_graph_writes_mono Hpe Hgw.
+    + subst E. inverts Hpe as Hxvol1 Hbd1 Hxvol2 Hbd2 Hfresh2.
+      * false; applys Hxvol1 Hxvol.
+      * forwards [HN0ch | (HmNch & Hcmeq)]: Nth_last_inv HNch.
+        { forwards Hib: Nth_inbound HN0ch. rewrite <- Hlen in HmN. nat_math. }
+        cbn [get_thread] in Hcmeq. rewrite read_update_same in Hcmeq. subst cm.
+        applys graph_writes_graph_commit_new. apply binds_update_same.
+Qed.
+
+(* The value seen after a [StepReadVolatile] pull (which reads [is_latest_value]
+   at the CURRENT global head [g] directly, no merge -- unlike Branching, which
+   pulls via a [graph_merge] of a per-variable [vc_read VVC x] pointer) is the
+   log's last [x]-write: the witness is the commit created by that last write
+   itself ([write_volatile_graph_writes]), and it dominates [g] via [play_log_inv]'s
+   totality ([Hmax]: every commit is an ancestor of [g]) directly -- no
+   [graph_writes_comparable]/[ancestor_creation_order] detour is needed, since
+   [g] is already known to dominate everything in the graph. *)
+Lemma is_latest_value_after_volatile_pull :
+  forall log D TC G g CH x v,
+    wf_log log ->
+    conflict_free log ->
+    play_log log init_play_cfg (D, TC, G, g) CH ->
+    x \in Volatiles ->
+    (exists tw log', LibList.filter (fun e => writes_variable x e) log = log' & event_write tw x v) ->
+    is_latest_value G g x v.
+Proof.
+  introv Hwf Hcf Hplay Hxvol (tw & log' & Hfilter).
+  forwards Hinv: play_log_inv Hplay. destruct Hinv as (_ & Hmax & _).
+  forwards (lw & HNlw & Hlast): last_write_position Hfilter.
+  forwards Hlwlt: Nth_inbound HNlw.
+  forwards Hlen: play_log_CH_length Hplay.
+  asserts HlwltCH: (lw < length CH). { nat_math. }
+  forwards (c_lw & HNlwCH): Nth_inbound_inv HlwltCH.
+  asserts Hgwlw: (graph_writes G c_lw x v).
+  { applys write_volatile_graph_writes Hplay Hxvol HNlw HNlwCH. }
+  asserts Hdomlw: (graph_indom G c_lw). { applys graph_writes_to_indom Hgwlw. }
+  asserts Hcelw: (is_commit_event (event_write tw x v)). { simpl. exact Hxvol. }
+  exists c_lw. splits.
+  - exact Hgwlw.
+  - applys Hmax Hdomlw.
+  - introv Hgw3 Hanc1 Hanc2.
+    destruct (classic (c'' = c_lw)) as [-> | Hne]; [reflexivity | exfalso].
+    forwards (f3 & ef3 & tw3 & kw3 & HNf3CH & HNf3log & Hgt3 & Hcef3 & Hkw3lt & HNkw3 & Hncl3):
+      graph_writes_flush Hplay Hgw3.
+    asserts Hkw3eq: (kw3 = f3).
+    { destruct (classic (kw3 = f3)) as [Heq | Hne2]; [exact Heq | exfalso].
+      asserts Hlt3: (kw3 < f3). { nat_math. }
+      asserts Hle3: (kw3 <= kw3). { nat_math. }
+      forwards Hni: Hncl3 Hle3 Hlt3 HNkw3 (eq_refl : get_thread (event_write tw3 x v') = tw3).
+      applys Hni. simpl. exact Hxvol. }
+    subst kw3.
+    asserts Hf3lelw: (f3 <= lw). { applys Hlast HNkw3. }
+    asserts Hcef3': (is_commit_event (event_write tw3 x v')). { simpl. exact Hxvol. }
+    asserts Hneq': (c_lw <> c''). { intro Heq. applys Hne (eq_sym Heq). }
+    forwards Hlwltf3: (>> ancestor_creation_order Hplay HNlwCH HNlw Hcelw HNf3CH HNkw3 Hcef3' Hanc1 Hneq').
+    nat_math.
+Qed.
+
+(* The reverse direction of [is_latest_value_after_volatile_pull]: whatever
+   value a [StepReadVolatile] pull actually observes at the global head [g] is
+   the log's last write of [x]. If the log has no [x]-write at all, [Hlv]'s own
+   witness writer would have to come from nowhere ([graph_writes_log_write]) --
+   contradiction. Otherwise, apply [is_latest_value_after_volatile_pull] to the
+   log's actual last write to get a SECOND [is_latest_value] witness at the
+   SAME commit [g]; [is_latest_value_inj] (using [total_order_conflict_free_graph],
+   simpler than Branching's [graph_writes_comparable] detour since Linear's
+   graph is totally ordered) then forces the two values to coincide. *)
+Lemma is_latest_value_after_volatile_pull_inv :
+  forall log D TC G g CH x v,
+    wf_log log ->
+    conflict_free log ->
+    play_log log init_play_cfg (D, TC, G, g) CH ->
+    x \in Volatiles ->
+    is_latest_value G g x v ->
+    exists tw log', LibList.filter (fun e => writes_variable x e) log = log' & event_write tw x v.
+Proof.
+  introv Hwf Hcf Hplay Hxvol Hlv.
+  destruct (last_case (LibList.filter (fun e => writes_variable x e) log)) as [Hnil | (e0 & l0 & Heq)].
+  - exfalso.
+    destruct Hlv as (cw & Hgw & Hanc & Hmax).
+    forwards (tw & m & HNm): graph_writes_log_write Hplay Hgw.
+    forwards Hmem: Nth_mem HNm.
+    asserts Hmemf: (mem (event_write tw x v) (LibList.filter (fun e => writes_variable x e) log)).
+    { applys mem_filter Hmem. reflexivity. }
+    rewrite Hnil in Hmemf. rewrite mem_nil_eq in Hmemf. exact Hmemf.
+  - asserts Hwv: (writes_variable x e0).
+    { asserts Hmeme0: (mem e0 (LibList.filter (fun e => writes_variable x e) log)).
+      { rewrite Heq. applys mem_last_r. }
+      forwards (_ & Hwv0): mem_filter_inv Hmeme0. exact Hwv0. }
+    destruct e0 as [ | | | tw0 x0 v0 | | | | ]; try (simpl in Hwv; contradiction).
+    simpl in Hwv. subst x0.
+    forwards Hval: is_latest_value_after_volatile_pull Hwf Hcf Hplay Hxvol.
+    { exists tw0 l0. exact Heq. }
+    forwards Hinv: play_log_inv Hplay. destruct Hinv as (Htot & _ & _).
+    forwards Hcfg: total_order_conflict_free_graph Htot.
+    forwards ->: is_latest_value_inj Hcfg Hlv Hval.
+    exists tw0 l0. exact Heq.
+Qed.
+
 (* Forward direction of the global-read correspondence: if [v] is the value of
    the last write to [x] in the log and [t] reads [x] globally (it is not in [t]'s
    delta), then [v] is exactly the value [t] sees in the commit graph
@@ -1554,6 +1962,7 @@ Qed.
    differ in the converse. *)
 Lemma last_global_write_latest_value :
   forall log D TC G g CH t x vr v t' log',
+    x \notin Volatiles ->
     conflict_free (log & event_read t x vr) ->
     wf_log (log & event_read t x vr) ->
     play_log log init_play_cfg (D, TC, G, g) CH ->
@@ -1561,12 +1970,12 @@ Lemma last_global_write_latest_value :
     LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v ->
     is_latest_value G (TC[t]) x v.
 Proof.
-  introv Hcf Hwf Hplay Hndom Hfilter.
+  introv Hxnvol Hcf Hwf Hplay Hndom Hfilter.
   forwards (mw & HNL & Hlast): last_write_position Hfilter.
   forwards HLlt: Nth_inbound HNL.
   asserts Hplayf: (exists CHf, play_log (log & event_read t x vr)
                      init_play_cfg (D, TC, G, g) CHf).
-  { eexists. applys PlaySnoc Hplay. apply PlayRead. }
+  { eexists. applys PlaySnoc Hplay. apply* PlayRead. }
   destruct Hplayf as (CHf & Hplayf).
   asserts HNLf: (LibList.Nth mw (log & event_read t x vr) (event_write t' x v)).
   { applys* Nth_app_l. }
@@ -1597,6 +2006,7 @@ Qed.
    via [total_order_conflict_free_graph]. *)
 Lemma conflict_free_last_global_write :
   forall log D TC G g CH t x v c,
+    x \notin Volatiles ->
     conflict_free (log & event_read t x v) ->
     wf_log (log & event_read t x v) ->
     play_log log init_play_cfg (D, TC, G, g) CH ->
@@ -1606,14 +2016,14 @@ Lemma conflict_free_last_global_write :
     is_latest_value G c x v ->
     exists t' log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v.
 Proof.
-  introv Hcf Hwf Hplay Hndom Hdom HTC Hval.
+  introv Hxnvol Hcf Hwf Hplay Hndom Hdom HTC Hval.
   forwards Hinv: play_log_inv Hplay.
   destruct Hinv as (Htot & _ & _).
   forwards Hcfg: total_order_conflict_free_graph Htot.
   (* [is_latest_value] ensures there is an x-write; take the last one. *)
   forwards (lw & tL & vL & Hfilter): is_latest_value_log_write Hplay Hval.
   (* the forward direction: [t] sees the last write's value [vL] *)
-  forwards Hlv: last_global_write_latest_value Hcf Hwf Hplay Hndom Hfilter.
+  forwards Hlv: (>> last_global_write_latest_value Hxnvol Hcf Hwf Hplay Hndom Hfilter).
   rewrite HTC in Hlv.
   (* and [is_latest_value] is functional, so [vL = v] *)
   forwards ->: is_latest_value_inj Hcfg Hlv Hval.
@@ -1627,6 +2037,7 @@ Qed.
    its converse [conflict_free_last_global_write]. *)
 Lemma is_latest_value_iff_last_write :
   forall log D TC G g CH t x v,
+    x \notin Volatiles ->
     conflict_free (log & event_read t x v) ->
     wf_log (log & event_read t x v) ->
     play_log log init_play_cfg (D, TC, G, g) CH ->
@@ -1635,11 +2046,11 @@ Lemma is_latest_value_iff_last_write :
     (is_latest_value G (TC[t]) x v
      <-> exists t' log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v).
 Proof.
-  introv Hcf Hwf Hplay Hndom Hdom. split.
+  introv Hxnvol Hcf Hwf Hplay Hndom Hdom. split.
   - introv Hval.
-    applys conflict_free_last_global_write Hcf Hwf Hplay Hndom Hdom; [ reflexivity | exact Hval ].
+    applys (>> conflict_free_last_global_write Hxnvol Hcf Hwf Hplay Hndom Hdom); [ reflexivity | exact Hval ].
   - introv (t' & log' & Hfilter).
-    applys last_global_write_latest_value Hcf Hwf Hplay Hndom Hfilter.
+    applys (>> last_global_write_latest_value Hxnvol Hcf Hwf Hplay Hndom Hfilter).
 Qed.
 
 (* ============================================================================
@@ -1779,7 +2190,28 @@ Lemma play_event_preserves_graph_facts :
 Proof.
   introv Hpe (Hwf' & Hg' & HTC'). inverts Hpe.
   - (* PlayRead *) splits; assumption.
+  - (* PlayReadVolatile: TCp[t := gp], graph/head unchanged (same as PlayStart) *)
+    splits; [ exact Hwf' | exact Hg' | ].
+    intros tq Htq. destruct (classic (tq = t)) as [->|Hne].
+    + rewrite read_update_same. exact Hg'.
+    + rewrite read_update_neq; auto.
+      asserts Hin: (tq \indom TCp).
+      { asserts Hor: (tq = t \/ tq \indom TCp). { applys* indom_update_inv Htq. }
+        destruct Hor as [Heq|Hin]; [congruence|exact Hin]. }
+      applys HTC' Hin.
   - (* PlayWrite *) splits; assumption.
+  - (* PlayWriteVolatile: graph_commit, TCp[t := g'] (same as PlayEnd) *)
+    match goal with Hf : commit_fresh _ _ |- _ => rename Hf into Hfresh end.
+    splits.
+    + applys graph_commit_wf Hwf' Hfresh Hg'.
+    + applys graph_commit_indom_same.
+    + intros tq Htq. destruct (classic (tq = t)) as [->|Hne].
+      * rewrite read_update_same. applys graph_commit_indom_same.
+      * rewrite read_update_neq; auto.
+        asserts Hin: (tq \indom TCp).
+        { asserts Hor: (tq = t \/ tq \indom TCp). { applys* indom_update_inv Htq. }
+          destruct Hor as [Heq|Hin]; [congruence|exact Hin]. }
+        applys graph_commit_indom. applys HTC' Hin.
   - (* PlayStart: TCp[t := gp], graph/head unchanged *)
     splits; [ exact Hwf' | exact Hg' | ].
     intros tq Htq. destruct (classic (tq = t)) as [->|Hne].

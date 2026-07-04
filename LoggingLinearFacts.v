@@ -161,11 +161,18 @@ Theorem step_equiv :
 Proof.
   introv. split; introv Hstep.
   - destruct Hstep as (log' & Hstep). inverts* Hstep.
-  - inverts* Hstep.
+  - inverts Hstep.
+    + eexists. applys* StepStart.
+    + eexists. applys* StepEnd.
     + eexists. applys* StepReadLocal.
     + eexists. applys* StepReadGlobal.
+    + eexists. applys* StepReadVolatile.
+    + eexists. applys* StepWrite.
+    + eexists. applys* StepWriteVolatile.
     + eexists. applys* StepSpawn.
     + eexists. applys* StepJoin.
+    + eexists. applys* StepLock.
+    + eexists. applys* StepRelease.
 Qed.
 
 Theorem step_preserves_wf_cfg :
@@ -215,6 +222,13 @@ Proof.
       forwards~ Heq: binds_update_same_inv Hbinds.
       inverts* Heq.
     + forwards*: binds_update_neq_inv Hbinds.
+  - (* StepReadVolatile *)
+    splits~.
+    introv Hbinds.
+    destruct (classic (t = t0)).
+    + subst.
+      forwards~ Heq: binds_update_same_inv Hbinds.
+    + forwards*: binds_update_neq_inv Hbinds.
   - (* StepWrite *)
     splits~.
     introv Hbinds.
@@ -223,6 +237,20 @@ Proof.
       forwards~ Heq: binds_update_same_inv Hbinds.
       inverts* Heq.
     + forwards*: binds_update_neq_inv Hbinds.
+  - (* StepWriteVolatile *)
+    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ =>
+      unfolds global_commit; rewrite~ read_update_same in H; inverts H end.
+    splits~.
+    + apply* graph_commit_wf.
+    + introv Hbinds.
+      destruct (classic (t = t0)).
+      * subst.
+        forwards~ Heq: binds_update_same_inv Hbinds;
+        inverts Heq; applys graph_commit_indom_same.
+      * forwards~ Hbinds1: binds_update_neq_inv Hbinds;
+        forwards~ Hbinds2: binds_update_neq_inv Hbinds1;
+        forwards~ Hbinds3: binds_update_neq_inv Hbinds2;
+        applys graph_commit_indom; applys HdomT Hbinds3.
   - (* StepSpawn *)
     unfolds global_commit.
     asserts* Hneq: (t <> t').
@@ -304,7 +332,17 @@ Proof.
     asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
     apply* wf_log_read_last.
+  - (* StepReadVolatile: append [event_read t x v] *)
+    destruct Hdesc as (_ & _ & _ & Hdrunning & _).
+    asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    { apply* Hdrunning. }
+    apply* wf_log_read_last.
   - (* StepWrite: append [event_write t x v] *)
+    destruct Hdesc as (_ & _ & _ & Hdrunning & _).
+    asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    { apply* Hdrunning. }
+    apply* wf_log_write_last.
+  - (* StepWriteVolatile: append [event_write t x v] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & _).
     asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
@@ -756,7 +794,7 @@ Proof.
     + (* 7. Replay: PlayRead is a no-op on the play state *)
       destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
       exists D TC. eexists. splits.
-      * applys PlaySnoc Hplay. apply PlayRead.
+      * applys PlaySnoc Hplay. apply* PlayRead.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
         -- asserts Htin: (t \indom T). { apply* indom_of_binds. }
@@ -797,7 +835,7 @@ Proof.
     + (* 7. Replay: PlayRead is a no-op on the play state *)
       destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
       exists D TC. eexists. splits.
-      * applys PlaySnoc Hplay. apply PlayRead.
+      * applys PlaySnoc Hplay. apply* PlayRead.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
         -- asserts Htin: (t \indom T). { apply* indom_of_binds. }
@@ -823,6 +861,49 @@ Proof.
         -- asserts Hor: (t0 = t \/ t0 \indom T). { applys* indom_update_inv. }
            destruct Hor as [->|Hor]. { congruence. }
            applys~ HdomTC.
+  - (* StepReadVolatile: log' = log & event_read t x v, T' = T[t := running K(v), c:=g] *)
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
+    asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    { apply (Hdrunning t). do 3 eexists. eassumption. }
+    asserts HtinX: (t \indom T). { apply* indom_of_binds. }
+    splits.
+    + applys* describes_spawned_inplace.
+    + applys* describes_new_inplace.
+    + applys* describes_ended_inplace.
+    + applys* describes_running_inplace.
+    + applys* describes_locked_snoc.
+    + applys* describes_free_snoc.
+    + (* 7. Replay: PlayReadVolatile fast-forwards [t]'s commit to [g] *)
+      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
+      exists D (TC[t := g]). eexists. splits.
+      * applys PlaySnoc Hplay. apply* PlayReadVolatile.
+      * intros t0 Hin.
+        destruct (classic (t0 = t)) as [->|Hneq].
+        -- asserts Htin: (t \indom T). { apply* indom_of_binds. }
+           forwards (st_old & e_old & Hbinds_delta): Hdelta t Htin.
+           forwards* Heq: binds_inj Hbinds_delta.
+           asserts Hd: (D[t] = d). { congruence. }
+           rewrite Hd. rewrite read_update_same.
+           exists state_running (K (ret_val v)). apply binds_update_same.
+        -- forwards~ Hin': indom_update_inv Hin.
+           destruct Hin' as [->|Hin']. { congruence. }
+           forwards (st' & e'' & Hbinds'): Hdelta t0 Hin'.
+           exists st' e''.
+           rewrite read_update_neq; [| auto].
+           apply~ binds_update_neq.
+      * intros t0 Hin.
+        destruct (classic (t0 = t)) as [->|Hneq].
+        -- applys HdomD. apply* indom_of_binds.
+        -- asserts Hor: (t0 = t \/ t0 \indom T). { applys* indom_update_inv. }
+           destruct Hor as [->|Hor]. { congruence. }
+           applys~ HdomD.
+      * intros t0 Hin.
+        destruct (classic (t0 = t)) as [->|Hneq].
+        -- apply* indom_update_same.
+        -- asserts Hor: (t0 = t \/ t0 \indom T). { applys* indom_update_inv. }
+           destruct Hor as [->|Hor]. { congruence. }
+           asserts HinTC: (t0 \indom TC). { applys~ HdomTC. }
+           applys* indom_update_of_indom.
   - (* StepWrite: log' = log & event_write t x v, T' = T[t := running K(void), d[x:=v]] *)
     lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
@@ -845,7 +926,8 @@ Proof.
       exists (D[t := d[x := v]]) TC. eexists. splits.
       * applys PlaySnoc Hplay.
         apply (PlayWrite _ _ _ _ _ _ _ d).
-        lets HtinD: HdomD Htin. applys* binds_of_indom_read.
+        -- assumption.
+        -- lets HtinD: HdomD Htin. applys* binds_of_indom_read.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
         -- asserts Hd_new: ((D[t := d[x:=v]])[t] = d[x:=v]). { rew_map*. }
@@ -870,6 +952,61 @@ Proof.
         -- asserts Hor: (t0 = t \/ t0 \indom T). { applys* indom_update_inv. }
            destruct Hor as [->|Hor]. { congruence. }
            applys~ HdomTC.
+  - (* StepWriteVolatile: log' = log & event_write t x v, T' = T[t := running K(void)],
+       commit onto the global head (the write, folded into the diff, is what
+       gets committed -- [t] stays [state_running], unlike [StepEnd]) *)
+    lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
+    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ =>
+      unfolds global_commit; rewrite~ read_update_same in H; inverts H end.
+    asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
+    { apply (Hdrunning t). do 3 eexists. eassumption. }
+    asserts HtinX: (t \indom T). { apply* indom_of_binds. }
+    splits.
+    + rewrite~ update_update. rewrite~ update_update. applys* describes_spawned_inplace.
+    + rewrite~ update_update. rewrite~ update_update. applys* describes_new_inplace.
+    + rewrite~ update_update. rewrite~ update_update. applys* describes_ended_inplace.
+    + rewrite~ update_update. rewrite~ update_update. applys* describes_running_inplace.
+    + applys* describes_locked_snoc.
+    + applys* describes_free_snoc.
+    + (* 7. Replay: PlayWriteVolatile commits [t]'s delta (write folded in) onto the global head *)
+      rewrite~ update_update. rewrite~ update_update.
+      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
+      forwards (st_old & e_old & Hbinds_delta): Hdelta t HtinX.
+      forwards* Heq: binds_inj Hbinds_delta.
+      asserts Hd: (D[t] = d). { congruence. }
+      asserts Htc: (TC[t] = c). { congruence. }
+      exists (D[t := empty]) (TC[t := g']). eexists. splits.
+      * applys PlaySnoc Hplay. applys PlayWriteVolatile.
+        -- assumption.
+        -- lets HtinD: HdomD HtinX. applys* binds_of_indom_read.
+        -- assumption.
+      * intros t0 Hin.
+        destruct (classic (t0 = t)) as [->|Hneq].
+        -- asserts Hd_new: (D[t := empty][t] = empty). { rew_map*. }
+           asserts Htc_new: (TC[t := g'][t] = g'). { rew_map*. }
+           rewrite Hd_new, Htc_new.
+           exists state_running (K void). apply binds_update_same.
+        -- forwards~ Hin1: indom_update_inv Hin.
+           destruct Hin1 as [->|Hin1]. { congruence. }
+           forwards (st' & e'' & Hbinds'): Hdelta t0 Hin1.
+           asserts Hd0: (D[t := empty][t0] = D[t0]). { rew_map*. }
+           asserts Htc0: (TC[t := g'][t0] = TC[t0]). { rew_map*. }
+           rewrite Hd0, Htc0.
+           exists st' e''. apply~ binds_update_neq.
+      * intros t0 Hin.
+        destruct (classic (t0 = t)) as [->|Hneq].
+        -- apply* indom_update_same.
+        -- asserts Hor: (t0 = t \/ t0 \indom T). { applys* indom_update_inv. }
+           destruct Hor as [->|Hor]. { congruence. }
+           asserts HinD: (t0 \indom D). { applys~ HdomD. }
+           applys* indom_update_of_indom.
+      * intros t0 Hin.
+        destruct (classic (t0 = t)) as [->|Hneq].
+        -- apply* indom_update_same.
+        -- asserts Hor: (t0 = t \/ t0 \indom T). { applys* indom_update_inv. }
+           destruct Hor as [->|Hor]. { congruence. }
+           asserts HinTC: (t0 \indom TC). { applys~ HdomTC. }
+           applys* indom_update_of_indom.
   - (* StepSpawn *)
     lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     asserts* Hneq: (t <> t').
