@@ -37,8 +37,14 @@ Definition threads := map tid thread.
 (* Locks carry no version: synchronisation goes through the global branch. *)
 Definition locks := map lid lock_state.
 
-(* The third component is the [global] commit: the head of the single branch. *)
-Definition cfg : Type := threads * graph * commit * locks.
+(* The configuration no longer tracks the global head as data: in a
+   well-formed, totally ordered graph it is always the unique maximum commit
+   of [G] ([is_global_head], [total_order_max_commit] in GraphFacts.v), so
+   rules that need it introduce it as a fresh existentially-quantified
+   witness satisfying [is_global_head] rather than reading it off the state.
+   Rules that never touch the global head (local reads/writes, reads from a
+   thread's own commit) simply drop it. *)
+Definition cfg : Type := threads * graph * locks.
 
 (* [commit]: flush thread [t]'s diff onto the global head [g], producing the
    fresh commit [g'] which becomes both [t]'s commit and the new global head;
@@ -61,33 +67,38 @@ Definition lock_read (L : locks) (l : lid) : lock_state :=
   read_default inhab_lock_state ls_free L l.
 
 Inductive step : cfg -> cfg -> Prop :=
-| StepStart : forall T G g L t e d c,
+| StepStart : forall T G L t e d c g,
     binds T t (state_new, e, d, c) ->
-    step (T, G, g, L) (T[t := (state_running, e, d, g)], G, g, L)
-| StepEnd : forall T T' G G' g g' L t r d c,
+    (* the new thread starts at the current global head *)
+    is_global_head G g ->
+    step (T, G, L) (T[t := (state_running, e, d, g)], G, L)
+| StepEnd : forall T T' G G' L t r d c g g',
     binds T t (state_running, te_ret r, d, c) ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' T G = (T', G') ->
-    step (T, G, g, L) (T'[t := (state_terminated, te_ret r, empty, g')], G', g', L)
-| StepReadLocal : forall T G g L t e d c K x v,
+    step (T, G, L) (T'[t := (state_terminated, te_ret r, empty, g')], G', L)
+| StepReadLocal : forall T G L t e d c K x v,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
     x \notin Volatiles ->
     binds d x v ->
-    step (T, G, g, L) (T[t := (state_running, K (ret_val v), d, c)], G, g, L)
-| StepReadGlobal : forall T G g L t e d c K x v,
+    step (T, G, L) (T[t := (state_running, K (ret_val v), d, c)], G, L)
+| StepReadGlobal : forall T G L t e d c K x v,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
     x \notin Volatiles ->
     x \notindom d ->
-    (* a thread reads the latest value visible at its own commit *)
+    (* a thread reads the latest value visible at its own commit -- the
+       global head never enters into this *)
     is_latest_value G c x v ->
-    step (T, G, g, L) (T[t := (state_running, K (ret_val v), d, c)], G, g, L)
-| StepReadVolatile : forall T G g L t e d c K x v,
+    step (T, G, L) (T[t := (state_running, K (ret_val v), d, c)], G, L)
+| StepReadVolatile : forall T G L t e d c K x v g,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
     x \in Volatiles ->
+    is_global_head G g ->
     (* reading a volatile is a *pull*: check conflict-freedom and fast-forward
        to the current global head [g] (a volatile is never left pending in
        [d] -- every write to one is immediately pushed, see
@@ -95,58 +106,64 @@ Inductive step : cfg -> cfg -> Prop :=
        read the latest value visible there. *)
     lin_conflict_free d c g G ->
     is_latest_value G g x v ->
-    step (T, G, g, L) (T[t := (state_running, K (ret_val v), d, g)], G, g, L)
-| StepWrite : forall T G g L t e d c K x v,
+    step (T, G, L) (T[t := (state_running, K (ret_val v), d, g)], G, L)
+| StepWrite : forall T G L t e d c K x v,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_write x v) ->
     x \notin Volatiles ->
-    step (T, G, g, L) (T[t := (state_running, K void, d[x := v], c)], G, g, L)
-| StepWriteVolatile : forall T T' G G' g g' L t e d c K x v,
+    step (T, G, L) (T[t := (state_running, K void, d[x := v], c)], G, L)
+| StepWriteVolatile : forall T T' G G' L t e d c K x v g g',
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_write x v) ->
     x \in Volatiles ->
-    (* writing a volatile is a *pull, then push*: the write is folded into
-       the diff, checked for conflict-freedom against the current global
-       head [g], then immediately committed onto it (flushing the whole
-       diff, exactly like [StepEnd]/[StepRelease] already do), producing a
-       fresh commit [g'] that becomes both the actor's commit and the new
-       global head. *)
+    is_global_head G g ->
+    (* writing a volatile is a *pull, then push*: the current diff
+       is checked for conflict-freedom against the current global
+       head [g], then immediately committed onto it with the write
+       folded into it (flushing the whole diff, exactly like
+       [StepEnd]/[StepRelease] already do), producing a fresh
+       commit [g'] that becomes both the thread's commit and the
+       new global head. *)
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' (T[t := (state_running, te_exp e, d[x := v], c)]) G = (T', G') ->
-    step (T, G, g, L) (T'[t := (state_running, K void, empty, g')], G', g', L)
-| StepSpawn : forall T T' G G' g g' L t (t' : tid) e d c K e',
+    step (T, G, L) (T'[t := (state_running, K void, empty, g')], G', L)
+| StepSpawn : forall T T' G G' L t (t' : tid) e d c K e' g g',
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_spawn e') ->
     t' \notindom T ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     (* the spawned thread [t']'s commit is irrelevant (overwritten
        when it starts), so we just leave it at the fresh commit
        [g'] *)
     global_commit t g g' (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, g')]) G = (T', G') ->
-    step (T, G, g, L) (T', G', g', L)
-| StepJoin : forall T G g L t t' e d c c' K r,
+    step (T, G, L) (T', G', L)
+| StepJoin : forall T G L t t' e d c c' K r g,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_join t') ->
     binds T t' (state_terminated, te_ret r, empty, c') ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
     (* the joined thread has already pushed (at its StepEnd); just fast-forward *)
-    step (T, G, g, L) (T[t := (state_running, K r, d, g)], G, g, L)
-| StepLock : forall T G g L t e d c K l,
+    step (T, G, L) (T[t := (state_running, K r, d, g)], G, L)
+| StepLock : forall T G L t e d c K l g,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_lock l) ->
     lock_read L l = ls_free ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
-    step (T, G, g, L) (T[t := (state_running, K void, d, g)], G, g, L[l := ls_held t])
-| StepRelease : forall T T' G G' g g' L t e d c K l,
+    step (T, G, L) (T[t := (state_running, K void, d, g)], G, L[l := ls_held t])
+| StepRelease : forall T T' G G' L t e d c K l g g',
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_unlock l) ->
     lock_read L l = ls_held t ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' T G = (T', G') ->
-    step (T, G, g, L) (T'[t := (state_running, K void, empty, g')], G', g', L[l := ls_free])
+    step (T, G, L) (T'[t := (state_running, K void, empty, g')], G', L[l := ls_free])
 .
 
 Hint Constructors step Linear.step : vcm.

@@ -811,6 +811,121 @@ Qed.
 
 Hint Resolve max_ancestor_commit : vcm.
 
+(* Committing onto the current global head produces the new one: bundles
+   [total_order_commit] (the chain stays totally ordered) with
+   [graph_commit_indom_same] + [max_ancestor_commit] (the fresh commit [g']
+   is indom and every graph-indom commit is now its ancestor, i.e.
+   [is_global_head]). This is the workhorse for the Linear model once [g] is
+   no longer tracked as data: every rule that pushes a diff onto the graph
+   re-derives its new head with this single lemma instead of threading one
+   through the configuration. *)
+Lemma is_global_head_commit :
+  forall G g g' d,
+    total_order G ->
+    is_global_head G g ->
+    commit_fresh G g' ->
+    total_order (graph_commit G g g' d) /\ is_global_head (graph_commit G g g' d) g'.
+Proof.
+  introv Htot (Hgdom & Hmax) Hfresh. split.
+  - applys total_order_commit Htot Hmax Hfresh.
+  - split.
+    + applys graph_commit_indom_same.
+    + introv Hindom. applys max_ancestor_commit Hmax Hfresh Hindom.
+Qed.
+
+(* The global head is unique: two commits that both dominate the whole graph
+   must dominate EACH OTHER, and [wf_graph]'s antisymmetry then collapses
+   them. This is what lets a rule's own freshly-introduced [is_global_head]
+   witness be identified with any other witness known for the same graph
+   (e.g. a previously-replayed head) once [g] is no longer tracked as data. *)
+Lemma is_global_head_unique :
+  forall G g1 g2,
+    wf_graph G ->
+    is_global_head G g1 ->
+    is_global_head G g2 ->
+    g1 = g2.
+Proof.
+  introv Hwf (Hdom1 & Hmax1) (Hdom2 & Hmax2).
+  destruct Hwf as (_ & Hantisym & _).
+  applys Hantisym (Hmax2 g1 Hdom1) (Hmax1 g2 Hdom2).
+Qed.
+
+(* Helper for [total_order_max_commit]: within a totally ordered graph, any
+   list containing at least one graph-indom commit has a *maximum* among its
+   graph-indom members -- one that every graph-indom member of the list is an
+   ancestor of. Induction on the list, comparing the head against the
+   tail's champion (if any) via [total_order] and keeping whichever wins;
+   [ancestor_trans] carries the losing side's dominion over to the winner. *)
+Lemma total_order_list_max_indom :
+  forall G l,
+    total_order G ->
+    (exists c, mem c l /\ graph_indom G c) ->
+    exists m,
+      graph_indom G m /\ mem m l /\
+      (forall c, mem c l -> graph_indom G c -> ancestor G c m).
+Proof.
+  introv Htot. induction l as [| y l' IH]; introv (c & Hmemc & Hindomc).
+  - false; applys mem_nil_inv Hmemc.
+  - destruct (classic (y = c)) as [-> | Hyc].
+    + (* the head [y] is itself graph-indom *)
+      destruct (classic (exists c', mem c' l' /\ graph_indom G c')) as [Hex | Hnex].
+      * forwards (m' & Hm'indom & Hm'mem & Hm'max): IH Hex.
+        forwards [Hym' | Hm'y]: Htot Hindomc Hm'indom.
+        -- exists m'. splits~.
+           intros cc Hmem Hindom. forwards [-> | Hmem']: mem_cons_inv Hmem.
+           ++ exact Hym'.
+           ++ applys Hm'max Hmem' Hindom.
+        -- exists c. splits~.
+           intros cc Hmem Hindom. forwards [-> | Hmem']: mem_cons_inv Hmem.
+           ++ apply ancestor_refl.
+           ++ applys ancestor_trans (Hm'max _ Hmem' Hindom) Hm'y.
+      * exists c. splits~.
+        intros cc Hmem Hindom. forwards [-> | Hmem']: mem_cons_inv Hmem.
+        -- apply ancestor_refl.
+        -- false; applys Hnex; exists* cc.
+    + (* the witness [c] lives in the tail, whether or not [y] is graph-indom *)
+      forwards [-> | Hmemc']: mem_cons_inv Hmemc; [false; applys Hyc; reflexivity |].
+      forwards (m' & Hm'indom & Hm'mem & Hm'max): IH.
+      { exists c. splits~. }
+      destruct (classic (graph_indom G y)) as [Hyindom | Hynindom].
+      * forwards [Hym' | Hm'y]: Htot Hyindom Hm'indom.
+        -- exists m'. splits~.
+           intros cc Hmem Hindom. forwards [-> | Hmem']: mem_cons_inv Hmem.
+           ++ exact Hym'.
+           ++ applys Hm'max Hmem' Hindom.
+        -- exists y. splits~.
+           intros cc Hmem Hindom. forwards [-> | Hmem']: mem_cons_inv Hmem.
+           ++ apply ancestor_refl.
+           ++ applys ancestor_trans (Hm'max _ Hmem' Hindom) Hm'y.
+      * exists m'. splits~.
+        intros cc Hmem Hindom. forwards [-> | Hmem']: mem_cons_inv Hmem.
+        -- false; applys Hynindom Hindom.
+        -- applys Hm'max Hmem' Hindom.
+Qed.
+
+(* A totally ordered, well-formed graph has a maximum commit: given any
+   witness [c0] showing the graph is nonempty, there is a commit [m] that
+   every graph-indom commit is an ancestor of. Once the Linear model's head
+   [g] is no longer tracked in the configuration, this is how it is recovered:
+   any commit already known to be in the graph (e.g. a thread's own pointer)
+   serves as [c0]. *)
+Lemma total_order_max_commit :
+  forall G c0,
+    wf_graph G ->
+    total_order G ->
+    graph_indom G c0 ->
+    exists m, graph_indom G m /\ forall c, graph_indom G c -> ancestor G c m.
+Proof.
+  introv Hwf Htot Hindom0.
+  destruct Hwf as (Hfin & _ & _).
+  destruct G as (C & P).
+  simpl in Hfin, Hindom0.
+  forwards (l & Hcov): finite_inv_list_covers Hfin.
+  forwards (m & Hmindom & _ & Hmax): total_order_list_max_indom Htot.
+  { exists c0. splits~. }
+  exists m. splits~.
+Qed.
+
 (* Inverting an ancestry path that lands exactly on the fresh merge commit [h]:
    its only incoming edges are [(p2,h)] and [(p1,h)] ([wf_graph]/[commit_fresh]
    rule out any pre-existing edge into [h]), so any path into [h] other than the

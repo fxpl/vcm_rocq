@@ -13,21 +13,24 @@ Import Linear.
 
 (* [wf_cfg] bundles everything [progress] needs to stay inductively true
    across a [step]: the thread map is finite (needed to generate a fresh tid
-   for [StepSpawn]), the graph is well-formed (acyclic and finite -- needed
-   for [exists_commit_fresh]), the global head [g] is always in the graph
-   (every [global_commit] commits *onto* [g], so this is the only
-   graph-indom fact [progress] ever needs -- unlike [Branching], threads
-   never carry an independent commit that needs its own invariant, since
-   every thread's pointer is either [g] itself or an old snapshot of it,
-   never freshly created), and a terminated thread always carries a return
-   value with an empty staging area (it became terminated only via
+   for [StepSpawn]), the graph is well-formed and totally ordered (acyclic
+   and finite -- needed for [exists_commit_fresh] -- and a single chain), a
+   global head always exists ([is_global_head] -- the graph is never empty,
+   and [total_order] plus [wf_graph] is what lets [total_order_max_commit]
+   produce it; every [global_commit] commits *onto* this head, so this is
+   the only graph-indom fact [progress] ever needs -- unlike [Branching],
+   threads never carry an independent commit that needs its own invariant,
+   since every thread's pointer is either the head itself or an old snapshot
+   of it, never freshly created), and a terminated thread always carries a
+   return value with an empty staging area (it became terminated only via
    [StepEnd]). *)
 Definition wf_cfg (cfg : cfg) : Prop :=
   match cfg with
-  | (T, G, g, L) =>
+  | (T, G, L) =>
       LibMap.finite T /\
       wf_graph G /\
-      graph_indom G g /\
+      total_order G /\
+      (exists g, is_global_head G g) /\
       (forall t e d c, binds T t (state_terminated, e, d, c) ->
          exists r, e = te_ret r /\ d = empty)
   end.
@@ -76,7 +79,7 @@ Definition blocked (T : threads) (L : locks) (a : eff) : Prop :=
    [progress] reports separately. *)
 Definition ul_progress (cfg : cfg) : Prop :=
   match cfg with
-  | (T, G, g, L) =>
+  | (T, G, L) =>
       forall t e d c,
         binds T t (state_running, te_exp e, d, c) ->
         exists K a, step_ul e K a
@@ -85,11 +88,14 @@ Definition ul_progress (cfg : cfg) : Prop :=
 (* A thread is *forbidden* from stepping when the underlying language offers
    a reduction to an effect that is not enabled: a read that is visible
    neither locally nor globally (nor, for a volatile, at the current global
-   head), or an unlock of a lock the thread does not itself hold. *)
+   head), or an unlock of a lock the thread does not itself hold. The global
+   head [g] is no longer tracked in [cfg], so it is pinned down here by
+   [is_global_head] instead of read off the state. *)
 Definition forbidden (cfg : cfg) : Prop :=
   match cfg with
-  | (T, G, g, L) =>
-      exists t e d c K a,
+  | (T, G, L) =>
+      exists t e d c K a g,
+        is_global_head G g /\
         binds T t (state_running, te_exp e, d, c) /\
         step_ul e K a /\
         ~ enabled G L t d c g a
@@ -111,9 +117,10 @@ Definition forbidden (cfg : cfg) : Prop :=
    all pull from / commit onto the one shared branch. *)
 Definition conflict_detected (cfg : cfg) : Prop :=
   match cfg with
-  | (T, G, g, L) =>
-      exists t d c,
-        (exists r,
+  | (T, G, L) =>
+      exists t d c g,
+        is_global_head G g /\
+        ((exists r,
             binds T t (state_running, te_ret r, d, c) /\
             ~ lin_conflict_free d c g G)
         \/
@@ -126,13 +133,13 @@ Definition conflict_detected (cfg : cfg) : Prop :=
              (exists l, step_ul e K (eff_unlock l) /\ lock_read L l = ls_held t) \/
              (exists x, step_ul e K (eff_read x) /\ x \in Volatiles) \/
              (exists x v, step_ul e K (eff_write x v) /\ x \in Volatiles)) /\
-            ~ lin_conflict_free d c g G)
+            ~ lin_conflict_free d c g G))
   end.
 
 (* A thread has terminated. *)
 Definition terminated (cfg : cfg) (t : tid) : Prop :=
   match cfg with
-  | (T, _, _, _) => exists r c, binds T t (state_terminated, te_ret r, empty, c)
+  | (T, _, _) => exists r c, binds T t (state_terminated, te_ret r, empty, c)
   end.
 
 (* A running thread is *inert* when it is still computing, can take a step,
@@ -140,7 +147,7 @@ Definition terminated (cfg : cfg) (t : tid) : Prop :=
    or a lock on a held lock). *)
 Definition inert (cfg : cfg) (t : tid) : Prop :=
   match cfg with
-  | (T, _, _, L) =>
+  | (T, _, L) =>
       exists e d c,
         binds T t (state_running, te_exp e, d, c) /\
         (exists K a, step_ul e K a) /\
@@ -150,7 +157,7 @@ Definition inert (cfg : cfg) (t : tid) : Prop :=
 (* The configuration is *done* when every thread has terminated. *)
 Definition done (cfg : cfg) : Prop :=
   match cfg with
-  | (T, _, _, _) => forall t, t \indom T -> terminated cfg t
+  | (T, _, _) => forall t, t \indom T -> terminated cfg t
   end.
 
 (* The configuration is *deadlocked* when every thread is terminated or
@@ -158,7 +165,7 @@ Definition done (cfg : cfg) : Prop :=
    [done]). *)
 Definition deadlocked (cfg : cfg) : Prop :=
   match cfg with
-  | (T, _, _, _) =>
+  | (T, _, _) =>
       (forall t, t \indom T -> terminated cfg t \/ inert cfg t) /\
       (exists t, t \indom T /\ inert cfg t)
   end.
@@ -248,10 +255,10 @@ Qed.
    updates existing threads in place (domain unchanged) or spawns exactly
    one new thread ([StepSpawn], adding a single element). *)
 Lemma step_preserves_finite :
-  forall T G g L cfg',
+  forall T G L cfg',
     LibSet.finite (dom T) ->
-    step (T, G, g, L) cfg' ->
-    match cfg' with (T', _, _, _) => LibSet.finite (dom T') end.
+    step (T, G, L) cfg' ->
+    match cfg' with (T', _, _) => LibSet.finite (dom T') end.
 Proof.
   introv Hfin Hstep.
   hint LibSet.finite_single.
@@ -297,98 +304,118 @@ Theorem step_preserves_wf_cfg :
     step cfg cfg' ->
     wf_cfg cfg'.
 Proof.
-  introv Hwfc Hstep. destruct cfg as (((T & G) & g) & L).
-  destruct Hwfc as (Hfin & Hwf & HrootG & Hterm).
+  introv Hwfc Hstep. destruct cfg as ((T & G) & L).
+  destruct Hwfc as (Hfin & Hwf & Htot & Hhex & Hterm).
   hint LibSet.finite_single.
   hint LibSet.finite_union.
   inverts Hstep.
-  - (* StepStart *)
+  - (* StepStart: graph unchanged, [Hhex] carries over as-is *)
     splits.
     + unfolds finite. rew_dom. autos.
     + exact Hwf.
-    + exact HrootG.
+    + exact Htot.
+    + exact Hhex.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
-  - (* StepEnd *)
+  - (* StepEnd: [is_global_head_commit] gives the new head [g'] at once *)
+    match goal with Hb : binds _ _ (state_running, te_ret _, _, _) |- _ => rename Hb into Hbr end.
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hhead0 end.
+    match goal with Hf : commit_fresh G _ |- _ => rename Hf into Hfresh0 end.
     match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
-    rewrite (global_commit_eq g g' H3) in Hgc.
+    rewrite (global_commit_eq _ _ Hbr) in Hgc.
     inverts Hgc.
+    forwards (Htot' & Hhead'): is_global_head_commit Htot Hhead0 Hfresh0.
     splits.
     + unfolds finite. rew_dom. autos.
-    + apply* graph_commit_wf.
-    + apply* graph_commit_indom_same.
+    + applys graph_commit_wf Hwf Hfresh0 (proj1 Hhead0).
+    + exact Htot'.
+    + eexists. exact Hhead'.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq. eexists. splits*.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
         forwards Hbinds'': binds_update_neq_inv Hbinds' Hne. applys* Hterm.
-  - (* StepReadLocal *)
+  - (* StepReadLocal: graph unchanged *)
     splits.
     + unfolds finite. rew_dom. autos.
     + exact Hwf.
-    + exact HrootG.
+    + exact Htot.
+    + exact Hhex.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
-  - (* StepReadGlobal *)
+  - (* StepReadGlobal: graph unchanged *)
     splits.
     + unfolds finite. rew_dom. autos.
     + exact Hwf.
-    + exact HrootG.
+    + exact Htot.
+    + exact Hhex.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
-  - (* StepReadVolatile *)
+  - (* StepReadVolatile: graph unchanged (the pull is a fast-forward, not a
+       commit) -- [Hhex] carries over regardless of which head the rule
+       itself fast-forwarded to *)
     splits.
     + unfolds finite. rew_dom. autos.
     + exact Hwf.
-    + exact HrootG.
+    + exact Htot.
+    + exact Hhex.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
-  - (* StepWrite *)
+  - (* StepWrite: graph unchanged *)
     splits.
     + unfolds finite. rew_dom. autos.
     + exact Hwf.
-    + exact HrootG.
+    + exact Htot.
+    + exact Hhex.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
   - (* StepWriteVolatile *)
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hhead0 end.
+    match goal with Hf : commit_fresh G _ |- _ => rename Hf into Hfresh0 end.
     match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
     asserts Hbt: (binds (T[t := (state_running, te_exp e, d[x := v], c)]) t
                     (state_running, te_exp e, d[x := v], c)).
     { applys binds_update_same. }
-    rewrite (global_commit_eq g g' Hbt) in Hgc.
+    rewrite (global_commit_eq _ _ Hbt) in Hgc.
     inverts Hgc.
+    forwards (Htot' & Hhead'): is_global_head_commit Htot Hhead0 Hfresh0.
     splits.
     + asserts Hfin0:
         (LibSet.finite (dom (T[t := (state_running, te_exp e, d[x := v], c)]))).
       { unfolds finite. rew_dom. autos. }
       unfolds finite. rew_dom. autos.
-    + apply* graph_commit_wf.
-    + apply* graph_commit_indom_same.
+    + applys graph_commit_wf Hwf Hfresh0 (proj1 Hhead0).
+    + exact Htot'.
+    + eexists. exact Hhead'.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
         forwards Hbinds'': binds_update_neq_inv Hbinds' Hne.
         forwards Hbinds3: binds_update_neq_inv Hbinds'' Hne. applys* Hterm.
   - (* StepSpawn *)
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hhead0 end.
+    match goal with Hf : commit_fresh G _ |- _ => rename Hf into Hfresh0 end.
     match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
     asserts Hneq: (t <> t').
     { introv Heqtt. subst. match goal with H : t' \notindom T |- _ => applys* H end. }
     asserts Hbt: (binds (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, g')]) t
                     (state_running, K t', d, c)).
     { applys binds_update_neq; [ | applys binds_update_same ]. auto. }
-    rewrite (global_commit_eq g g' Hbt) in Hgc.
+    rewrite (global_commit_eq _ _ Hbt) in Hgc.
     inverts Hgc.
+    forwards (Htot' & Hhead'): is_global_head_commit Htot Hhead0 Hfresh0.
     splits.
     + asserts Hfin0:
         (LibSet.finite (dom (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, g')]))).
       { unfolds finite. rew_dom. autos. }
       unfolds finite. rew_dom. autos.
-    + apply* graph_commit_wf.
-    + apply* graph_commit_indom_same.
+    + applys graph_commit_wf Hwf Hfresh0 (proj1 Hhead0).
+    + exact Htot'.
+    + eexists. exact Hhead'.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
@@ -396,30 +423,37 @@ Proof.
         -- forwards Heq: binds_update_same_inv Hbinds'. inverts Heq.
         -- forwards Hbinds'': binds_update_neq_inv Hbinds' Hne'.
            forwards Hbinds3: binds_update_neq_inv Hbinds'' Hne. applys* Hterm.
-  - (* StepJoin *)
+  - (* StepJoin: graph unchanged *)
     splits.
     + unfolds finite. rew_dom. autos.
     + exact Hwf.
-    + exact HrootG.
+    + exact Htot.
+    + exact Hhex.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
-  - (* StepLock *)
+  - (* StepLock: graph unchanged *)
     splits.
     + unfolds finite. rew_dom. autos.
     + exact Hwf.
-    + exact HrootG.
+    + exact Htot.
+    + exact Hhex.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
   - (* StepRelease *)
+    match goal with Hb : binds _ _ (state_running, te_exp _, _, _) |- _ => rename Hb into Hbr end.
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hhead0 end.
+    match goal with Hf : commit_fresh G _ |- _ => rename Hf into Hfresh0 end.
     match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
-    rewrite (global_commit_eq g g' H3) in Hgc.
+    rewrite (global_commit_eq _ _ Hbr) in Hgc.
     inverts Hgc.
+    forwards (Htot' & Hhead'): is_global_head_commit Htot Hhead0 Hfresh0.
     splits.
     + unfolds finite. rew_dom. autos.
-    + apply* graph_commit_wf.
-    + apply* graph_commit_indom_same.
+    + applys graph_commit_wf Hwf Hfresh0 (proj1 Hhead0).
+    + exact Htot'.
+    + eexists. exact Hhead'.
     + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
@@ -430,23 +464,25 @@ Qed.
 (* Progress (modulo deadlock, forbidden effects, and conflicts)          *)
 (* ===================================================================== *)
 
-(* The heart of progress: keep the whole configuration [(T, G, g, L)] fixed
+(* The heart of progress: keep the whole configuration [(T, G, L)] fixed
    and induct over a *list of thread ids* [l]. Either every thread named in
    [l] is terminated-or-inert, or some thread can take a step, or the
    configuration is forbidden, or a synchronising thread's commit
-   conflicts. *)
+   conflicts. The global head is no longer tracked in the state, so it is
+   pulled out once via [wf_cfg]'s existential and reused throughout: [g]
+   plays exactly the role the old state component did. *)
 Lemma progress_aux :
-  forall T G g L (l : list tid),
-    ul_progress (T, G, g, L) ->
-    wf_cfg (T, G, g, L) ->
+  forall T G L (l : list tid),
+    ul_progress (T, G, L) ->
+    wf_cfg (T, G, L) ->
     (forall t, mem t l -> t \indom T ->
-       terminated (T, G, g, L) t \/ inert (T, G, g, L) t)
-    \/ (exists cfg', step (T, G, g, L) cfg')
-    \/ forbidden (T, G, g, L)
-    \/ conflict_detected (T, G, g, L).
+       terminated (T, G, L) t \/ inert (T, G, L) t)
+    \/ (exists cfg', step (T, G, L) cfg')
+    \/ forbidden (T, G, L)
+    \/ conflict_detected (T, G, L).
 Proof.
   introv Hulp Hwfc.
-  lets (Hfin & Hwf & HrootG & Hterm): Hwfc.
+  lets (Hfin & Hwf & Htot & (g & Hhead) & Hterm): Hwfc.
   induction l as [| a l IH].
   - left. introv Hmem. inverts Hmem.
   - destruct IH as [Hall | [Hstep | [Hforb | Hconf]]];
@@ -459,7 +495,7 @@ Proof.
       destruct (T[a]) as (((st & e) & d) & c) eqn:HTa.
       destruct st.
       * (* state_new: StepStart always fires *)
-        right. left. exists. applys StepStart Hbth.
+        right. left. exists. applys StepStart Hbth Hhead.
       * (* state_running *)
         destruct e as [e | r].
         -- (* still computing: use [ul_progress], split on whether some
@@ -477,9 +513,10 @@ Proof.
                      destruct (global_commit a g g''
                          (T[a := (state_running, K t', d, c)][t' := (state_new, te_exp e0, empty, g'')]) G)
                        as [T' G'] eqn:Heq.
-                     exists. applys (>> StepSpawn Hbth Hul Ht' Hcfm Hfresh Heq).
+                     exists. applys (>> StepSpawn Hbth Hul Ht' Hhead Hcfm Hfresh Heq).
                  --- right. right. right.
-                     exists a d c. right. exists e K. splits.
+                     exists a d c g. split; [ exact Hhead | ].
+                     right. exists e K. splits.
                      +++ exact Hbth.
                      +++ left. exists e0. exact Hul.
                      +++ exact Hncfm.
@@ -489,9 +526,10 @@ Proof.
                  forwards (r1 & Heqr1 & Heqd0): Hterm Hbr. inverts Heqr1. subst d0.
                  destruct (classic (lin_conflict_free d c g G)) as [Hcfm | Hncfm].
                  --- right. left.
-                     exists. applys StepJoin Hbth Hul Hbr Hcfm.
+                     exists. applys StepJoin Hbth Hul Hbr Hhead Hcfm.
                  --- right. right. right.
-                     exists a d c. right. exists e K. splits.
+                     exists a d c g. split; [ exact Hhead | ].
+                     right. exists e K. splits.
                      +++ exact Hbth.
                      +++ right. left. exists t r1 empty_diff c0. split; [exact Hul | exact Hbr].
                      +++ exact Hncfm.
@@ -503,12 +541,13 @@ Proof.
                         then on whether [g] has a latest value *)
                      destruct (classic (lin_conflict_free d c g G)) as [Hcfm | Hncfm].
                      +++ destruct (classic (exists v, is_latest_value G g x v)) as [(v & Hlv) | Hnlv].
-                         *** right. left. exists. applys StepReadVolatile Hbth Hul Hxvol Hcfm Hlv.
+                         *** right. left. exists. applys (>> StepReadVolatile Hbth Hul Hxvol Hhead Hcfm Hlv).
                          *** right. right. left.
-                             exists a e d c K (eff_read x). splits*.
+                             exists a e d c K (eff_read x). exists g. splits*.
                              simpl. rew_logic. splits*.
                      +++ right. right. right.
-                         exists a d c. right. exists e K. splits.
+                         exists a d c g. split; [ exact Hhead | ].
+                         right. exists e K. splits.
                          *** exact Hbth.
                          *** right; right; right; right; left. exists x. split; [exact Hul | exact Hxvol].
                          *** exact Hncfm.
@@ -521,7 +560,7 @@ Proof.
                      +++ destruct (classic (exists v, is_latest_value G c x v)) as [(v & Hlv) | Hnlv].
                          *** right. left. exists. applys StepReadGlobal Hbth Hul Hxnvol Hxnd Hlv.
                          *** right. right. left.
-                             exists a e d c K (eff_read x). splits*.
+                             exists a e d c K (eff_read x). exists g. splits*.
                              simpl. rew_logic. splits*.
               ** (* write: volatile (a pull-then-push, conflict-checked) or
                     normal (always succeeds, staged into [d]) *)
@@ -533,9 +572,10 @@ Proof.
                          destruct (global_commit a g g''
                              (T[a := (state_running, te_exp e, d[x := v], c)]) G)
                            as [T' G'] eqn:Heq.
-                         exists. applys (>> StepWriteVolatile Hbth Hul Hxvol Hcfm Hfresh Heq).
+                         exists. applys (>> StepWriteVolatile Hbth Hul Hxvol Hhead Hcfm Hfresh Heq).
                      +++ right. right. right.
-                         exists a d c. right. exists e K. splits.
+                         exists a d c g. split; [ exact Hhead | ].
+                         right. exists e K. splits.
                          *** exact Hbth.
                          *** right; right; right; right; right. exists x v. split; [exact Hul | exact Hxvol].
                          *** exact Hncfm.
@@ -544,9 +584,10 @@ Proof.
                     check *)
                  rew_logic in Hnbl.
                  destruct (classic (lin_conflict_free d c g G)) as [Hcfm | Hncfm].
-                 --- right. left. exists. applys StepLock Hbth Hul Hnbl Hcfm.
+                 --- right. left. exists. applys StepLock Hbth Hul Hnbl Hhead Hcfm.
                  --- right. right. right.
-                     exists a d c. right. exists e K. splits.
+                     exists a d c g. split; [ exact Hhead | ].
+                     right. exists e K. splits.
                      +++ exact Hbth.
                      +++ right. right. left. exists l0. split; [exact Hul | exact Hnbl].
                      +++ exact Hncfm.
@@ -557,14 +598,15 @@ Proof.
                      +++ right. left.
                          forwards (g'' & Hfresh): exists_commit_fresh Hwf.
                          destruct (global_commit a g g'' T G) as [T' G'] eqn:Heq.
-                         exists. applys (>> StepRelease Hbth Hul Hheld Hcfm Hfresh Heq).
+                         exists. applys (>> StepRelease Hbth Hul Hheld Hhead Hcfm Hfresh Heq).
                      +++ right. right. right.
-                         exists a d c. right. exists e K. splits.
+                         exists a d c g. split; [ exact Hhead | ].
+                         right. exists e K. splits.
                          *** exact Hbth.
                          *** right. right. right. left. exists l0. split; [exact Hul | exact Hheld].
                          *** exact Hncfm.
                  --- right. right. left.
-                     exists a e d c K (eff_unlock l0). splits*.
+                     exists a e d c K (eff_unlock l0). exists g. splits*.
            ++ (* every reduction is blocked: [a] is inert *)
               asserts Hib: (forall K0 a0, step_ul e K0 a0 -> blocked T L a0).
               { introv Hul0. destruct (classic (blocked T L a0)) as [Hb | Hnb]; auto.
@@ -578,9 +620,10 @@ Proof.
            ++ right. left.
               forwards (g'' & Hfresh): exists_commit_fresh Hwf.
               destruct (global_commit a g g'' T G) as [T' G'] eqn:Heq.
-              exists. applys StepEnd Hbth Hcfm Hfresh Heq.
+              exists. applys StepEnd Hbth Hhead Hcfm Hfresh Heq.
            ++ right. right. right.
-              exists a d c. left. exists r. splits*.
+              exists a d c g. split; [ exact Hhead | ].
+              left. exists r. splits*.
       * (* state_terminated *)
         destruct e as [e | r].
         -- (* terminated but still carrying [te_exp]: impossible by [wf_cfg] *)
@@ -597,25 +640,25 @@ Proof.
 Qed.
 
 Theorem progress :
-  forall T G g L,
-    ul_progress (T, G, g, L) ->
-    wf_cfg (T, G, g, L) ->
-    done (T, G, g, L)
-    \/ deadlocked (T, G, g, L)
-    \/ (exists cfg', step (T, G, g, L) cfg')
-    \/ forbidden (T, G, g, L)
-    \/ conflict_detected (T, G, g, L).
+  forall T G L,
+    ul_progress (T, G, L) ->
+    wf_cfg (T, G, L) ->
+    done (T, G, L)
+    \/ deadlocked (T, G, L)
+    \/ (exists cfg', step (T, G, L) cfg')
+    \/ forbidden (T, G, L)
+    \/ conflict_detected (T, G, L).
 Proof.
   introv Hulp Hwfc.
   lets (Hfin & _): Hwfc.
   lets (l & Hcov): finite_inv_list_covers Hfin.
-  forwards Hres: (progress_aux T G g L l Hulp Hwfc).
+  forwards Hres: (progress_aux T G L l Hulp Hwfc).
   destruct Hres as [Hall | [Hstep | [Hforb | Hconf]]].
   - (* every thread in [dom T] is terminated or inert (via the cover [l]) *)
     asserts Hdi: (forall t, t \indom T ->
-                            terminated (T, G, g, L) t \/ inert (T, G, g, L) t).
+                            terminated (T, G, L) t \/ inert (T, G, L) t).
     { introv Hin. applys* Hall. }
-    destruct (classic (exists t, t \indom T /\ inert (T, G, g, L) t)) as [Hi | Hni].
+    destruct (classic (exists t, t \indom T /\ inert (T, G, L) t)) as [Hi | Hni].
     + (* some thread is inert: deadlocked *)
       right. left. split*.
     + (* no inert thread: every thread is terminated, i.e. done *)

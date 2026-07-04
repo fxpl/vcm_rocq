@@ -618,7 +618,7 @@ Proof.
         rename Hb into HbT; rename Hd into Hbd
     end.
     destruct Hdesc as (_ & _ & _ & _ & _ & _ &
-      (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
+      (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
     lets HtinT: (indom_of_binds HbT).
     forwards (st' & e'' & Hbd'): Hdelta HtinT.
     forwards~ Heqt: binds_inj HbT Hbd'. inverts Heqt.
@@ -657,7 +657,7 @@ Proof.
         rename Hb into HbT; rename Hl into Hlv
     end.
     destruct Hdesc as (_ & _ & _ & Hrun & _ & _ &
-      (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
+      (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
     lets HtinT: (indom_of_binds HbT).
     forwards (st' & e'' & Hbd'): Hdelta HtinT.
     forwards~ Heqt: binds_inj HbT Hbd'. inverts Heqt.
@@ -696,7 +696,7 @@ Proof.
         (* extended play including the read (a no-op that appends [TC[t0]] to [CH]) *)
         match goal with Hxv : x0 \notin Volatiles |- _ => rename Hxv into Hxnvol end.
         asserts HplayR:
-          (play_log (log & event_read t0 x0 v0) init_play_cfg (D, TC, G, g) (CH & TC[t0])).
+          (play_log (log & event_read t0 x0 v0) init_play_cfg (D, TC, G, g0) (CH & TC[t0])).
         { applys PlaySnoc Hplay. applys* PlayRead. }
         asserts HNRch: (LibList.Nth (length log) (CH & TC[t0]) (TC[t0])).
         { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
@@ -814,7 +814,10 @@ Proof.
     match goal with Hxv : x \in Volatiles |- _ => rename Hxv into HxVol end.
     match goal with Hl : is_latest_value _ g _ _ |- _ => rename Hl into Hlv end.
     destruct Hdesc as (_ & _ & _ & Hrun & _ & _ &
-      (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
+      (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+    forwards (HwfG0 & _ & Hhead0): play_log_head_wf Hplay.
+    forwards Heqg0: is_global_head_unique HwfG0 Hhead0 Hheadr. subst g0.
     lets HtinT: (indom_of_binds HbT).
     forwards (st' & e'' & Hbd'): Hdelta HtinT.
     forwards~ Heqt: binds_inj HbT Hbd'. inverts Heqt.

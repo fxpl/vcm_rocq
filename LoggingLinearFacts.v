@@ -36,7 +36,7 @@ Theorem init_cfg_wf :
   forall e,
     wf_cfg (init_cfg e).
 Proof.
-  introv. unfolds init_cfg, wf_cfg, total_order, graph_root, empty_graph, graph_indom.
+  introv. unfolds init_cfg, wf_cfg, total_order, graph_root, empty_graph, graph_indom, is_global_head.
   splits.
   - apply init_graph_wf.
   - (* total order: the only commit is [root_commit] *)
@@ -46,13 +46,13 @@ Proof.
     asserts ->: (b = root_commit).
     { rew_dom. rew_set in Hb. branches; [forwards*: indom_empty_inv | auto]. }
     left. apply ancestor_refl.
-  - (* the global head [root_commit] is in the graph *)
-    rew_dom. rew_set. auto.
-  - (* every commit is an ancestor of the global head *)
-    introv Hc.
-    asserts ->: (c = root_commit).
-    { rew_dom. rew_set in Hc. branches; [forwards*: indom_empty_inv | auto]. }
-    apply ancestor_refl.
+  - (* the global head is [root_commit]: in the graph, and every commit's ancestor *)
+    exists root_commit. unfolds graph_indom. split.
+    + rew_dom. rew_set. auto.
+    + introv Hc.
+      asserts ->: (c = root_commit).
+      { rew_dom. rew_set in Hc. branches; [forwards*: indom_empty_inv | auto]. }
+      apply ancestor_refl.
   - (* every thread's commit is in the graph *)
     introv Hbinds.
     asserts ->: (t = t_root).
@@ -181,22 +181,31 @@ Theorem step_preserves_wf_cfg :
     step (cfg, log) (cfg', log') ->
     wf_cfg cfg'.
 Proof.
-  destruct cfg as (((T & G) & g) & L).
-  introv (Hwf & Htot & Hg & Hmax & HdomT) Hstep.
+  destruct cfg as ((T & G) & L).
+  introv (Hwf & Htot & Hhex & HdomT) Hstep.
   inverts Hstep.
-  - (* StepStart *)
+  - (* StepStart: graph unchanged -- [Hhex] carries over as-is; the started
+       thread's new commit [g] is graph-indom via the step's own witness *)
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
     splits~.
     introv Hbinds.
     destruct (classic (t = t0)).
     + subst.
       forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts Heq. applys (proj1 Hheadr).
     + forwards*: binds_update_neq_inv Hbinds.
   - (* StepEnd *)
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+    match goal with Hf : commit_fresh G _ |- _ => rename Hf into Hfresh end.
+    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
     unfolds global_commit.
-    replace (T[t]) with (state_running, te_ret r, d, c) in H9 by forwards*: read_of_binds.
-    inverts H9.
-    splits~.
-    + apply* graph_commit_wf.
+    replace (T[t]) with (state_running, te_ret r, d, c) in Hgc by forwards*: read_of_binds.
+    inverts Hgc.
+    forwards (Htot' & Hhead'): is_global_head_commit Htot Hheadr Hfresh.
+    splits.
+    + applys graph_commit_wf Hwf Hfresh (proj1 Hheadr).
+    + exact Htot'.
+    + eexists. exact Hhead'.
     + introv Hbinds.
       destruct (classic (t = t0)).
       * subst.
@@ -206,7 +215,7 @@ Proof.
         forwards~ Hbinds'': binds_update_neq_inv Hbinds'.
         asserts* Hdom': (graph_indom G c).
         auto_star.
-  - (* StepLocalRead *)
+  - (* StepLocalRead: graph unchanged *)
     splits~.
     introv Hbinds.
     destruct (classic (t = t0)).
@@ -214,7 +223,7 @@ Proof.
       forwards~ Heq: binds_update_same_inv Hbinds.
       inverts* Heq.
     + forwards*: binds_update_neq_inv Hbinds.
-  - (* StepGlobalRead *)
+  - (* StepGlobalRead: graph unchanged *)
     splits~.
     introv Hbinds.
     destruct (classic (t = t0)).
@@ -222,14 +231,16 @@ Proof.
       forwards~ Heq: binds_update_same_inv Hbinds.
       inverts* Heq.
     + forwards*: binds_update_neq_inv Hbinds.
-  - (* StepReadVolatile *)
+  - (* StepReadVolatile: graph unchanged (the pull is a fast-forward) *)
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
     splits~.
     introv Hbinds.
     destruct (classic (t = t0)).
     + subst.
       forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts Heq. applys (proj1 Hheadr).
     + forwards*: binds_update_neq_inv Hbinds.
-  - (* StepWrite *)
+  - (* StepWrite: graph unchanged *)
     splits~.
     introv Hbinds.
     destruct (classic (t = t0)).
@@ -238,10 +249,15 @@ Proof.
       inverts* Heq.
     + forwards*: binds_update_neq_inv Hbinds.
   - (* StepWriteVolatile *)
-    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ =>
-      unfolds global_commit; rewrite~ read_update_same in H; inverts H end.
-    splits~.
-    + apply* graph_commit_wf.
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+    match goal with Hf : commit_fresh G _ |- _ => rename Hf into Hfresh end.
+    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
+    unfolds global_commit. rewrite~ read_update_same in Hgc. inverts Hgc.
+    forwards (Htot' & Hhead'): is_global_head_commit Htot Hheadr Hfresh.
+    splits.
+    + applys graph_commit_wf Hwf Hfresh (proj1 Hheadr).
+    + exact Htot'.
+    + eexists. exact Hhead'.
     + introv Hbinds.
       destruct (classic (t = t0)).
       * subst.
@@ -252,12 +268,19 @@ Proof.
         forwards~ Hbinds3: binds_update_neq_inv Hbinds2;
         applys graph_commit_indom; applys HdomT Hbinds3.
   - (* StepSpawn *)
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+    match goal with Hf : commit_fresh G _ |- _ => rename Hf into Hfresh end.
+    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
     unfolds global_commit.
     asserts* Hneq: (t <> t').
-    rewrite~ read_update_neq in H11.
-    rewrite~ read_update_same in H11.
-    inverts H11. splits~.
-    + apply* graph_commit_wf.
+    rewrite~ read_update_neq in Hgc.
+    rewrite~ read_update_same in Hgc.
+    inverts Hgc.
+    forwards (Htot' & Hhead'): is_global_head_commit Htot Hheadr Hfresh.
+    splits.
+    + applys graph_commit_wf Hwf Hfresh (proj1 Hheadr).
+    + exact Htot'.
+    + eexists. exact Hhead'.
     + introv Hbinds.
       forwards [(-> & Heq) | (Hne1 & Hbinds1)]: binds_update_inv' Hbinds.
       * (* the spawner [t], committed to [g'] *)
@@ -268,26 +291,36 @@ Proof.
         -- forwards [(Heqtt & _) | (Hne3 & Hbinds3)]: binds_update_inv' Hbinds2.
            ++ congruence.
            ++ applys graph_commit_indom. applys HdomT Hbinds3.
-  - (* StepJoin *)
+  - (* StepJoin: graph unchanged *)
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
     splits~.
     introv Hbinds.
     destruct (classic (t = t0)).
     * subst.
       forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts Heq. applys (proj1 Hheadr).
     * forwards* Hbinds': binds_update_neq_inv Hbinds.
-  - (* StepLock *)
+  - (* StepLock: graph unchanged *)
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
     splits~.
     introv Hbinds.
     destruct (classic (t = t0)).
     + subst.
       forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts Heq. applys (proj1 Hheadr).
     + forwards* Hbinds': binds_update_neq_inv Hbinds.
   - (* StepUnlock *)
+    match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+    match goal with Hf : commit_fresh G _ |- _ => rename Hf into Hfresh end.
+    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
     unfolds global_commit.
-    replace (T[t]) with (state_running, te_exp e, d, c) in H11 by forwards*: read_of_binds T.
-    inverts H11.
-    splits~.
-    + apply* graph_commit_wf.
+    replace (T[t]) with (state_running, te_exp e, d, c) in Hgc by forwards*: read_of_binds T.
+    inverts Hgc.
+    forwards (Htot' & Hhead'): is_global_head_commit Htot Hheadr Hfresh.
+    splits.
+    + applys graph_commit_wf Hwf Hfresh (proj1 Hheadr).
+    + exact Htot'.
+    + eexists. exact Hhead'.
     + introv Hbinds.
       destruct (classic (t = t0)).
       * subst.
@@ -403,6 +436,84 @@ Qed.
    that the auto-find ([apply* ...]) idiom below leaves open.  Scoped after the
    init lemmas so it does not perturb their explicit [typeclass] handling. *)
 Hint Extern 1 (Inhab _) => typeclass : vcm.
+
+(* The replayed graph is always well-formed and totally ordered, and the
+   replayed head is always its maximum -- i.e. [is_global_head]. Proved
+   directly off [play_event]/[play_log] (mirrors [play_event_preserves_inv] /
+   [play_log_inv] / [play_log_graph_facts], which live in LinearEquivLemmas.v
+   and so cannot be imported here, since that file itself imports this one).
+   Needed to identify a step's own freshly-introduced [is_global_head]
+   witness with the head that replaying the log up to that point produces,
+   now that [g] is no longer tracked as data in [cfg]. *)
+Lemma play_event_preserves_head_wf :
+  forall E Dp TCp Gp gp D TC G g,
+    play_event E (Dp, TCp, Gp, gp) (D, TC, G, g) ->
+    wf_graph Gp -> total_order Gp -> is_global_head Gp gp ->
+    wf_graph G /\ total_order G /\ is_global_head G g.
+Proof.
+  introv Hpe Hwf' Htot' Hhead'. inverts Hpe.
+  - (* PlayRead *) splits*.
+  - (* PlayReadVolatile: TC updated only, graph/head unchanged *) splits*.
+  - (* PlayWrite *) splits*.
+  - (* PlayWriteVolatile: graph_commit *)
+    match goal with Hf : commit_fresh _ _ |- _ => rename Hf into Hfresh end.
+    forwards (Htot'' & Hhead''): is_global_head_commit Htot' Hhead' Hfresh.
+    splits.
+    + destruct Hhead' as (Hgdom' & _). applys graph_commit_wf Hwf' Hfresh Hgdom'.
+    + exact Htot''.
+    + exact Hhead''.
+  - (* PlayStart *) splits*.
+  - (* PlayEnd: graph_commit *)
+    match goal with Hf : commit_fresh _ _ |- _ => rename Hf into Hfresh end.
+    forwards (Htot'' & Hhead''): is_global_head_commit Htot' Hhead' Hfresh.
+    splits.
+    + destruct Hhead' as (Hgdom' & _). applys graph_commit_wf Hwf' Hfresh Hgdom'.
+    + exact Htot''.
+    + exact Hhead''.
+  - (* PlaySpawn: graph_commit *)
+    match goal with Hf : commit_fresh _ _ |- _ => rename Hf into Hfresh end.
+    forwards (Htot'' & Hhead''): is_global_head_commit Htot' Hhead' Hfresh.
+    splits.
+    + destruct Hhead' as (Hgdom' & _). applys graph_commit_wf Hwf' Hfresh Hgdom'.
+    + exact Htot''.
+    + exact Hhead''.
+  - (* PlayJoin *) splits*.
+  - (* PlayLock *) splits*.
+  - (* PlayUnlock: graph_commit *)
+    match goal with Hf : commit_fresh _ _ |- _ => rename Hf into Hfresh end.
+    forwards (Htot'' & Hhead''): is_global_head_commit Htot' Hhead' Hfresh.
+    splits.
+    + destruct Hhead' as (Hgdom' & _). applys graph_commit_wf Hwf' Hfresh Hgdom'.
+    + exact Htot''.
+    + exact Hhead''.
+Qed.
+
+Lemma play_log_head_wf :
+  forall log D TC G g CH,
+    play_log log init_play_cfg (D, TC, G, g) CH ->
+    wf_graph G /\ total_order G /\ is_global_head G g.
+Proof.
+  introv Hplay. inductions Hplay.
+  - (* PlayNil: [init_play_cfg]'s graph is [graph_root root_commit] *)
+    unfolds init_play_cfg. splits.
+    + apply init_graph_wf.
+    + introv Ha Hb.
+      unfolds graph_indom, graph_root.
+      asserts ->: (a = root_commit).
+      { rew_dom. rew_set in Ha. branches; [forwards*: indom_empty_inv | auto]. }
+      asserts ->: (b = root_commit).
+      { rew_dom. rew_set in Hb. branches; [forwards*: indom_empty_inv | auto]. }
+      left. apply ancestor_refl.
+    + unfolds is_global_head. split.
+      * applys graph_root_indom_same.
+      * introv Hc. unfolds graph_indom, graph_root.
+        asserts ->: (c = root_commit).
+        { rew_dom. rew_set in Hc. branches; [forwards*: indom_empty_inv | auto]. }
+        apply ancestor_refl.
+  - (* PlaySnoc *)
+    forwards~ (Hwf' & Htot' & Hhead'): IHHplay.
+    applys* play_event_preserves_head_wf H.
+Qed.
 
 (* ============================================================= *)
 (* Reusable [describes]-conjunct preservation lemmas             *)
@@ -644,9 +755,15 @@ Proof.
               exact (Hnend contra).
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
-    + (* 7. Replay: PlayStart fast-forwards [t] to the global head [g] *)
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
-      exists D (TC[t := g]). eexists. splits.
+    + (* 7. Replay: PlayStart fast-forwards [t] to the global head [g] --
+         [g] is the step's own [is_global_head] witness; [is_global_head_unique]
+         identifies it with the replayed head [g0] so the rest of the proof can
+         refer to a single [g] as before. *)
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
+      match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+      forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
+      forwards Heqg0: is_global_head_unique HwfG Hhead0 Hheadr. subst g0.
+      exists D (TC[t := g]) g. eexists. splits.
       * applys PlaySnoc Hplay. apply PlayStart.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
@@ -732,13 +849,16 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay: PlayEnd commits [t]'s delta onto the global head *)
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
+      match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+      forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
+      forwards Heqg0: is_global_head_unique HwfG Hhead0 Hheadr. subst g0.
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (st_old & e_old & Hbinds_delta): Hdelta t Htin.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      exists (D[t := empty]) (TC[t := g']). eexists. splits.
+      exists (D[t := empty]) (TC[t := g']) g'. eexists. splits.
       * applys PlaySnoc Hplay. applys PlayEnd.
         -- lets HtinD: HdomD Htin. applys* binds_of_indom_read.
         -- assumption.
@@ -792,8 +912,8 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay: PlayRead is a no-op on the play state *)
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
-      exists D TC. eexists. splits.
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
+      exists D TC g0. eexists. splits.
       * applys PlaySnoc Hplay. apply* PlayRead.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
@@ -833,8 +953,8 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay: PlayRead is a no-op on the play state *)
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
-      exists D TC. eexists. splits.
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
+      exists D TC g0. eexists. splits.
       * applys PlaySnoc Hplay. apply* PlayRead.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
@@ -874,8 +994,11 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay: PlayReadVolatile fast-forwards [t]'s commit to [g] *)
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
-      exists D (TC[t := g]). eexists. splits.
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
+      match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+      forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
+      forwards Heqg0: is_global_head_unique HwfG Hhead0 Hheadr. subst g0.
+      exists D (TC[t := g]) g. eexists. splits.
       * applys PlaySnoc Hplay. apply* PlayReadVolatile.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
@@ -917,13 +1040,13 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay: PlayWrite updates [t]'s delta at [x] *)
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (st_old & e_old & Hbinds_delta): Hdelta t Htin.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      exists (D[t := d[x := v]]) TC. eexists. splits.
+      exists (D[t := d[x := v]]) TC g0. eexists. splits.
       * applys PlaySnoc Hplay.
         apply (PlayWrite _ _ _ _ _ _ _ d).
         -- assumption.
@@ -970,12 +1093,15 @@ Proof.
     + applys* describes_free_snoc.
     + (* 7. Replay: PlayWriteVolatile commits [t]'s delta (write folded in) onto the global head *)
       rewrite~ update_update. rewrite~ update_update.
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
+      match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+      forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
+      forwards Heqg0: is_global_head_unique HwfG Hhead0 Hheadr. subst g0.
       forwards (st_old & e_old & Hbinds_delta): Hdelta t HtinX.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      exists (D[t := empty]) (TC[t := g']). eexists. splits.
+      exists (D[t := empty]) (TC[t := g']) g'. eexists. splits.
       * applys PlaySnoc Hplay. applys PlayWriteVolatile.
         -- assumption.
         -- lets HtinD: HdomD HtinX. applys* binds_of_indom_read.
@@ -1155,13 +1281,16 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay: PlaySpawn commits parent's delta; child starts at the new head *)
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
+      match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+      forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
+      forwards Heqg0: is_global_head_unique HwfG Hhead0 Hheadr. subst g0.
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (st_old & e_old & Hbinds_delta): Hdelta t Htin.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      exists (D[t := empty][t' := empty]) (TC[t := g'][t' := g']). eexists. splits.
+      exists (D[t := empty][t' := empty]) (TC[t := g'][t' := g']) g'. eexists. splits.
       * applys PlaySnoc Hplay. applys PlaySpawn.
         -- lets HtinD: HdomD Htin. applys* binds_of_indom_read.
         -- assumption.
@@ -1230,8 +1359,11 @@ Proof.
     + applys* describes_locked_snoc.
     + applys* describes_free_snoc.
     + (* 7. Replay: PlayJoin fast-forwards [t] to the global head [g] *)
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
-      exists D (TC[t := g]). eexists. splits.
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
+      match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+      forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
+      forwards Heqg0: is_global_head_unique HwfG Hhead0 Hheadr. subst g0.
+      exists D (TC[t := g]) g. eexists. splits.
       * applys PlaySnoc Hplay. apply PlayJoin.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
@@ -1305,8 +1437,11 @@ Proof.
            forwards~ Hbinds': binds_update_neq_inv Hbinds.
            apply (Hdunlock l0). exact Hbinds'.
     + (* 7. Replay: PlayLock fast-forwards [t] to the global head [g] *)
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
-      exists D (TC[t := g]). eexists. splits.
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
+      match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+      forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
+      forwards Heqg0: is_global_head_unique HwfG Hhead0 Hheadr. subst g0.
+      exists D (TC[t := g]) g. eexists. splits.
       * applys PlaySnoc Hplay. apply PlayLock.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
@@ -1383,13 +1518,16 @@ Proof.
            forwards~ Hbinds': binds_update_neq_inv Hbinds.
            apply (Hdunlock l0). exact Hbinds'.
     + (* 7. Replay: PlayUnlock commits [t]'s delta onto the global head *)
-      destruct Hdplay as (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC).
+      destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
+      match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
+      forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
+      forwards Heqg0: is_global_head_unique HwfG Hhead0 Hheadr. subst g0.
       asserts Htin: (t \indom T). { apply* indom_of_binds. }
       forwards (st_old & e_old & Hbinds_delta): Hdelta t Htin.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      exists (D[t := empty]) (TC[t := g']). eexists. splits.
+      exists (D[t := empty]) (TC[t := g']) g'. eexists. splits.
       * applys PlaySnoc Hplay. applys PlayUnlock.
         -- lets HtinD: HdomD Htin. applys* binds_of_indom_read.
         -- assumption.

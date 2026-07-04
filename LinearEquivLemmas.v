@@ -2161,14 +2161,17 @@ Qed.
 Theorem linear_sync_conflict_sound :
   forall log T G g L t e d c,
     wf_log log ->
-    describes log (T, G, g, L) ->
+    describes log (T, G, L) ->
+    is_global_head G g ->
     binds T t (state_running, te_exp e, d, c) ->
     ~ lin_conflict_free d c g G ->
     ~ conflict_free log.
 Proof.
-  introv Hwf Hdesc Hbt Hncf Hcflog.
+  introv Hwf Hdesc Hhead Hbt Hncf Hcflog.
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
-    (D & TC & CH & Hplay & Hdelta & HdomD & HdomTC)).
+    (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
+  forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
+  forwards Heqg: is_global_head_unique HwfG Hhead0 Hhead. subst g0.
   lets Htin: (indom_of_binds Hbt).
   asserts HtD: (t \indom D). { applys HdomD Htin. }
   asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
@@ -2307,16 +2310,15 @@ Lemma describes_wf_cfg :
     describes log cfg ->
     wf_cfg cfg.
 Proof.
-  introv Hdesc. destruct cfg as [[[T G] g] L].
+  introv Hdesc. destruct cfg as [[T G] L].
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
-    (D & TC & CH & Hplay & HdT & HdomD & HdomTC)).
+    (D & TC & g & CH & Hplay & HdT & HdomD & HdomTC)).
   forwards (Hwfg & Hgin & HTCin): play_log_graph_facts Hplay.
   forwards (Htot & Hmax & _): play_log_inv Hplay.
   splits.
   - exact Hwfg.
   - exact Htot.
-  - exact Hgin.
-  - exact Hmax.
+  - exists g. splits*.
   - introv Hb.
     lets Hin: (indom_of_binds Hb).
     forwards (st0 & e0 & Hb0): HdT Hin.

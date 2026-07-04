@@ -84,7 +84,7 @@ Inductive play_log :
 
 Definition describes (log : log) (cfg : cfg) : Prop :=
   match cfg with
-  | (T, G, g, L) =>
+  | (T, G, L) =>
       (* Spawned and inited threads exist *)
       (forall t2,
           (exists t1, mem (event_spawn t1 t2) log) \/ t2 = t_root <-> t2 \indom T)
@@ -110,9 +110,10 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (forall l,
           (exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> binds L l ls_free)
       /\
-      (* Replaying the log produces the commit graph [G] and the global head [g];
+      (* Replaying the log produces the commit graph [G]; some replayed global
+         head [g] witnesses it (no longer tracked in [cfg], see [Linear.cfg]) --
          each thread's diff and commit are the replayed [D[t]] and [TC[t]]. *)
-      (exists D TC CH,
+      (exists D TC g CH,
           play_log log init_play_cfg (D, TC, G, g) CH /\
             (forall t, t \indom T -> exists st e, binds T t (st, e, D[t], TC[t])) /\
             (forall t, t \indom T -> t \indom D) /\
@@ -121,100 +122,108 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
 
 (* The single-branch well-formedness of a configuration, transferred from
    LoggingBranching's [wf_cfg] and strengthened with the linear-history property:
-     - the commit graph is well-formed and TOTALLY ORDERED (a single chain);
-     - the global head [g] is in the graph and is its maximum (every commit is an
-       ancestor of [g]), so any thread can fast-forward to it;
+     - the commit graph is well-formed and TOTALLY ORDERED (a single chain),
+       hence has a (unique) maximum commit -- the global head -- that every
+       thread can fast-forward to ([is_global_head], [total_order_max_commit]
+       in GraphFacts.v);
      - every thread's commit lives in the graph.
    Locks no longer carry a commit, so (unlike Branching) there is no lock clause. *)
 Definition wf_cfg (cfg : cfg) : Prop :=
   match cfg with
-  | (T, G, g, L) =>
+  | (T, G, L) =>
       wf_graph G /\
       total_order G /\
-      graph_indom G g /\
-      (forall c, graph_indom G c -> ancestor G c g) /\
+      (exists g, is_global_head G g) /\
       (forall t st e d c, binds T t (st, e, d, c) -> graph_indom G c)
   end.
 
 (* The initial configuration: a single new root thread whose commit is the graph
-   root, an empty single-commit graph whose head is that root, and no locks. *)
+   root, an empty single-commit graph (whose head is that root, though it is no
+   longer tracked explicitly), and no locks. *)
 Definition init_cfg (e : exp) : cfg :=
   (empty[t_root := (state_new, te_exp e, empty_diff, root_commit)],
    graph_root root_commit,
-   root_commit,
    empty).
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
-| StepStart : forall T G g L t e d c log,
+| StepStart : forall T G L t e d c g log,
     binds T t (state_new, e, d, c) ->
-    step ((T, G, g, L), log) ((T[t := (state_running, e, d, g)], G, g, L), log & event_start t)
-| StepEnd : forall T T' G G' g g' L t r d c log,
+    is_global_head G g ->
+    step ((T, G, L), log) ((T[t := (state_running, e, d, g)], G, L), log & event_start t)
+| StepEnd : forall T T' G G' L t r d c g g' log,
     binds T t (state_running, te_ret r, d, c) ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' T G = (T', G') ->
-    step ((T, G, g, L), log) ((T'[t := (state_terminated, te_ret r, empty, g')], G', g', L), log & event_end t)
-| StepReadLocal : forall T G g L t e d c K x v log,
+    step ((T, G, L), log) ((T'[t := (state_terminated, te_ret r, empty, g')], G', L), log & event_end t)
+| StepReadLocal : forall T G L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
     x \notin Volatiles ->
     binds d x v ->
-    step ((T, G, g, L), log) ((T[t := (state_running, K (ret_val v), d, c)], G, g, L), log & event_read t x v)
-| StepReadGlobal : forall T G g L t e d c K x v log,
+    step ((T, G, L), log) ((T[t := (state_running, K (ret_val v), d, c)], G, L), log & event_read t x v)
+| StepReadGlobal : forall T G L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
     x \notin Volatiles ->
     x \notindom d ->
     is_latest_value G c x v ->
-    step ((T, G, g, L), log) ((T[t := (state_running, K (ret_val v), d, c)], G, g, L), log & event_read t x v)
-| StepReadVolatile : forall T G g L t e d c K x v log,
+    step ((T, G, L), log) ((T[t := (state_running, K (ret_val v), d, c)], G, L), log & event_read t x v)
+| StepReadVolatile : forall T G L t e d c K x v g log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_read x) ->
     x \in Volatiles ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
     is_latest_value G g x v ->
-    step ((T, G, g, L), log) ((T[t := (state_running, K (ret_val v), d, g)], G, g, L), log & event_read t x v)
-| StepWrite : forall T G g L t e d c K x v log,
+    step ((T, G, L), log) ((T[t := (state_running, K (ret_val v), d, g)], G, L), log & event_read t x v)
+| StepWrite : forall T G L t e d c K x v log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_write x v) ->
     x \notin Volatiles ->
-    step ((T, G, g, L), log) ((T[t := (state_running, K void, d[x := v], c)], G, g, L), log & event_write t x v)
-| StepWriteVolatile : forall T T' G G' g g' L t e d c K x v log,
+    step ((T, G, L), log) ((T[t := (state_running, K void, d[x := v], c)], G, L), log & event_write t x v)
+| StepWriteVolatile : forall T T' G G' L t e d c K x v g g' log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_write x v) ->
     x \in Volatiles ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' (T[t := (state_running, te_exp e, d[x := v], c)]) G = (T', G') ->
-    step ((T, G, g, L), log) ((T'[t := (state_running, K void, empty, g')], G', g', L), log & event_write t x v)
-| StepSpawn : forall T T' G G' g g' L t (t' : tid) e d c K e' log,
+    step ((T, G, L), log) ((T'[t := (state_running, K void, empty, g')], G', L), log & event_write t x v)
+| StepSpawn : forall T T' G G' L t (t' : tid) e d c K e' g g' log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_spawn e') ->
     t' \notindom T ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, g')]) G = (T', G') ->
-    step ((T, G, g, L), log) ((T', G', g', L), log & event_spawn t t')
-| StepJoin : forall T G g L t t' e d c c' K r log,
+    step ((T, G, L), log) ((T', G', L), log & event_spawn t t')
+| StepJoin : forall T G L t t' e d c c' K r g log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_join t') ->
     binds T t' (state_terminated, te_ret r, empty, c') ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
-    step ((T, G, g, L), log) ((T[t := (state_running, K r, d, g)], G, g, L), log & event_join t t')
-| StepLock : forall T G g L t e d c K l log,
+    step ((T, G, L), log) ((T[t := (state_running, K r, d, g)], G, L), log & event_join t t')
+| StepLock : forall T G L t e d c K l g log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_lock l) ->
     lock_read L l = ls_free ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
-    step ((T, G, g, L), log) ((T[t := (state_running, K void, d, g)], G, g, L[l := ls_held t]), log & event_lock t l)
-| StepRelease : forall T T' G G' g g' (L : locks) t e d c K l log,
+    step ((T, G, L), log) ((T[t := (state_running, K void, d, g)], G, L[l := ls_held t]), log & event_lock t l)
+| StepRelease : forall T T' G G' (L : locks) t e d c K l g g' log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_unlock l) ->
     lock_read L l = ls_held t ->
+    is_global_head G g ->
     lin_conflict_free d c g G ->
     commit_fresh G g' ->
     global_commit t g g' T G = (T', G') ->
-    step ((T, G, g, L), log) ((T'[t := (state_running, K void, empty, g')], G', g', L[l := ls_free]), log & event_unlock t l)
+    step ((T, G, L), log) ((T'[t := (state_running, K void, empty, g')], G', L[l := ls_free]), log & event_unlock t l)
 .
 
 Hint Constructors step LoggingLinear.step : vcm.

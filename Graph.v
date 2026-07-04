@@ -73,6 +73,14 @@ Definition total_order (G : graph) : Prop :=
     graph_indom G b ->
     ancestor G a b \/ ancestor G b a.
 
+(* [g] is the maximum commit of [G]: in the graph, and an ancestor of every
+   other commit in it. In a well-formed, totally ordered graph this pins
+   [g] down uniquely (see [total_order_max_commit] in GraphFacts.v), so the
+   Linear model uses this predicate to characterise its single global head
+   instead of tracking it as data in the configuration. *)
+Definition is_global_head (G : graph) (g : commit) : Prop :=
+  graph_indom G g /\ forall c, graph_indom G c -> ancestor G c g.
+
 Definition graph_writes (G : graph) (c : commit) (x : var) (v : val) : Prop :=
   exists d, graph_binds G c d /\ binds d x v.
 
