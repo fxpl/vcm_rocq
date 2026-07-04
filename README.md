@@ -54,3 +54,8 @@ the following correspondence:
 | Lemma 5.11     | `conflict_free_merge_holds` in BranchingEquivLemmas.v                                    |
 | Corollary 5.12 | `branching_join_conflict_sound` in BranchingEquivLemmas.v                                |
 | Theorem 5.14   | `branching_equiv` in BranchingEquiv.v and `linear_equiv in LinearEquiv.v                 |
+
+Note that Lemma 5.8 in the paper does apply to volatile variables.
+There are corresponding lemmas for volatiles in
+`is_latest_value_after_volatile_pull` and
+`is_latest_value_after_volatile_pull_inv` in \*EquivLemmas.v.
