@@ -158,21 +158,23 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (forall l,
           (exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> exists h, binds L l (ls_free, h))
       /\
-      (* Replaying the log produces the commit graph, staging areas and lock/thread/volatile
-         commits.  [LC]/[VC] only record locks/volatiles that have actually been
-         *unlocked*/*written* at least once ([PlayLock]/[PlayReadVolatile] read a
-         never-touched one's parent via [lc_read]/[vc_read]'s default rather than
-         adding it), so the correspondence uses [lc_read]/[vc_read] and the domain
-         facts are one-directional: [LC]/[VC] can lag behind [L]/[VC]. *)
+      (* Replaying the log produces the commit graph, staging areas and lock/thread
+         commits, and EXACTLY the volatile-commit map [V]: unlike a lock (which
+         gains an [L]-entry on the mere *lock*, before any [LC]-recording unlock),
+         a volatile is never touched by [PlayReadVolatile]/[StepReadVolatile] --
+         only [PlayWriteVolatile]/[StepWriteVolatile] ever update [VC]/[V], with
+         the very same fresh commit, so the two never diverge. [LC] still only
+         records locks that have actually been *unlocked* at least once
+         ([PlayLock] reads a never-touched one's parent via [lc_read]'s default
+         rather than adding it), so that correspondence stays one-directional. *)
       (exists D TC LC VC CH,
           play_log log init_play_cfg (D, TC, G, LC, VC) CH /\
             (forall t, t \indom T -> exists ts e, binds T t (ts, e, D[t], TC[t])) /\
             (forall l, l \indom L -> exists ls, binds L l (ls, lc_read LC l)) /\
-            (forall x, x \indom V -> binds V x (vc_read VC x)) /\
+            VC = V /\
             (forall t, t \indom T -> t \indom D) /\
             (forall t, t \indom T -> t \indom TC) /\
-            (forall l, l \indom LC -> l \indom L) /\
-            (forall x, x \indom VC -> x \indom V))
+            (forall l, l \indom LC -> l \indom L))
   end.
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=

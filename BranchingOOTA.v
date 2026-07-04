@@ -637,7 +637,7 @@ Proof.
         rename Hb into HbT; rename Hd into Hbd
     end.
     destruct Hdesc as (_ & _ & _ & _ & _ & _ &
-      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & HV & HdomD & HdomTC & HdomLC & HdomV)).
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
     lets HtinT: (indom_of_binds HbT).
     forwards (st' & e'' & Hbd'): Hdelta HtinT.
     forwards~ Heqt: binds_inj HbT Hbd'. inverts Heqt.
@@ -847,7 +847,7 @@ Proof.
     match goal with Hxvol0 : x \in Volatiles |- _ => rename Hxvol0 into HxVol end.
     match goal with Hfr0 : commit_fresh G c'' |- _ => rename Hfr0 into Hfresh end.
     destruct Hdesc as (_ & _ & _ & Hrun & _ & _ &
-      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvol & HdomD & HdomTC & HdomLC & HdomV)).
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
     lets HtinT: (indom_of_binds HbT0).
     forwards (st' & e'' & Hbd'): Hdelta HtinT.
     forwards~ Heqt: binds_inj HbT0 Hbd'. inverts Heqt.
@@ -857,15 +857,10 @@ Proof.
     forwards HwfR: wf_log_read_last HstartT HnoendT Hwf.
     asserts HbTCc: (binds TC t (TC[t])).
     { applys binds_of_indom_read (HdomTC t HtinT); (reflexivity || typeclass). }
-    (* [V] (the config's own volatile map) and [VC] (the replay's bookkeeping
-       map) agree on [vc_read] ([vc_read_V_VC_eq]), so the fresh commit
-       [G'] built by [pull_volatile] (using [V]) matches [PlayReadVolatile]'s
-       own merge (using [VC]). *)
-    asserts HVCeq: (Branching.vc_read V x = vc_read VC x). { applys vc_read_V_VC_eq Hvol HdomV. }
     asserts HG'eq: (G' = graph_merge G (vc_read VC x) (TC[t]) c'').
     { unfold Branching.pull_volatile, Branching.do_merge in H8.
-      rewrite (read_of_binds HbT0) in H8. cbn in H8. inverts H8.
-      rewrite HVCeq. reflexivity. }
+      rewrite (read_of_binds HbT0) in H8. cbn in H8. inverts* H8.
+    }
     asserts HplayR:
       (play_log (log & event_read t x v) init_play_cfg (D, TC[t := c''], G', LC, VC) (CH & c'')).
     { rewrite HG'eq.

@@ -1723,30 +1723,6 @@ Proof.
   Unshelve. all: typeclass.
 Qed.
 
-(* The [describes]-level volatile-commit map [V] (part of the [cfg], read via
-   [Branching.vc_read] in the operational semantics) agrees with the internal
-   play-log map [VC] (read via [LoggingBranching.vc_read]) EVERYWHERE, not
-   just on [V]'s domain: where [x \indom V], [describes]' own correspondence
-   conjunct gives the equation directly; where [x \notindom V], the OTHER
-   conjunct ([x \indom VC -> x \indom V], i.e. [VC]'s domain is included in
-   [V]'s) forces [x \notindom VC] too, so both sides default to
-   [root_commit]. This lets every [VC]-based fact ([vc_read_is_latest_value],
-   [vc_read_graph_indom]) be transported to the [V] actually appearing in
-   [Branching.step]'s premises. *)
-Lemma vc_read_V_VC_eq :
-  forall V VC x,
-    (forall x, x \indom V -> binds V x (vc_read VC x)) ->
-    (forall x, x \indom VC -> x \indom V) ->
-    vc_read V x = vc_read VC x.
-Proof.
-  introv Hvol Hdom. destruct (classic (x \indom V)) as [Hin | Hnin].
-  - forwards Hb: Hvol Hin. unfold vc_read at 1. rewrite (read_default_indom Hin).
-    applys read_of_binds Hb.
-  - asserts Hninv: (x \notindom VC). { intro Hc. applys Hnin. applys Hdom Hc. }
-    unfold vc_read. rewrite (read_default_notindom Hnin). rewrite (read_default_notindom Hninv).
-    reflexivity.
-Qed.
-
 (* [vc_read VC x] is always in the graph's domain: either [x] is stored
    ([HVC]) or the default [root_commit] applies ([Hroot]). Mirrors the
    [lc_read]/[LC] reasoning already inlined at each [PlayReadVolatile] /
@@ -1839,7 +1815,7 @@ Lemma describes_wf_cfg :
 Proof.
   introv Hdesc. destruct cfg as [((T & G) & L) V].
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
-    (D & TC & LC & VC & CH & Hplay & HdT & HdL & Hdvol & HdomD & HdomTC & HdomLClk & HdomVC)).
+    (D & TC & LC & VC & CH & Hplay & HdT & HdL & Hveq & HdomD & HdomTC & HdomLClk)).
   forwards Hpgwf: play_log_graph_wf Hplay.
   destruct Hpgwf as (_ & HTC & HLC & HVC & Hroot).
   splits.
@@ -1858,13 +1834,11 @@ Proof.
     + rewrite (read_default_indom Hindom). applys* HLC.
     + rewrite (read_default_notindom Hnotin). exact Hroot.
   - introv Hb.
+    rewrite <- Hveq in Hb.
     lets Hin: (indom_of_binds Hb).
-    forwards Hb0: Hdvol Hin.
-    forwards Heq: binds_inj Hb Hb0; [ typeclass | ].
-    subst c.
-    unfold vc_read. destruct (classic (x \indom VC)) as [Hindom|Hnotin].
-    + rewrite (read_default_indom Hindom). applys* HVC.
-    + rewrite (read_default_notindom Hnotin). exact Hroot.
+    forwards HVCx: HVC Hin.
+    forwards Heq: read_of_binds Hb.
+    subst c. exact HVCx.
 Qed.
 
 (* Every graph x-writer [cx] is the commit produced by some flush at position [f']
@@ -3367,7 +3341,7 @@ Proof.
   forwards (HwfG & _ & Hcommits & Hlockcommits & _): describes_wf_cfg Hdesc.
   forwards Hcdom: Hcommits Hbt'.
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
-    (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
+    (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC)).
   lets Htin: (indom_of_binds Hbt).
   asserts HtD: (t \indom D). { applys HdomD Htin. }
   asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
@@ -3391,7 +3365,7 @@ Proof.
   forwards (HwfG & _ & Hcommits & Hlockcommits & _): describes_wf_cfg Hdesc.
   forwards Hcdom: Hlockcommits Hbl.
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
-    (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
+    (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC)).
   lets Htin: (indom_of_binds Hbt).
   asserts HtD: (t \indom D). { applys HdomD Htin. }
   asserts HtTC: (t \indom TC). { applys HdomTC Htin. }

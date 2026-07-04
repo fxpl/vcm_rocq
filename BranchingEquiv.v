@@ -342,7 +342,7 @@ Proof.
     destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
     apply Hwrite in H6 as (t' & log'0 & Hfilter).
     destruct HdescB as (_ & _ & _ & Hrun & _ & _ &
-      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvol & HdomD & HdomTC & HdomLC & HdomVC)).
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
@@ -353,9 +353,8 @@ Proof.
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
-      asserts HVCeq: (vc_read V x = vc_read VC x). { applys vc_read_V_VC_eq Hvol HdomVC. }
       asserts Hmerge: (conflict_free_merge (D[t]) (TC[t]) (vc_read V x) G).
-      { rewrite HVCeq. applys (>> conflict_free_merge_holds Hwf Hcflog Hplay Hdt HtTC Hcdom). }
+      { subst. applys (>> conflict_free_merge_holds Hwf Hcflog Hplay Hdt HtTC Hcdom). }
       forwards (c'' & Hfresh): exists_commit_fresh HwfG.
       asserts Hpull: (pull_volatile t x c'' T G V = (T[t := (state_running, te_exp e, D[t], c'')],
                                                        graph_merge G (vc_read V x) (TC[t]) c'')).
@@ -386,8 +385,7 @@ Proof.
       { exists t' log'0. exact Hfilter. }
       forwards Hlv0: (>> is_latest_value_after_volatile_pull Hwf Hcflog Hplay Hdt HtTC
         Hfresh Hcneq0 Hxvol Hexfilter).
-      asserts Hlv: (is_latest_value (graph_merge G (vc_read V x) (TC[t]) c'') c'' x v).
-      { rewrite HVCeq. exact Hlv0. }
+      asserts* Hlv: (is_latest_value (graph_merge G (vc_read V x) (TC[t]) c'') c'' x v).
       exists. split;
         [ applys (>> LoggingBranching.StepReadVolatile Hbinds H5 Hxvol Hmerge Hfresh Hpull Hbinds'' Hlv)
         | rewrite update_update; simpls* ].
@@ -408,7 +406,7 @@ Proof.
         exists. split; [ applys LoggingBranching.StepReadGlobal Hbinds; [ eassumption | exact Hnv | exact Hnin | exact Hlv ] | simpls* ]. }
   + (* StepWrite *)
     destruct HdescB as (_ & _ & _ & _ & _ & _ &
-      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvol & HdomD & HdomTC & HdomLC & HdomVC)).
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
@@ -423,9 +421,8 @@ Proof.
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
-      asserts HVCeq: (vc_read V x = vc_read VC x). { applys vc_read_V_VC_eq Hvol HdomVC. }
       asserts Hmerge: (conflict_free_merge (D[t]) (TC[t]) (vc_read V x) G).
-      { rewrite HVCeq. applys (>> conflict_free_merge_holds Hwf Hcflog Hplay Hdt HtTC Hcdom). }
+      { subst. applys (>> conflict_free_merge_holds Hwf Hcflog Hplay Hdt HtTC Hcdom). }
       forwards (c' & Hfresh1): exists_commit_fresh HwfG.
       asserts Hpull: (pull_volatile t x c' T G V = (T[t := (state_running, te_exp e, D[t], c')],
                                                        graph_merge G (vc_read V x) (TC[t]) c')).
@@ -439,7 +436,7 @@ Proof.
       forwards Hpgwf: play_log_graph_wf Hplay.
       destruct Hpgwf as (_ & HTCindomAll & _ & _ & _).
       asserts HTCindom: (graph_indom G (TC[t])). { applys HTCindomAll HtTC. }
-      asserts HVCindomG: (graph_indom G (vc_read V x)). { rewrite HVCeq. exact Hcdom. }
+      asserts* HVCindomG: (graph_indom G (vc_read V x)).
       asserts HwfG': (wf_graph (graph_merge G (vc_read V x) (TC[t]) c')).
       { applys graph_merge_wf HwfG Hfresh1 HVCindomG HTCindom. }
       forwards (c'' & Hfresh2): exists_commit_fresh HwfG'.
@@ -506,7 +503,7 @@ Proof.
     asserts Hmerge: (conflict_free_merge d' c' c G).
     {
       destruct HdescB as (_ & _ & _ & _ & _ & _ &
-        (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
+        (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC)).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds').
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -546,7 +543,7 @@ Proof.
     asserts Hmerge: (conflict_free_merge d c c' G).
     {
       destruct HdescB as (_ & _ & _ & _ & _ & _ &
-        (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
+        (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC)).
       forwards Hcflog: conflict_free_last_inv Hcf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
@@ -639,7 +636,7 @@ Proof.
     exists. split.
     { constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & Hstart & _ & _ & (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
+      destruct HdescB as (_ & _ & _ & Hstart & _ & _ & (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       apply Hwrite.
@@ -653,7 +650,7 @@ Proof.
     {
       constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
-      destruct HdescB as (_ & _ & _ & Hrun & _ & _ & (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC & _)).
+      destruct HdescB as (_ & _ & _ & Hrun & _ & _ & (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC)).
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       forwards* Heq: binds_inj Hbinds'.
@@ -680,7 +677,7 @@ Proof.
        which is exactly what [Hwrite] needs. *)
     destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
     destruct HdescB as (_ & _ & _ & Hrun & _ & _ &
-      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hvol & HdomD & HdomTC & HdomLC & HdomVC)).
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
     forwards~ (ts & e' & Hbinds'): Hdelta t.
     asserts* ->: (d = D[t]).
     forwards* Heq: binds_inj Hbinds'.
@@ -695,12 +692,10 @@ Proof.
     asserts* Hdt: (t \indom D).
     asserts* HtTC: (t \indom TC).
     asserts Hcdom: (graph_indom G (vc_read VC x)). { applys vc_read_graph_indom Hplay. }
-    asserts HVCeq: (vc_read V x = vc_read VC x). { applys vc_read_V_VC_eq Hvol HdomVC. }
     asserts Hcneq: (vc_read VC x <> c'').
     { intro Heqc. rewrite Heqc in Hcdom. applys commit_fresh_not_indom Hfresh Hcdom. }
-    rewrite HVCeq in Hlv.
     forwards Hcf': conflict_free_last_inv Hcf.
-    forwards* Hex: (>> is_latest_value_after_volatile_pull_inv Hwf Hcf' Hplay Hdt HtTC Hfresh Hcneq Hxvol Hlv).
+    subst. forwards* Hex: (>> is_latest_value_after_volatile_pull_inv Hwf Hcf' Hplay Hdt HtTC Hfresh Hcneq Hxvol Hlv).
     exists. split.
     { constructors*. apply Hwrite. exact Hex. }
     repeat rewrite update_update; simpls*.
