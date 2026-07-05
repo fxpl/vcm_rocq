@@ -33,12 +33,7 @@ Definition blocked (T : threads) (L : locks) (a : eff) : Prop :=
   end.
 
 (* Progress for the underlying sequential language: every running,
-   still-computing thread can take a [step_ul] step. Nothing is assumed
-   about whether the resulting effect is [enabled] -- a thread offering a
-   [step_ul] to a disabled effect is exactly the [forbidden] situation that
-   [progress] reports separately. A thread never reduces to a [te_ret] on its
-   own -- it becomes [te_ret] only as a side-effect of the concurrent
-   semantics, i.e. when its continuation hands one back. *)
+   still-computing thread can take a [step_ul] step. *)
 Definition ul_progress (cfg : cfg) : Prop :=
   match cfg with
   | (T, H, L) =>
@@ -173,21 +168,7 @@ Qed.
    take one more [step], or it is [forbidden] (some thread's next [step_ul] is
    to a disabled effect: a read of an unallocated variable, or an unlock of a
    lock it does not hold).
-
-   Proof sketch (by induction over the -- finite -- thread domain):
-     - [state_new] threads can always [StepStart].
-     - running [te_ret r] threads can always [StepEnd].
-     - running [te_exp e] threads can [step_ul] (premise) to some effect;
-       writes/spawns fire unconditionally; joins/locks fire unless blocked, in
-       which case -- if *every* reduction is blocked -- the thread is inert;
-       reads/unlocks fire if enabled (reads hit [dom H], unlocks hold the
-       lock), otherwise the configuration is [forbidden].
-     - [state_terminated] threads contribute to [done].
-   If no thread can step or is forbidden, then there are no [new] threads and
-   no running [te_ret] threads, every running [te_exp] thread is inert, hence
-   the configuration is [done] (no inert threads) or [deadlocked] (some
-   inert). *)
-(* [thread] is inhabited, so we can read a binding out of a domain membership. *)
+*)
 #[local] Instance inhab_sm_thread : Inhab thread.
 Proof. apply (Inhab_of_val (state_new, te_ret ret_race)). Qed.
 

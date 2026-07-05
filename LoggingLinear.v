@@ -8,16 +8,11 @@ Import Linear.
 Import Log.
 Import LogFacts.
 
-(* Replaying the log reconstructs the single-branch commit graph.  Compared with
-   LoggingBranching's [play_event], the play state carries the GLOBAL HEAD [g] (a
-   commit) in place of the per-lock commits [LC]:
-     - pushes (end / spawn / unlock) commit the actor's diff *onto [g]*, producing
-       a fresh commit [g'] that becomes the new head and the actor's commit;
-     - pulls (start / join / lock) fast-forward the actor's commit to [g] and
-       leave the graph (and head) unchanged -- there is no merge;
-     - lock events need no special handling for the graph (locks carry no commit),
-       so a single [PlayLock] rule suffices; [StepLock]/[StepRelease] read the
-       lock state via the total [lock_read] (defaulting to [ls_free]). *)
+(* Linear augmented with an execution log ([Log.v]) recording every step as
+   an event. [play_log] replays a log back into a commit graph and global
+   head on its own, independently of any live configuration, and
+   [describes] characterises a configuration by requiring it to be exactly
+   what replaying its own log produces. *)
 
 Definition deltas := map tid diff.
 Definition commits := map tid commit.
@@ -111,8 +106,8 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
           (exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> binds L l ls_free)
       /\
       (* Replaying the log produces the commit graph [G]; some replayed global
-         head [g] witnesses it (no longer tracked in [cfg], see [Linear.cfg]) --
-         each thread's diff and commit are the replayed [D[t]] and [TC[t]]. *)
+         head [g] witnesses it -- each thread's diff and commit are the
+         replayed [D[t]] and [TC[t]]. *)
       (exists D TC g CH,
           play_log log init_play_cfg (D, TC, G, g) CH /\
             (forall t, t \indom T -> exists st e, binds T t (st, e, D[t], TC[t])) /\
@@ -120,14 +115,13 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
             (forall t, t \indom T -> t \indom TC))
   end.
 
-(* The single-branch well-formedness of a configuration, transferred from
-   LoggingBranching's [wf_cfg] and strengthened with the linear-history property:
+(* The single-branch well-formedness of a configuration:
      - the commit graph is well-formed and TOTALLY ORDERED (a single chain),
        hence has a (unique) maximum commit -- the global head -- that every
        thread can fast-forward to ([is_global_head], [total_order_max_commit]
        in GraphFacts.v);
      - every thread's commit lives in the graph.
-   Locks no longer carry a commit, so (unlike Branching) there is no lock clause. *)
+   Locks carry no commit here (unlike Branching), so there is no lock clause. *)
 Definition wf_cfg (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, L) =>
@@ -136,14 +130,6 @@ Definition wf_cfg (cfg : cfg) : Prop :=
       (exists g, is_global_head G g) /\
       (forall t st e d c, binds T t (st, e, d, c) -> graph_indom G c)
   end.
-
-(* The initial configuration: a single new root thread whose commit is the graph
-   root, an empty single-commit graph (whose head is that root, though it is no
-   longer tracked explicitly), and no locks. *)
-Definition init_cfg (e : exp) : cfg :=
-  (empty[t_root := (state_new, te_exp e, empty_diff, root_commit)],
-   graph_root root_commit,
-   empty).
 
 Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 | StepStart : forall T G L t e d c g log,
@@ -227,3 +213,10 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
 .
 
 Hint Constructors step LoggingLinear.step : vcm.
+
+(* The initial configuration: a single new root thread whose commit is the graph
+   root, an empty single-commit graph whose head is that root, and no locks. *)
+Definition init_cfg (e : exp) : cfg :=
+  (empty[t_root := (state_new, te_exp e, empty_diff, root_commit)],
+   graph_root root_commit,
+   empty).

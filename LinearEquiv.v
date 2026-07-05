@@ -212,10 +212,10 @@ Proof.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
     forwards Hcflog: conflict_free_last_inv Hcf.
     destruct (classic (x \in Volatiles)) as [Hxvol | Hnv].
-    * (* volatile write: conflict-check then commit in one step (no
-         [is_latest_value] obligation, unlike the read side -- purely
-         mechanical, mirroring [StepEnd]'s [global_commit] handling above but
-         on a diff pre-updated with [x := v]) *)
+    * (* volatile write: conflict-check then commit in one step, mirroring
+         [StepEnd]'s [global_commit] handling but on a diff pre-updated with
+         [x := v]; unlike the read side, there is no [is_latest_value]
+         obligation *)
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       asserts Hlcf: (lin_conflict_free (D[t]) (TC[t]) g G).
@@ -241,7 +241,7 @@ Proof.
         [ exact Hbinds | exact H5 | exact Hxvol | exact Hhead | exact Hlcf | exact Hfresh | exact Heq ]. }
       { apply conj; [ exact Hmt3 | reflexivity ]. }
       typeclass.
-    * (* non-volatile write: unconditional, as before *)
+    * (* non-volatile write: unconditional *)
       exists. splits; [ applys StepWrite Hbinds; [ eassumption | exact Hnv ] | simpls* ].
   - (* StepSpawn *)
     forwards (g' & Hfresh): exists_commit_fresh HwfG.
@@ -427,11 +427,7 @@ Proof.
     * clears HdescSh HdescL.
       simpls*.
   + (* StepReadVolatile: the SharedMemory side has no volatile distinction, so
-       this maps to a plain [SharedMemory.StepRead];
-       [is_latest_value_after_volatile_pull_inv] recovers the "last write in
-       the log" characterization [Hwrite] needs, from [is_latest_value]
-       evaluated at the global head [g] (not at [t]'s own, possibly stale,
-       commit -- there is no per-thread commit distinction to make here). *)
+       this maps to a plain [SharedMemory.StepRead]. *)
     exists. split.
     * constructors*.
       destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
@@ -447,12 +443,8 @@ Proof.
   + (* StepWrite *)
     clears HdescSh HdescL.
     eexists. split; [ constructors* | simpls*].
-  + (* StepWriteVolatile: purely mechanical -- a [SharedMemory.StepWrite]
-       always matches (no [is_latest_value] obligation on the write side).
-       [matching_threads] needs the same explicit chain as [linear_complete]'s
-       [StepWrite] case: [T'] comes from a [global_commit] on a pre-updated
-       [T], so [simpl]/[auto]'s hint search can't bridge the double update
-       without an explicit [update_update] rewrite. *)
+  + (* StepWriteVolatile: a [SharedMemory.StepWrite] always matches, since
+       there is no [is_latest_value] obligation on the write side. *)
     clears HdescSh HdescL.
     match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ => rename H into Hgc end.
     asserts Hdom0: (t \indom (Tsh[t := (state_running, te_exp e)])).

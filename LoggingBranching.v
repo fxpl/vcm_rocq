@@ -11,6 +11,12 @@ Import Branching.
 Import Log.
 Import LogFacts.
 
+(* Branching augmented with an execution log ([Log.v]) recording every step
+   as an event. [play_log] replays a log back into a commit graph and set of
+   branches on its own, independently of any live configuration, and
+   [describes] characterises a configuration by requiring it to be exactly
+   what replaying its own log produces. *)
+
 Definition deltas := map tid diff.
 Definition commits := map tid commit.
 Definition lcommits := map lid commit.
@@ -78,10 +84,6 @@ Inductive play_event : event -> (deltas * commits * graph * lcommits * volatiles
     commit_fresh G c' ->
     play_event (event_join t1 t2) (D, TC, G, LC, VC) (D, TC[t1 := c'], graph_merge G c2 c1 c', LC, VC)
 | PlayLock :
-  (* [lc_read LC l] defaults to [root_commit] for a never-touched lock, so a
-     single rule covers both the "already touched" and "fresh lock" cases
-     (merging with [root_commit] -- a universal ancestor with an empty diff
-     -- is always conflict-free, matching [Branching.StepLock]). *)
   forall D TC G LC VC t l c1 c',
     binds TC t c1 ->
     commit_fresh G c' ->
@@ -108,27 +110,6 @@ Inductive play_log : log -> (deltas * commits * graph * lcommits * volatiles) ->
     play_event E (D', TC', G', LC', VC') (D'', TC'', G'', LC'', VC'') ->
     play_log (log & E) (D, TC, G, LC, VC) (D'', TC'', G'', LC'', VC'') (CH & TC''[get_thread E])
 .
-
-(* TODO: Move to Log.v *)
-Definition is_sync_event (E : event) :=
-  match E with
-  | event_spawn t _
-  | event_join t _
-  | event_lock t _
-  | event_unlock t _
-  | event_start t
-  | event_end t => True
-  | _ => False
-  end.
-
-Fixpoint get_uncommitted' (t : tid) (l : log) (acc : log) :=
-  match l with
-  | nil => acc
-  | E :: log' => get_uncommitted' t log' (If is_sync_event E then nil else acc & E)
-  end.
-
-Definition get_uncommitted (t : tid) (log : log) :=
-  get_uncommitted' t log nil.
 
 Definition describes (log : log) (cfg : cfg) : Prop :=
   match cfg with
@@ -158,15 +139,8 @@ Definition describes (log : log) (cfg : cfg) : Prop :=
       (forall l,
           (exists t log', LibList.filter (fun e => touches_lock l e) log = log' & event_unlock t l) <-> exists h, binds L l (ls_free, h))
       /\
-      (* Replaying the log produces the commit graph, staging areas and lock/thread
-         commits, and EXACTLY the volatile-commit map [V]: unlike a lock (which
-         gains an [L]-entry on the mere *lock*, before any [LC]-recording unlock),
-         a volatile is never touched by [PlayReadVolatile]/[StepReadVolatile] --
-         only [PlayWriteVolatile]/[StepWriteVolatile] ever update [VC]/[V], with
-         the very same fresh commit, so the two never diverge. [LC] still only
-         records locks that have actually been *unlocked* at least once
-         ([PlayLock] reads a never-touched one's parent via [lc_read]'s default
-         rather than adding it), so that correspondence stays one-directional. *)
+      (* Replaying the log produces the commit graph, staging
+         areas, lock/thread/volatile commits. *)
       (exists D TC LC VC CH,
           play_log log init_play_cfg (D, TC, G, LC, VC) CH /\
             (forall t, t \indom T -> exists ts e, binds T t (ts, e, D[t], TC[t])) /\

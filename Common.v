@@ -2,6 +2,11 @@ From TLC Require Export LibTactics LibLogic LibList LibSet LibMap LibNat LibMin 
 
 From Stdlib Require Export Lia.
 
+(* Infrastructure shared by every model in this development: the base types
+   (threads, locks, variables, values, ...), the sequential ("underlying
+   language") expression/step relation each model reuses unchanged, and the
+   tactic/hint setup used throughout. *)
+
 (* Hint database *)
 Hint Extern 1 => congruence : vcm.
 Hint Extern 1 => nat_math : vcm.

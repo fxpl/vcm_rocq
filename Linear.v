@@ -2,26 +2,28 @@ From Vcm Require Import Common.
 From Vcm Require Import Graph.
 
 (* ------------------------------------------------------------------------ *)
-(* The Linear model, re-expressed with the commit-graph machinery.          *)
+(* The Linear model: SharedMemory (see SharedMemory.v) re-expressed with a  *)
+(* commit graph, using a SINGLE global branch shared by every thread, lock  *)
+(* and volatile variable (a specialisation of Branching.v's per-owner       *)
+(* branches down to one).                                                   *)
 (*                                                                          *)
-(* It is the Branching model specialised to a SINGLE global branch: instead *)
-(* of every thread (and lock critical section) owning a branch of its own,  *)
-(* they all synchronise against one shared commit chain.  The configuration *)
-(* therefore carries a distinguished [global] commit -- the head of that    *)
-(* single branch -- alongside the graph.                                    *)
+(* Memory is a graph of immutable commits, each holding a diff; the whole   *)
+(* graph forms one chain, and its head is the global branch everyone        *)
+(* synchronises against ([is_global_head] in Graph.v).                      *)
 (*                                                                          *)
-(* Differences from Branching.v:                                            *)
-(*   - [pull] is a fast-forward, not a [graph_merge]: a thread is always    *)
-(*     *behind* the global head (an ancestor of it on the one chain), so    *)
-(*     synchronising just moves its commit pointer to the head.  No new     *)
-(*     commit is created.                                                    *)
-(*   - [push] commits a thread's diff *onto the global head* (advancing it), *)
-(*     rather than onto the thread's own commit.  This is where the         *)
-(*     write-write conflict check lives: a thread may only commit if none of *)
-(*     the variables it writes were written by a commit it has not yet seen. *)
-(*   - locks no longer carry a commit: lock/unlock synchronise through the   *)
-(*     global branch (lock = pull, unlock = push), so a lock is just         *)
-(*     free / held.                                                          *)
+(*   - a thread stages its writes locally (in a diff) until it next         *)
+(*     synchronises, and reads either its own staged value or the latest    *)
+(*     value visible at its own commit;                                     *)
+(*   - synchronising is a PULL, which here is just a fast-forward (a        *)
+(*     thread is always *behind* the global head on the one chain, so no    *)
+(*     merge is ever needed): the thread's commit pointer simply moves to   *)
+(*     the head after checking for conflict;                                *)
+(*   - a synchronising WRITE additionally PUSHES: it commits the thread's   *)
+(*     staged diff *onto the global head* (advancing it), after pulling     *)
+(*     and checking for conflict;                                           *)
+(*   - locks carry no commit of their own here (unlike Branching): since    *)
+(*     there is only one branch, lock/unlock synchronise through it         *)
+(*     directly (lock = pull, unlock = push), so a lock is just free/held.  *)
 (* ------------------------------------------------------------------------ *)
 
 Definition thread := (thread_state * thread_exp * diff * commit)%type.
@@ -37,13 +39,6 @@ Definition threads := map tid thread.
 (* Locks carry no version: synchronisation goes through the global branch. *)
 Definition locks := map lid lock_state.
 
-(* The configuration no longer tracks the global head as data: in a
-   well-formed, totally ordered graph it is always the unique maximum commit
-   of [G] ([is_global_head], [total_order_max_commit] in GraphFacts.v), so
-   rules that need it introduce it as a fresh existentially-quantified
-   witness satisfying [is_global_head] rather than reading it off the state.
-   Rules that never touch the global head (local reads/writes, reads from a
-   thread's own commit) simply drop it. *)
 Definition cfg : Type := threads * graph * locks.
 
 (* [commit]: flush thread [t]'s diff onto the global head [g], producing the
@@ -90,8 +85,7 @@ Inductive step : cfg -> cfg -> Prop :=
     step_ul e K (eff_read x) ->
     x \notin Volatiles ->
     x \notindom d ->
-    (* a thread reads the latest value visible at its own commit -- the
-       global head never enters into this *)
+    (* a thread reads the latest value visible at its own commit *)
     is_latest_value G c x v ->
     step (T, G, L) (T[t := (state_running, K (ret_val v), d, c)], G, L)
 | StepReadVolatile : forall T G L t e d c K x v g,

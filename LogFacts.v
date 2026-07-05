@@ -14,8 +14,7 @@ Proof.
   exists (l & e). rewrite Hlg. rew_list~.
 Qed.
 
-(* The root start event is present in any non-empty well-formed log -- this is
-   the fact that used to live as a conjunct of [describes]. *)
+(* The root start event is present in any non-empty well-formed log. *)
 Lemma wf_log_nonempty_init :
   forall log, wf_log log -> log <> nil -> mem (event_start t_root) log.
 Proof.
@@ -670,10 +669,6 @@ Proof.
     applys IHkn Hek Hgek Hns' Hn.
 Qed.
 
-(* ---------------------------------------------------------------------- *)
-(* Lemmas relocated here from BranchingEquiv.v (organization pass).          *)
-(* ---------------------------------------------------------------------- *)
-
 (* Extending a "no commit event of [t] at index >= m" property by one event:
    it survives appending any event that is not a commit event of [t]. *)
 Lemma no_commit_event_snoc :
@@ -960,6 +955,44 @@ Proof.
       -- introv HNk. forwards [(Hk0 & Hxe) | (mm & Hkm & HNmm)]: Nth_cons_inv HNk.
          ++ subst. exfalso. apply HP. reflexivity.
          ++ forwards Hle: Hmax' HNmm. nat_math.
+Qed.
+
+Lemma get_uncommitted'_has_sync :
+  forall log t acc,
+    Exists is_sync_event log ->
+    get_uncommitted' t log acc = get_uncommitted' t log nil.
+Proof.
+  introv Hex.
+  gen acc.
+  induction Hex; intros; simpls; cases_if~.
+Qed.
+
+Lemma get_uncommitted'_no_sync :
+  forall log t acc,
+    ~Exists is_sync_event log ->
+    get_uncommitted' t log acc = acc ++ log.
+Proof.
+  intros log.
+  induction log; introv Hnex; simpls; rew_list~.
+  cases_if~.
+  - false Hnex. constructors*.
+  - rew_listx in Hnex. rew_logic in Hnex. unpack.
+    rewrite~ IHlog. rew_list~.
+Qed.
+
+Lemma get_uncommited_inv :
+  forall log t,
+    exists log', log = log' ++ get_uncommitted t log.
+Proof.
+  intros log t.
+  unfolds get_uncommitted.
+  induction log; simpls.
+  - exists* (@nil event).
+  - unpack. destruct (classic (Exists is_sync_event log)).
+    + rewrite~ get_uncommitted'_has_sync. exists (a :: log'). rew_list*.
+    + cases_if.
+      * rewrite~ get_uncommitted'_no_sync. exists (a :: nil). rew_list*.
+      * rewrite~ get_uncommitted'_no_sync. exists (@nil event). rew_list*.
 Qed.
 
 Example nil_log_wf : wf_log nil.

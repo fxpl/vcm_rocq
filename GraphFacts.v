@@ -87,7 +87,7 @@ Qed.
 
 (* In a well-formed graph, a commit with no data has no proper descendants:
    it is not an edge endpoint, so no ancestry path can leave it. This subsumes
-   the explicit "fresh leaf" hypothesis previously needed for graph lemmas. *)
+   the explicit "fresh leaf" hypothesis needed by other graph lemmas. *)
 Lemma ancestor_commit_fresh_eq :
   forall G a z,
     wf_graph G ->
@@ -220,8 +220,6 @@ Proof.
     forwards ->: graph_binds_inj Hb1 Hb2.
     applys binds_inj Hbd1 Hbd2. typeclass.
 Qed.
-
-(* TODO: Add these as hints *)
 
 (* Ancestry ignores the data component and only grows when edges are added, so
    committing [c'] (which only adds the edge [(c, c')]) preserves all existing
@@ -415,63 +413,8 @@ Proof.
   - applys~ ancestor_graph_merge.
 Qed.
 
-(* TODO: These don't make sense?
-Lemma ancestor_graph_root :
-  forall G c x y,
-    ancestor G x y ->
-    commit_fresh G c ->
-    ancestor (graph_root c) x y.
-Proof.
-  introv Hanc Hfresh. destruct G as (C & P). unfold graph_root.
-  induction Hanc.
-  - apply ancestor_refl.
-  - applys AncestorTrans IHHanc. rew_set; auto_star.
-Qed.
-
-Lemma ancestor_graph_root_inv :
-  forall G c x y,
-    (forall z, ancestor G c z -> z = c) ->
-    y <> c ->
-    ancestor (graph_root G c ) x y ->
-    ancestor G x y.
-Proof.
-  introv Hsink Hneq Hanc.
-  destruct G as (C & P). unfolds graph_root.
-  gen Hneq. induction Hanc; introv Hneq.
-  - apply ancestor_refl.
-  - asserts Hc2: (c2 <> c).
-    { intro Heqc2. subst c2.
-      asserts Hanc_c': (ancestor (C, P) c c3).
-      { apply AncestorTrans with (c2 := c); auto. apply ancestor_refl. }
-      forwards: Hsink Hanc_c'. congruence. }
-    apply AncestorTrans with (c2 := c2); auto.
-Qed.
-
-Lemma graph_writes_graph_root :
-  forall G c x i v,
-    x <> c ->
-    graph_writes G x i v ->
-    graph_writes (graph_root G c) x i v.
-Proof.
-  introv Hneq (dd & Hb & Hbd). destruct G as (C & P).
-  unfolds graph_binds, graph_writes, graph_commit.
-  exists dd. split~. applys~ binds_update_neq.
-Qed.
-
-Lemma graph_writes_graph_root_inv :
-  forall G c x i v,
-    x <> c ->
-    graph_writes (graph_root G c) x i v ->
-    graph_writes G x i v.
-Proof.
-  introv Hneq (dd & Hb & Hbd). destruct G as (C & P).
-  unfolds graph_binds, graph_writes, graph_commit.
-  exists dd. split~. applys~ binds_update_neq_inv Hb.
-Qed.
-*)
-
 (* ---------------------------------------------------------------------- *)
-(* Lemmas relocated here from BranchingEquiv.v (organization pass).          *)
+(* Basic ancestry facts about freshly created commits.                    *)
 (* ---------------------------------------------------------------------- *)
 
 (* The new commit created by a commit/merge is a descendant of its parent(s). *)
@@ -815,10 +758,7 @@ Hint Resolve max_ancestor_commit : vcm.
    [total_order_commit] (the chain stays totally ordered) with
    [graph_commit_indom_same] + [max_ancestor_commit] (the fresh commit [g']
    is indom and every graph-indom commit is now its ancestor, i.e.
-   [is_global_head]). This is the workhorse for the Linear model once [g] is
-   no longer tracked as data: every rule that pushes a diff onto the graph
-   re-derives its new head with this single lemma instead of threading one
-   through the configuration. *)
+   [is_global_head]). *)
 Lemma is_global_head_commit :
   forall G g g' d,
     total_order G ->
@@ -835,9 +775,7 @@ Qed.
 
 (* The global head is unique: two commits that both dominate the whole graph
    must dominate EACH OTHER, and [wf_graph]'s antisymmetry then collapses
-   them. This is what lets a rule's own freshly-introduced [is_global_head]
-   witness be identified with any other witness known for the same graph
-   (e.g. a previously-replayed head) once [g] is no longer tracked as data. *)
+   them. *)
 Lemma is_global_head_unique :
   forall G g1 g2,
     wf_graph G ->
@@ -905,10 +843,7 @@ Qed.
 
 (* A totally ordered, well-formed graph has a maximum commit: given any
    witness [c0] showing the graph is nonempty, there is a commit [m] that
-   every graph-indom commit is an ancestor of. Once the Linear model's head
-   [g] is no longer tracked in the configuration, this is how it is recovered:
-   any commit already known to be in the graph (e.g. a thread's own pointer)
-   serves as [c0]. *)
+   every graph-indom commit is an ancestor of. *)
 Lemma total_order_max_commit :
   forall G c0,
     wf_graph G ->

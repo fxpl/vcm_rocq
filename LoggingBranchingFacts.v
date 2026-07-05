@@ -139,44 +139,6 @@ Proof.
     forwards*: binds_empty_false. typeclass.
 Qed.
 
-Lemma get_uncommitted'_has_sync :
-  forall log t acc,
-    Exists is_sync_event log ->
-    get_uncommitted' t log acc = get_uncommitted' t log nil.
-Proof.
-  introv Hex.
-  gen acc.
-  induction Hex; intros; simpls; cases_if~.
-Qed.
-
-Lemma get_uncommitted'_no_sync :
-  forall log t acc,
-    ~Exists is_sync_event log ->
-    get_uncommitted' t log acc = acc ++ log.
-Proof.
-  intros log.
-  induction log; introv Hnex; simpls; rew_list~.
-  cases_if~.
-  - false Hnex. constructors*.
-  - rew_listx in Hnex. rew_logic in Hnex. unpack.
-    rewrite~ IHlog. rew_list~.
-Qed.
-
-Lemma get_uncommited_inv :
-  forall log t,
-    exists log', log = log' ++ get_uncommitted t log.
-Proof.
-  intros log t.
-  unfolds get_uncommitted.
-  induction log; simpls.
-  - exists* (@nil event).
-  - unpack. destruct (classic (Exists is_sync_event log)).
-    + rewrite~ get_uncommitted'_has_sync. exists (a :: log'). rew_list*.
-    + cases_if.
-      * rewrite~ get_uncommitted'_no_sync. exists (a :: nil). rew_list*.
-      * rewrite~ get_uncommitted'_no_sync. exists (@nil event). rew_list*.
-Qed.
-
 Theorem step_equiv :
   forall cfg cfg' log,
     (exists log', step (cfg, log) (cfg', log')) <-> Branching.step cfg cfg'.
@@ -443,8 +405,7 @@ Proof.
     apply* wf_log_join_last.
   - (* StepLock: append [event_lock t l] -- [lock_read] unifies the
        "already touched" and "never touched" (defaulting to
-       [(ls_free, root_commit)]) cases into one constructor, so this case
-       covers both of the old [StepLock]/[StepLockFresh] proofs below. *)
+       [(ls_free, root_commit)]) cases into a single constructor. *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & Hdlock & Hdunlock & _).
     asserts (Hsmem & Hnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply* Hdrunning. }
@@ -1351,8 +1312,7 @@ Proof.
         branches; auto_star.
   - (* StepLock: log' = log & event_lock t l, T' = T[t := ...], L' = L[l := held t] --
        [lock_read] unifies the "already touched"/"never touched" cases into one
-       constructor, so this proof covers both of the old StepLock/StepLockFresh
-       cases; only the replay conjunct (7) genuinely branches on [l \indom L]. *)
+       constructor; only the replay conjunct (7) genuinely branches on [l \indom L]. *)
     lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     match goal with Hpre : lock_read L l = (ls_free, c') |- _ => rename Hpre into Hread end.
     unfolds pull_lock, do_merge.

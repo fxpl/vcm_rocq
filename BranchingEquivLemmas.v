@@ -202,18 +202,6 @@ Proof.
         exists log'.
         rew_listx. cases_if as Hwrites.
         -- simpl in Hwrites. subst. false.
-           (* There is at least one write by t to x0 in log (by Hfilter).
-              This write is in the delta of t (by Hdelta), so it has not been committed.
-              The log is conflict free (by Hcf) so the write by t to x0
-              happens before the write by t0 to x0.
-              But since t <> t0 and the write is uncommitted, the happens before
-              relation is a contradiction.
-            *)
-           (* The write [event_write t x0 v] is still in [t]'s delta, hence
-              uncommitted: [t] performs no commit event after it. So it cannot
-              happen-before the final write by [t0 <> t] (a cross-thread hb edge
-              would need a commit event of [t]). But conflict-freedom forces such
-              an hb edge. *)
            forwards (m0 & HN0 & Hns0): delta_is_uncommitted_write Hplay Hdom' Hdelta.
            forwards Hlt0: Nth_inbound HN0.
            asserts HN0f:
@@ -234,11 +222,8 @@ Proof.
            simpl in Hgt0. congruence.
         -- rew_list*.
     + (* PlayWriteVolatile: flushes D[t0] to empty, so [t = t0] is impossible
-         given [binds D[t] x v] -- but the appended event may still write [x]
-         for a DIFFERENT thread [t0], requiring the same conflict-freedom
-         argument as [PlayWrite]'s cross-thread case (this event even IS a
-         commit event, but only for [t0 <> t], which is all
-         [hb_preserves_thread] needs). *)
+         given [binds D[t] x v]; the cross-thread case is otherwise the same
+         conflict-freedom argument as [PlayWrite]. *)
       asserts Hneq: (t <> t0).
       { intros contra.
         subst. rewrite read_update_same in Hdelta.
@@ -351,10 +336,10 @@ Proof.
   inverts Hpe; auto using ancestor_graph_commit, ancestor_graph_merge.
 Qed.
 
-(* [is_latest_value_graph_commit_mono], [is_latest_value_graph_merge_mono], and
-   [is_latest_value_graph_commit_fresh_writer] -- generic graph facts, no
-   Branching/logging specifics -- now live in GraphFacts.v alongside
-   [is_latest_value_graph_merge_fresh]. *)
+(* [is_latest_value_graph_commit_mono], [is_latest_value_graph_merge_mono],
+   [is_latest_value_graph_commit_fresh_writer], and
+   [is_latest_value_graph_merge_fresh] are generic graph facts, with no
+   Branching/logging specifics, and live in GraphFacts.v. *)
 
 (* After any play step, each thread's commit pointer advances to a descendant
    (in the new graph) -- except a freshly spawned thread, hence the side-condition. *)
@@ -1008,14 +993,6 @@ Proof.
     applys* ancestor_trans.
 Qed.
 
-(* hb -> ancestry: the bridge between the log's happens-before order and the
-   commit graph. If [m] is the LAST write to [x] in the log, that write is
-   committed (no longer in [tm]'s delta), and [m] happens-before some event [n],
-   then [vm] is exactly the latest value of [x] visible at [n]'s thread's commit.
-   (Being the last write pins the committed value to [vm]; the [hb] edge forces
-   [n]'s thread to actually see it — no stale read.) This is the core soundness
-   lemma; proved separately via [hb -> commit-pointer ancestry]. *)
-
 (* Every commit that writes [x = v] in a played graph corresponds to a log write
    event of [x = v]: commits are created only by flushing a thread's delta, whose
    [x = v] binding comes (via [delta_is_uncommitted_write]) from a write event. *)
@@ -1201,9 +1178,7 @@ Qed.
 
 (* The last write of [x] is either still in [tm]'s delta (with value [vm]), or it
    has been flushed into a commit [cs] holding [x = vm] that is an ancestor of
-   [tm]'s current commit. By induction on [play_log]: the write enters [tm]'s
-   delta, stays there until a commit event of [tm] flushes it into a new commit
-   (being the last x-write, the value is still [vm] at flush time). *)
+   [tm]'s current commit. *)
 Lemma last_write_committed_or_delta :
   forall log s0 D TC G LC VC CH m tm x vm,
     wf_log log ->
@@ -1845,9 +1820,7 @@ Qed.
    (so [cx = CH[f']], a commit event of its thread [tw']), and the flushed value
    came from an x-write at some earlier position [kw'] that was still uncommitted
    at [f'] -- no commit event of [tw'] occurs in [[kw', f')]. This is the inverse
-   of [last_write_committed_or_delta], obtained by carrying the [delta_is_uncommitted_write]
-   witness through the same case analysis as [graph_writes_log_write] while keeping
-   the flush position. *)
+   of [last_write_committed_or_delta]. *)
 (* [kw' <= f'], not strictly [<]: for an ordinary write, the flush [f'] is a
    later, separate commit event, so [kw' < f']; but a *volatile* write is its
    own flush ([is_commit_event] holds directly on the write), so [kw' = f']. *)
@@ -2068,10 +2041,6 @@ Proof.
       end.
 Qed.
 
-(* Graph edges only ever point to the freshly created commit, so ancestry follows
-   creation order: a proper descendant of a commit born at [ka] (a commit event at
-   [ka] with [CH[ka] = a]) is born strictly later. *)
-
 (* The graph domain only grows along a play step. *)
 Lemma play_event_graph_indom_mono :
   forall E D' TC' G' LC' VC' D'' TC'' G'' LC'' VC'' c,
@@ -2261,12 +2230,7 @@ Proof.
 Qed.
 
 (* Graph edges follow creation order, so a proper graph-descendant of a commit
-   born at a commit event [ka] is itself born strictly later.  By induction on the
-   replay: if the target [b] is the freshly created commit ([kb = length log]) then
-   [a <> b] forces [ka < kb] directly.  Otherwise [b] is older and lives in the
-   prefix graph, so the fresh commit (a sink) is not on any path into [b]; invert
-   the ancestry to the prefix graph and apply the IH (the source [a] cannot be the
-   fresh commit, as it is an ancestor source hence in the prefix domain). *)
+   born at a commit event [ka] is itself born strictly later. *)
 Lemma ancestor_creation_order :
   forall log D TC G LC VC CH a b ka kb ea eb,
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
@@ -2310,14 +2274,7 @@ Qed.
 
 (* Maximality: the commit [cs = CH[f]] of [tm]'s flush [f] of the LAST x-write is
    the maximal x-writer in the graph -- no strict graph-descendant of [cs] writes
-   [x].  Suppose [c' <> cs] is an x-writer below [cs].  By [graph_writes_flush] it
-   is a flush at [f'] of some thread [tw'] fed by an x-write at [kw' <= m] with no
-   [tw']-commit in [[kw', f')].  If [tw' = tm]: [c'] is a proper descendant of [cs]
-   so (by [ancestor_creation_order]) [f < f'], but [f] is itself a [tm]-commit in
-   [[kw', f')] -- contradiction.  If [tw' <> tm]: [conflict_free] orders the x-write
-   at [kw' < m] before the one at [m] ([hb kw' m]); being cross-thread,
-   [hb_cross_thread_flush] yields a [tw']-commit [f''] with [kw' <= f'' < m <= f < f'],
-   again inside [[kw', f')] -- contradiction. *)
+   [x]. *)
 Lemma last_write_maximal :
   forall log D TC G LC VC CH m tm x vm f ef cs,
     conflict_free log ->
@@ -2539,15 +2496,7 @@ Qed.
 (* [vc_read VC x] (for a volatile [x] already touched, i.e. [x \indom VC]) is
    always the LATEST value of [x] in the graph: every volatile access
    immediately pulls/pushes through this single pointer, so it is exactly the
-   commit of the most recent volatile write (or [root_commit] if untouched).
-   Proved as an invariant maintained across [play_log]: at each step, either
-   [VC] and the target commit are both unchanged (any graph growth is a
-   merge/commit onto a FRESH commit, which forward-preserves [is_latest_value]
-   via the [_mono] lemmas -- the commit/spawn/end/unlock cases additionally need
-   [x \notindom d], from [volatile_notin_delta]), or the step is the
-   [PlayWriteVolatile] that just wrote [x] itself, landing [VC[x]] on the
-   freshly committed commit, which is immediately the latest value
-   ([is_latest_value_graph_commit_fresh_writer]). *)
+   commit of the most recent volatile write (or [root_commit] if untouched). *)
 Lemma vc_read_is_latest_value :
   forall log D TC G LC VC CH x,
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
@@ -2782,9 +2731,7 @@ Qed.
 (* The bridge from log happens-before to graph ancestry between flush commits:
    if [ta]'s write at [ka] (flushed into [ha] at [fa], with no [ta]-commit in
    [[ka, fa)]) happens-before [tb]'s write at [kb] (flushed into [hbb] at [fb]),
-   and the threads differ, then [ha] is an ancestor of [hbb].  The crossing flush
-   from [hb_cross_thread_flush] lands at or after [fa] and reaches [kb], and
-   [CH_thread_monotone] carries [ha] down to it and [kb] up to [hbb]. *)
+   and the threads differ, then [ha] is an ancestor of [hbb]. *)
 Lemma write_hb_flush_ancestor :
   forall log D TC G LC VC CH ta tb x va vb ka fa ea ha kb fb eb hbb,
     wf_log log ->
@@ -2825,17 +2772,8 @@ Proof.
   applys ancestor_trans Hanc1. applys ancestor_trans Hanc2 Hanc3.
 Qed.
 
-(* A data-race-free log replays to a conflict-free commit graph.
-   Two incomparable x-writers in the graph would each have a feeding log write
-   ([graph_writes_flush]); [conflict_free] orders those writes by [hb], and
-   [write_hb_flush_ancestor] then forces the two writer commits to be
-   ancestor-comparable -- contradiction. *)
 (* Any two writers of the SAME variable [x] are ancestor-comparable in a
-   conflict-free log: same-thread writers are ordered by their flush order
-   ([CH_thread_monotone]); cross-thread writers are ordered by [conflict_free]
-   (whichever writes first happens-before the other, since both access [x]),
-   then [write_hb_flush_ancestor] turns that [hb] edge into ancestry between
-   their flush commits. Extracted from (and reused by)
+   conflict-free log. Extracted from (and reused by)
    [conflict_free_log_describes_conflict_free_graph]. *)
 Lemma graph_writes_comparable :
   forall log D TC G LC VC CH x va vb ha hbb,
@@ -2920,13 +2858,7 @@ Qed.
    (GraphFacts.v) supplies exactly this, GIVEN [is_latest_value G (vc_read VC x)
    x v] and that every [x]-writer is already an ancestor of [vc_read VC x]
    ([write_ancestor_VC]: every volatile write chains directly through the
-   single [VC] pointer, unconditionally).
-
-   The witness for [is_latest_value G (vc_read VC x) x v] is the commit created
-   by the LAST [x]-write in the log ([write_volatile_graph_writes]); its
-   maximality uses [graph_writes_comparable] (which DOES need [conflict_free])
-   to compare it against any competing [x]-writer, then [Hlast] (no [x]-write
-   strictly after the last one) rules out the "competitor is later" direction. *)
+   single [VC] pointer, unconditionally). *)
 Lemma is_latest_value_after_volatile_pull :
   forall log D TC G LC VC CH t x v c'',
     wf_log log ->
@@ -2973,12 +2905,10 @@ Proof.
       asserts Hcelw: (is_commit_event (event_write tw x v)). { simpl. exact Hxvol. }
       asserts Hne': (c_lw <> c''0). { intro Heq. applys Hne (eq_sym Heq). }
       forwards [Hc | Hc]: graph_writes_comparable Hwf Hcf Hplay Hgwlw Hgw3.
-      + (* [ancestor c_lw c''0] and [c''0 <> c_lw]: [ancestor_creation_order]
-           forces [lw < f3], contradicting [f3 <= lw]. *)
+      + (* [ancestor c_lw c''0] *)
         forwards Hlwltf3: (>> ancestor_creation_order Hplay HNlwCH HNlw Hcelw HNf3CH HNf3log Hcef3 Hc Hne').
         nat_math.
-      + (* [ancestor c''0 c_lw] together with [ancestor c_lw c''0] (=[Hanc1]):
-           antisymmetry forces [c''0 = c_lw], contradicting [Hne]. *)
+      + (* [ancestor c''0 c_lw]: antisymmetry with [Hanc1] *)
         forwards Hwfg: play_log_wf_graph Hplay.
         destruct Hwfg as (_ & Hantisym & _).
         applys Hne. symmetry. applys Hantisym Hanc1 Hc. }
@@ -3000,16 +2930,9 @@ Qed.
 
 (* The reverse direction of [is_latest_value_after_volatile_pull]: whatever
    value [v] a [StepReadVolatile] pull actually observes at the fresh merge
-   commit, [v] is the log's last write of [x].  Used by [branching_sound]'s
+   commit, [v] is the log's last write of [x]. Used by [branching_sound]'s
    StepReadVolatile case to justify the matching (non-volatile) SharedMemory
-   read. If the log has no [x]-write at all, [Hlv]'s own witness writer would
-   have to come from nowhere ([graph_writes_log_write]) -- contradiction.
-   Otherwise, apply [is_latest_value_after_volatile_pull] to the log's actual
-   last write [v0] to get a second [is_latest_value] witness at the same
-   commit; the two writers are comparable ([graph_writes_comparable], after
-   stripping the merge's own contributionless fresh node), so each one's
-   maximality clause collapses the other's witness onto it, forcing [v = v0]
-   (via functionality of [graph_writes]). *)
+   read. *)
 Lemma is_latest_value_after_volatile_pull_inv :
   forall log D TC G LC VC CH t x v c'',
     wf_log log ->
@@ -3064,6 +2987,7 @@ Proof.
       exists tw0 l0. exact Heq.
 Qed.
 
+(* A data-race-free log replays to a conflict-free commit graph. *)
 Theorem conflict_free_log_describes_conflict_free_graph :
   forall log D TC G LC VC CH,
     wf_log log ->
@@ -3103,14 +3027,11 @@ Qed.
 (* Forward direction of the global-read correspondence: if [v] is the value of
    the last write to [x] in the log and [t] reads [x] globally (it is not in [t]'s
    delta), then [v] is exactly the value [t] sees in the commit graph
-   ([is_latest_value]).  The read of [x=v] by [t] is included in the (tightened)
-   conflict-free log, so it happens-after every x-write; [hb_last_write_visible]
-   then identifies its flushed value with what [t] sees.
+   ([is_latest_value]).
 
    This is the shared core that both directions of the global-read equivalence
    build on: [branching_complete] uses it as is, and [conflict_free_last_global_write]
-   (its converse) recovers it via [is_latest_value_inj].  It is the single place
-   where [hb_last_write_visible] is applied. *)
+   (its converse) recovers it via [is_latest_value_inj]. *)
 Lemma last_global_write_latest_value :
   forall log D TC G LC VC CH t x vr v t' log',
     x \notin Volatiles ->
@@ -3152,10 +3073,8 @@ Qed.
 
 (* Global counterpart of [conflict_free_last_local_write]: when [t] reads [x]
    globally (it is not in [t]'s delta), the value [t] sees ([is_latest_value]) is
-   the last write to [x] in the log.  This is the converse of
-   [last_global_write_latest_value]: take the last write (with some value [vL]),
-   observe via that lemma that [t] sees [vL], and conclude [vL = v] by
-   [is_latest_value_inj].
+   the last write to [x] in the log. This is the converse of
+   [last_global_write_latest_value].
 
    [conflict_free_graph G] is not assumed: it is recovered from the conflict-free
    [log] via [conflict_free_log_describes_conflict_free_graph]. *)

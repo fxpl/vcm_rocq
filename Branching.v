@@ -1,6 +1,35 @@
 From Vcm Require Import Common.
 From Vcm Require Import Graph.
 
+(* ------------------------------------------------------------------------ *)
+(* The Branching model: SharedMemory (see SharedMemory.v) re-expressed with *)
+(* a commit graph, so that each thread's view of memory is explicit.        *)
+(*                                                                          *)
+(* Instead of one global heap, memory is a graph of immutable commits, each *)
+(* holding a diff (the variables it changed and their new values). Every    *)
+(* thread, lock and volatile variable owns a branch: a pointer to the       *)
+(* commit representing what it has last observed.                           *)
+(*                                                                          *)
+(*   - a thread stages its writes locally (in a diff) until it next         *)
+(*     synchronises, and reads either its own staged value or the latest    *)
+(*     value visible at its own commit;                                     *)
+(*   - synchronising with a thread, lock or a volatile variable is a PULL,  *)
+(*     PUSH, or for a volatile write both:                                  *)
+(*       * pull merges the other party's branch into the thread's own       *)
+(*         (a fresh commit with both as parents), so the thread now sees    *)
+(*         everything the thread/lock/volatile has seen;                    *)
+(*       * push commits the thread's staged diff (a fresh commit with the   *)
+(*         thread's branch as parent) and hands that fresh commit to the    *)
+(*         thread/lock/volatile as its new branch;                          *)
+(*   - a commit may only be created when doing so is CONFLICT-FREE: no      *)
+(*     variable it touches may have changed on a branch the thread has not  *)
+(*     yet observed. This only needs checking on pulling; a push does not   *)
+(*     affect another thread until it pulls.                                *)
+(*                                                                          *)
+(* Linear.v specialises this to a single shared branch instead of one per   *)
+(* thread/lock/volatile.                                                    *)
+(* ------------------------------------------------------------------------ *)
+
 Definition thread := (thread_state * thread_exp * diff * commit)%type.
 
 Instance inhab_thread : Inhab thread.
@@ -162,10 +191,6 @@ Inductive step : cfg -> cfg -> Prop :=
 | StepLock : forall T T' G G' L V t e d h h' h'' K l,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_lock l) ->
-    (* Locks default to [(ls_free, root_commit)] ([lock_read] is a total
-       read), so a never-acquired lock is already free -- merging with
-       [root_commit] (a universal ancestor with an empty diff) is always
-       conflict-free, so no separate "fresh lock" case is needed. *)
     lock_read L l = (ls_free, h') ->
     conflict_free_merge d h h' G ->
     commit_fresh G h'' ->

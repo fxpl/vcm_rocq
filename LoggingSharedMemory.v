@@ -3,10 +3,13 @@ From Vcm Require Import SharedMemory.
 From Vcm Require Import Log.
 From Vcm Require Import LogFacts.
 
-(* Import FMap. *)
 Import SharedMemory.
 Import Log.
 Import LogFacts.
+
+(* SharedMemory augmented with an execution log ([Log.v]) recording every
+   step as an event, and [describes], which characterises a configuration
+   purely in terms of what its own log says happened. *)
 
 Definition describes (log : log) (cfg : cfg) : Prop :=
   match cfg with

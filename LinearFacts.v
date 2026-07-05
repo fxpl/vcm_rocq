@@ -73,10 +73,7 @@ Definition blocked (T : threads) (L : locks) (a : eff) : Prop :=
   end.
 
 (* Progress for the underlying sequential language: every running,
-   still-computing thread can take a [step_ul] step. Nothing is assumed
-   about whether the resulting effect is [enabled] -- a thread offering a
-   [step_ul] to a disabled effect is exactly the [forbidden] situation that
-   [progress] reports separately. *)
+   still-computing thread can take a [step_ul] step. *)
 Definition ul_progress (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, L) =>
@@ -88,9 +85,7 @@ Definition ul_progress (cfg : cfg) : Prop :=
 (* A thread is *forbidden* from stepping when the underlying language offers
    a reduction to an effect that is not enabled: a read that is visible
    neither locally nor globally (nor, for a volatile, at the current global
-   head), or an unlock of a lock the thread does not itself hold. The global
-   head [g] is no longer tracked in [cfg], so it is pinned down here by
-   [is_global_head] instead of read off the state. *)
+   head), or an unlock of a lock the thread does not itself hold. *)
 Definition forbidden (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, L) =>
@@ -101,20 +96,6 @@ Definition forbidden (cfg : cfg) : Prop :=
         ~ enabled G L t d c g a
   end.
 
-(* A thread is poised to synchronise with the global branch -- return
-   (commit its final diff), spawn (commit and hand the child a snapshot),
-   join a terminated thread, acquire a free lock, release a held one, read a
-   volatile (a pull), or write a volatile (a pull, then push) -- but the
-   pull/commit that synchronisation would perform is not conflict-free
-   ([lin_conflict_free]: some variable it touches was also written, on the
-   global branch, since its own commit [c]). This is the other
-   (non-[forbidden]) way a thread can get stuck: not a deadlock (the
-   blocking precondition, if any, is satisfied), not a language-level
-   violation (the effect is enabled), but a genuine write-write race against
-   the single global branch. Unlike [Branching] (where only [join]/[lock]
-   perform a check beyond blocking), *every* synchronising or
-   volatile-touching operation here checks [lin_conflict_free], since they
-   all pull from / commit onto the one shared branch. *)
 Definition conflict_detected (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, L) =>
@@ -181,9 +162,6 @@ Proof.
   - right. split; [ exact Hne | applys binds_update_neq_inv Hb Hne ].
 Qed.
 
-(* A fresh thread id always exists, since the domain is a finite set of
-   [nat]s. (Used to discharge the freshness side-condition of [StepSpawn] in
-   progress.) *)
 Lemma exists_fresh_tid :
   forall (T : threads),
     LibMap.finite T ->
@@ -200,15 +178,12 @@ Proof.
 Qed.
 
 (* [thread]-specialised re-statements of the generic [LibMap] read/binds
-   lemmas, with [Linear.inhab_thread] supplied *explicitly*. Typeclass
-   search for a bare [Inhab thread] (a [Definition], not folded back from
-   its tuple expansion) does not reliably find [Linear.inhab_thread] when
-   the goal is stated in unfolded tuple form (as [binds_inj]'s generic
-   statement forces) -- pin it down here once so the rest of the proof
-   doesn't hit that ambiguity. (Locks carry no commit in this model --
-   [locks := map lid lock_state] -- so [lock_state]'s single, canonical
-   [Inhab] instance from [Common.v] is unambiguous and needs no such
-   wrapper.) *)
+   lemmas, with [Linear.inhab_thread] supplied *explicitly*, since typeclass
+   search does not reliably resolve a bare [Inhab thread] when the goal is
+   stated in unfolded tuple form (as [binds_inj]'s generic statement
+   forces). (Locks carry no commit in this model -- [locks := map lid
+   lock_state] -- so [lock_state]'s single, canonical [Inhab] instance from
+   [Common.v] is unambiguous and needs no such wrapper.) *)
 Lemma thread_read_of_binds :
   forall {t : tid} {T : threads} {v : thread}, binds T t v -> T[t] = v.
 Proof. introv Hb. exact (@read_of_binds tid thread Linear.inhab_thread T t v Hb). Qed.
@@ -292,12 +267,6 @@ Proof.
     rew_dom. autos.
 Qed.
 
-(* [wf_cfg] is preserved by [step]: finiteness ([step_preserves_finite]),
-   well-formedness and indom-ness of the (possibly advanced) global head
-   (every graph change is a [graph_commit] onto [g], from [g] itself, which
-   is already in the graph by [HrootG] -- [graph_commit_wf] /
-   [graph_commit_indom_same]), and the terminated-thread shape (only
-   [StepEnd] produces one, with [te_ret] and an empty staging area). *)
 Theorem step_preserves_wf_cfg :
   forall cfg cfg',
     wf_cfg cfg ->
@@ -468,9 +437,7 @@ Qed.
    and induct over a *list of thread ids* [l]. Either every thread named in
    [l] is terminated-or-inert, or some thread can take a step, or the
    configuration is forbidden, or a synchronising thread's commit
-   conflicts. The global head is no longer tracked in the state, so it is
-   pulled out once via [wf_cfg]'s existential and reused throughout: [g]
-   plays exactly the role the old state component did. *)
+   conflicts. *)
 Lemma progress_aux :
   forall T G L (l : list tid),
     ul_progress (T, G, L) ->

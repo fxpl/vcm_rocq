@@ -287,9 +287,7 @@ Proof.
            apply indom_update_of_indom; (typeclass || (rewrite <- Hdeq; exact Hin0)).
         -- rewrite read_update_neq; [ exact Hin0 | congruence ].
       * (* write wt wj ww (PlayWriteVolatile): the write IS a commit event, so
-           [t = wt] contradicts [Hncl] (same as unlock/end/spawn); the volatile
-           witness is found generically since it comes through an UNNAMED
-           [inverts H] shared across all 8 [destruct E] branches *)
+           [t = wt] contradicts [Hncl] (same as unlock/end/spawn) *)
         destruct (classic (t = wt)) as [Hwt | Hwt].
         -- subst wt. exfalso. applys Hncl (length log) (event_write t wj ww); try nat_math.
            exact HNE. reflexivity.
@@ -376,11 +374,7 @@ Proof.
       * (* PlayWrite (non-volatile): contradicts [Hcf : wj \in Volatiles] *)
         congruence.
       * (* PlayWriteVolatile (event_write wt wj ww), [t = wt]: this is [t]'s own
-           flush (folding in the new write [wj := ww]); since [x] is
-           non-volatile ([Hxnvol]) while [wj] is volatile ([Hcf]), [x <> wj],
-           so [x]'s value in the flushed diff is unaffected by the fold-in and
-           still equal to its staged value ([HxinD]), matching the
-           Spawn/Unlock/End pattern. *)
+           flush, folding in the new write [wj := ww] *)
         subst t.
         match goal with HbD : binds D' wt d |- _ =>
           forwards Hdd: read_of_binds HbD end.
@@ -486,11 +480,9 @@ Proof.
               [ applys Hnw Hlt HNp0 | nat_math ] ] ] end.
       * (* PlayWrite (non-volatile): contradicts [Hcf : wj \in Volatiles] *)
         congruence.
-      * (* PlayWriteVolatile (event_write wt wj ww), [tw = wt]: either [cw]'s
-           value for [x0] came directly from this write's own fold-in (when
-           [x0 = wj], the self-flush case, so [kL = fw = length log]), or it
-           was already staged in [d] beforehand (when [x0 <> wj], same as the
-           Spawn/Unlock/End cases). *)
+      * (* PlayWriteVolatile (event_write wt wj ww), [tw = wt]: either the
+           self-flush case ([x0 = wj]) or [x0] was already staged in [d]
+           (same as the Spawn/Unlock/End cases) *)
         subst tw.
         rewrite <- Hcxeq in Hgw. rewrite read_update_same in Hgw.
         forwards Hbdd: graph_writes_graph_commit_same Hgw.
@@ -635,10 +627,7 @@ Proof.
       * applys Nth_app_l HNm.
       * (* [~ hb (log & read) (length log) m]: hb increases positions, but m < length log *)
         intros Hhb. forwards Hlt: hb_lt Hhb. forwards Hm: Nth_inbound HNm. nat_math.
-      * (* maximality: no x-write hb-strictly-between [W = D[t][x]] and the read.
-           A same-thread [W'] would be a later staged x-write, contradicting [Hnw]
-           ([m] is [t]'s LAST x-write); a cross-thread [W'] would need a commit by
-           [t] after [m] ([hb_cross_thread_flush]), contradicting [Hunc]. *)
+      * (* Maximality: no x-write hb-strictly between [W = D[t][x]] and the read. *)
         introv (m' & t'' & v' & Hneq & Hmth' & Hhb & Hhb').
         forwards Hm'lt: hb_lt Hhb'.
         forwards [Hmth'' | (Hpe' & Hee')]: Nth_last_inv Hmth'; [| inverts Hee'].
@@ -679,11 +668,7 @@ Proof.
       exists kL tw. splits.
       * applys Nth_app_l HNkL.
       * intros Hhb. forwards Hlt: hb_lt Hhb. nat_math.
-      * (* Maximality.  An intervening x0-write [W'] at [m'] (thread [t'']) with
-           [hb kL m'] and [hb m' R] flushes to a commit [cf] that (i) writes [x0]
-           ([xwrite_flush_writer]), (ii) is an ancestor of [TC[t0]] ([hb f R] +
-           [hb_pointer_ancestor]), and (iii) is a strict descendant of [cw],
-           contradicting [Hmax]. *)
+      * (* Maximality *)
         introv (m' & t'' & v' & Hneq & Hmth' & Hhb & Hhb').
         (* ---- common setup ---- *)
         forwards Hm'lt: hb_lt Hhb'.
@@ -767,9 +752,7 @@ Proof.
         forwards HancfTC: (>> hb_pointer_ancestor HwfR HplayR HhbfR HNcfapp HNRch).
         (* [cw] is an ancestor of [cf]; strictness [cf <> cw] gives the contradiction *)
         destruct (classic (tw = t'')) as [Htweq | Htwne].
-        -- (* same thread [tw = t'']: [kL] is the last [tw]-x0-write before [fw]; the
-              intervening [m' > kL] forces [m' >= fw], hence [f > fw], a strict
-              descendant [cf] of [cw]. *)
+        -- (* same thread [tw = t''] *)
            rewrite <- Htweq in Hmth''.
            forwards HmL: hb_lt HmthL.
            asserts Hm'fw: (fw <= m').
@@ -806,10 +789,7 @@ Proof.
        not a [graph_merge], so the graph [G] itself does not change here).
        Every write of a volatile variable is itself a commit event
        (self-flushing), so an intervening writer's own position already IS its
-       flush commit -- [write_volatile_graph_writes] gives this directly, with
-       no need to search for a *later* flush ([exists_first_commit] /
-       [hb_cross_thread_flush] / [xwrite_flush_writer], which assume a
-       separate, later flush). *)
+       flush commit. *)
     match goal with Hb : binds _ _ (state_running, te_exp _, _, _) |- _ => rename Hb into HbT end.
     match goal with Hxv : x \in Volatiles |- _ => rename Hxv into HxVol end.
     match goal with Hl : is_latest_value _ g _ _ |- _ => rename Hl into Hlv end.
@@ -852,14 +832,7 @@ Proof.
       exists kL tw. splits.
       * exact HNkL.
       * intros Hhb0. forwards Hlt: hb_lt Hhb0. nat_math.
-      * (* Maximality: an intervening [x0]-write [W'] at [m'] is itself a commit
-           event (self-flushing), so its own position [m'] already gives a
-           flush commit [cf] ([write_volatile_graph_writes]) that is an
-           ancestor of [g] ([hb_pointer_ancestor]).  Showing [cf] is also a
-           strict descendant of [cw] (same-thread: every volatile write
-           self-flushes, so the source [kL] is its own flush position [fw];
-           since [m'<>kL=fw], [fw<m']; different-thread: two distinct commit
-           events cannot create the same commit) contradicts maximality. *)
+      * (* Maximality *)
         introv (m' & t'' & v' & Hneq & Hmth' & Hhb & Hhb').
         asserts Hcm'commit: (is_commit_event (event_write t'' x0 v')). { simpl. exact HxVol. }
         forwards Hm'lt: Nth_inbound Hmth'.

@@ -214,16 +214,10 @@ Proof.
     + (* PlayWriteVolatile (event_write t0 x0 v0): flushes D[t0] ENTIRELY (the
          just-written value is committed, not kept locally, unlike PlayWrite) *)
       destruct (classic (t = t0)).
-      * (* t = t0: D[t0] just got flushed to empty -- [binds D''[t] x v] is
-           impossible since nothing survives locally *)
+      * (* t = t0: D[t0] just got flushed to empty *)
         subst. rewrite read_update_same in Hdelta.
         forwards contra: (indom_of_binds Hdelta). forwards*: indom_empty_inv.
-      * (* t <> t0: propagate through, ruling out [x = x0] via [conflict_free]
-           exactly as PlayWrite's [t <> t0] branch does -- [event_write t0 x0
-           v0] IS a commit event here (x0 is volatile), so [Hns0f]'s
-           obligation is closed via the [t <> t0] contradiction, not via
-           [~is_commit_event] being trivially true as in the non-volatile
-           case *)
+      * (* t <> t0 *)
         rewrite~ read_update_neq in Hdelta.
         asserts Hdom': (t \indom D').
         { lets [Hc | Hd]: (indom_update_inv Hdom). congruence. exact Hd. }
@@ -746,9 +740,7 @@ Proof.
                 exists tw m0; rew_list; applys Nth_app_l HN).
     + (* PlayWriteVolatile: graph_commit of (d0[x0 := v0]) -- either [x] IS the
          just-written variable [x0] (this event is directly the witness) or
-         it comes from [d0] via [delta_is_uncommitted_write] (same as
-         PlayEnd), since the committed diff carries the EXTRA update on top
-         of the underlying delta *)
+         it comes from [d0] via [delta_is_uncommitted_write] (same as PlayEnd) *)
       match type of Hgw with
       | graph_writes (graph_commit _ _ ?ccp (?dd0[?xx0 := ?vv0])) _ _ _ =>
         destruct (classic (cx = ccp)) as [Hc | Hc];
@@ -1129,9 +1121,7 @@ Lemma play_event_commit_new :
 Proof.
   introv Hpe Hce. inverts Hpe; cbn [is_commit_event get_thread] in *; try contradiction;
     destruct Gp as (C0 & P0).
-  - (* PlayWriteVolatile: [is_commit_event] doesn't reduce to [False] here (it
-       IS the volatile-write's own [x \in Volatiles]), so it isn't auto-closed
-       by [try contradiction] as PlayWrite's is -- same shape as PlayEnd/PlayUnlock *)
+  - (* PlayWriteVolatile: same shape as PlayEnd/PlayUnlock *)
     rewrite read_update_same. split; [ assumption | simpls; apply indom_update_same; typeclass ].
   - rewrite read_update_same. split; [ assumption | simpls; apply indom_update_same; typeclass ].
   - destruct (classic (t1 = t2)) as [Heqt | Hnet].
@@ -1643,8 +1633,7 @@ Proof.
       * (* write wt wj ww (PlayWriteVolatile): flushes [tm]'s WHOLE delta into a
            fresh commit -- if [wt = tm], [x]'s pending value (if any, i.e.
            [wj <> x] -- [wj = x] is excluded exactly as for PlayWrite) is
-           committed ALONGSIDE [wj], not merely overwritten, since
-           [graph_commit] commits the full updated diff [d[wj:=ww]] at once *)
+           committed ALONGSIDE [wj], not merely overwritten *)
         destruct (classic (wt = tm)) as [Hwt | Hwt].
         -- subst wt.
            destruct (classic (wj = x)) as [Hwj | Hwj].
@@ -1739,9 +1728,9 @@ Proof.
            { forwards Hglt: Nth_inbound HNg0. nat_math. }
            { subst ep; simpl; auto. }
       * (* PlayWriteVolatile: this write IS its own commit -- [kw = f = m],
-           matching the [kw' <= f'] weakening in [graph_writes_flush]. Note:
-           the fresh commit is named [g] here (not [g']), since [g'] was
-           already claimed by this lemma's own top-level state pair. *)
+           matching the [kw' <= f'] weakening in [graph_writes_flush]. The
+           fresh commit is named [g] here, not [g'], since [g'] is already
+           taken by this lemma's own top-level state pair. *)
         right. exists (length log) (event_write tm x vm) g. splits.
         -- nat_math.
         -- applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ].
@@ -1860,11 +1849,7 @@ Qed.
 (* The value seen after a [StepReadVolatile] pull (which reads [is_latest_value]
    at the CURRENT global head [g] directly, no merge -- unlike Branching, which
    pulls via a [graph_merge] of a per-variable [vc_read VVC x] pointer) is the
-   log's last [x]-write: the witness is the commit created by that last write
-   itself ([write_volatile_graph_writes]), and it dominates [g] via [play_log_inv]'s
-   totality ([Hmax]: every commit is an ancestor of [g]) directly -- no
-   [graph_writes_comparable]/[ancestor_creation_order] detour is needed, since
-   [g] is already known to dominate everything in the graph. *)
+   log's last [x]-write. *)
 Lemma is_latest_value_after_volatile_pull :
   forall log D TC G g CH x v,
     wf_log log ->
@@ -1908,13 +1893,7 @@ Qed.
 
 (* The reverse direction of [is_latest_value_after_volatile_pull]: whatever
    value a [StepReadVolatile] pull actually observes at the global head [g] is
-   the log's last write of [x]. If the log has no [x]-write at all, [Hlv]'s own
-   witness writer would have to come from nowhere ([graph_writes_log_write]) --
-   contradiction. Otherwise, apply [is_latest_value_after_volatile_pull] to the
-   log's actual last write to get a SECOND [is_latest_value] witness at the
-   SAME commit [g]; [is_latest_value_inj] (using [total_order_conflict_free_graph],
-   simpler than Branching's [graph_writes_comparable] detour since Linear's
-   graph is totally ordered) then forces the two values to coincide. *)
+   the log's last write of [x]. *)
 Lemma is_latest_value_after_volatile_pull_inv :
   forall log D TC G g CH x v,
     wf_log log ->
@@ -1950,9 +1929,7 @@ Qed.
 (* Forward direction of the global-read correspondence: if [v] is the value of
    the last write to [x] in the log and [t] reads [x] globally (it is not in [t]'s
    delta), then [v] is exactly the value [t] sees in the commit graph
-   ([is_latest_value]).  The read of [x=vr] by [t] is included in the (tightened)
-   conflict-free log, so it happens-after every x-write; [hb_last_write_visible]
-   then identifies the last write's flushed value with what [t] sees.
+   ([is_latest_value]).
 
    This is the shared core that both directions of the global-read equivalence
    build on: [linear_complete] uses it as is, and [conflict_free_last_global_write]
@@ -1999,9 +1976,7 @@ Proof.
 Qed.
 
 (* [15] GOAL: the value a thread reads globally is the last write of [x] in the
-   log.  Converse of [last_global_write_latest_value]: take the last write (with
-   some value [vL]), observe via that lemma that [t] sees [vL], and conclude
-   [vL = v] by [is_latest_value_inj].  Linear drops Branching's
+   log.  Converse of [last_global_write_latest_value].  Linear drops Branching's
    [conflict_free_graph G] premise: it follows from [play_log_inv] (total order)
    via [total_order_conflict_free_graph]. *)
 Lemma conflict_free_last_global_write :

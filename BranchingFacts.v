@@ -11,30 +11,34 @@ Import Branching.
 (* Well-formedness                                                       *)
 (* ===================================================================== *)
 
-(* [wf_cfg] bundles everything [progress] needs to stay inductively true
-   across a [step]: the thread map is finite (needed to generate a fresh tid
-   for [StepSpawn]), the graph is well-formed (acyclic and finite -- needed
-   for [exists_commit_fresh]), [root_commit] is always in the graph (a
-   never-touched lock's [lock_read] defaults to it), every thread's and
-   lock's commit pointer is already in the graph (needed to justify
-   [graph_commit_wf] / [graph_merge_wf] when that thread/lock is next
-   touched), a terminated thread always carries a return value with an
-   empty staging area (it became terminated only via [StepEnd]), every
-   write of a volatile variable [x] is an ancestor of [x]'s current pointer
-   [vc_read V x] (every volatile write is folded into [V[x]] by
-   [StepWriteVolatile], and [V[x]] only ever advances forward, so no earlier
-   write can be "ahead" of it), and -- crucially, since dominance alone does
-   not give existence -- [vc_read V x] itself always has a well-defined
-   latest value whenever [x] has been written at all (again maintained via
-   [StepWriteVolatile]: the freshly written commit trivially IS that latest
-   value, by [is_latest_value_graph_commit_fresh_writer]). This last
-   conjunct is what lets [progress_aux] show that a pre-pull
-   [is_latest_value] cannot survive in isolation: if none exists after
-   merging [h] with [vc_read V x], none can have existed at [vc_read V x]
-   alone either (dominance forces every writer below it), so none exists at
-   [h] to begin with -- [is_latest_value_graph_merge_fresh] packages exactly
-   this "existence at the merge's dominant parent survives the merge"
-   argument. *)
+(* [wf_cfg] bundles everything [progress] needs to stay
+   inductively true across a [step]:
+
+   - the thread map is finite (needed to generate a fresh tid for
+   [StepSpawn])
+
+   - the graph is well-formed (acyclic and finite -- needed for
+   [exists_commit_fresh]),
+
+   - [root_commit] is always in the graph (a never-touched lock's
+   [lock_read] defaults to it),
+
+   - every thread's and lock's commit pointer is already in the
+   graph (needed to justify [graph_commit_wf] / [graph_merge_wf]
+   when that thread/lock is next touched),
+
+   - a terminated thread always carries a return value with an
+   empty staging area (it became terminated only via [StepEnd]),
+
+   - every write of a volatile variable [x] is an ancestor of
+   [x]'s current pointer [vc_read V x] (every volatile write is
+   folded into [V[x]] by [StepWriteVolatile],
+
+   - [V[x]] only ever advances forward, so no earlier write can be
+   "ahead" of it), and -- crucially, since dominance alone does
+   not give existence -- [vc_read V x] itself always has a
+   well-defined latest value whenever [x] has been written at all
+   (again maintained via [StepWriteVolatile]. *)
 Definition wf_cfg (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, L, V) =>
@@ -56,13 +60,11 @@ Definition wf_cfg (cfg : cfg) : Prop :=
 (* Progress (modulo deadlock, forbidden effects, and conflicts)          *)
 (* ===================================================================== *)
 
-(* An effect is *enabled* for thread [t] (staging diff [d], commit pointer
-   [h]) when its non-blocking precondition holds: a read must be visible
-   either locally (in [d]) or globally (as the latest committed value at
-   [h]); an unlock must target a lock [t] itself holds. Writes, spawns,
-   joins and locks have no such precondition -- whether a join/lock can
-   actually fire is the *blocking* question below, and whether it can fire
-   *without* a conflict is the separate [conflict_detected] question. *)
+(* An effect is *enabled* for thread [t] (staging diff [d], commit
+   pointer [h]) when its non-blocking precondition holds: a read
+   must be visible either locally (in [d]) or globally (as the
+   latest committed value at [h]); an unlock must target a lock
+   [t] itself holds. *)
 Definition enabled (G : graph) (L : locks) (t : tid) (d : diff) (h : commit) (a : eff) : Prop :=
   match a with
   | eff_read x   => x \indom d \/ exists v, is_latest_value G h x v
@@ -70,10 +72,10 @@ Definition enabled (G : graph) (L : locks) (t : tid) (d : diff) (h : commit) (a 
   | _ => True
   end.
 
-(* A *blocking* effect: joining a thread that has not terminated, or
-   acquiring a lock that is currently held. These are the legitimate sources
-   of deadlock (locks default to free, so there is no "never acquired"
-   case). *)
+(* A *blocking* effect: joining a thread that has not terminated,
+   or acquiring a lock that is currently held. These are the
+   legitimate sources of deadlock (locks default to free, so there
+   is no "never acquired" case). *)
 Definition blocked (T : threads) (L : locks) (a : eff) : Prop :=
   match a with
   | eff_join t'  => ~ exists r d c, binds T t' (state_terminated, te_ret r, d, c)
@@ -82,10 +84,7 @@ Definition blocked (T : threads) (L : locks) (a : eff) : Prop :=
   end.
 
 (* Progress for the underlying sequential language: every running,
-   still-computing thread can take a [step_ul] step. Nothing is assumed
-   about whether the resulting effect is [enabled] -- a thread offering a
-   [step_ul] to a disabled effect is exactly the [forbidden] situation that
-   [progress] reports separately. *)
+   still-computing thread can take a [step_ul] step. *)
 Definition ul_progress (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, L, V) =>
@@ -94,10 +93,9 @@ Definition ul_progress (cfg : cfg) : Prop :=
         exists K a, step_ul e K a
   end.
 
-(* A thread is *forbidden* from stepping when the underlying language offers
-   a reduction to an effect that is not enabled: a read that is visible
-   neither locally nor globally, or an unlock of a lock the thread does not
-   itself hold. *)
+(* A thread is *forbidden* from stepping when the underlying
+   language offers a reduction to an effect that is not enabled.
+   *)
 Definition forbidden (cfg : cfg) : Prop :=
   match cfg with
   | (T, G, L, V) =>
@@ -173,17 +171,6 @@ Definition deadlocked (cfg : cfg) : Prop :=
       (exists t, t \indom T /\ inert cfg t)
   end.
 
-(* A binding in an updated map is either the updated entry or an untouched one. *)
-Lemma binds_update_inv' :
-  forall A B (M : map A B) i j v w,
-    binds (M[i := v]) j w ->
-    (j = i /\ w = v) \/ (j <> i /\ binds M j w).
-Proof.
-  introv Hb. destruct (classic (j = i)) as [-> | Hne].
-  - left. split; [ reflexivity | applys binds_update_same_inv Hb ].
-  - right. split; [ exact Hne | applys binds_update_neq_inv Hb Hne ].
-Qed.
-
 (* A fresh thread id always exists, since the domain is a finite set of
    [nat]s. (Used to discharge the freshness side-condition of [StepSpawn] in
    progress.) *)
@@ -201,13 +188,6 @@ Proof.
   forwards Hle: mem_le_sum Hmem.
   nat_math.
 Qed.
-
-(* ===================================================================== *)
-(* [dom T] is preserved (or grows by exactly the fresh tid) by the         *)
-(* thread/graph combinators, independently of any [indom] side-condition -- *)
-(* [dom_update] is unconditional, so these hold even though the [let]      *)
-(* destructuring inside each combinator is opaque about what it reads.     *)
-(* ===================================================================== *)
 
 Lemma finite_do_commit :
   forall t h_new T G T' G',
@@ -382,10 +362,6 @@ Proof.
     applys ancestor_graph_merge Hanc.
 Qed.
 
-(* [vc_read V x]'s graph membership, derived the same way at every call site:
-   either [x] is already recorded ([HdomV]) or it defaults to [root_commit]
-   ([HrootIndom]). Factored out since [exwa_preserved_commit]/[_merge] both
-   need it internally. *)
 Lemma vc_read_graph_indom_cfg :
   forall G V x,
     (forall x0 c0, binds V x0 c0 -> graph_indom G c0) ->
@@ -403,12 +379,6 @@ Proof.
     rewrite Heq. exact HrootIndom.
 Qed.
 
-(* The commit tracking [x]'s latest value keeps having one across a
-   [graph_commit]: PROVIDED the fresh commit's diff does not write [x] itself
-   ([Hnovol], a per-[x] hypothesis -- not "no volatile is in [d]" globally, so
-   this also covers a diff that writes some OTHER volatile, e.g. the
-   [push_volatile] commit in [StepWriteVolatile]), [x]'s value survives via
-   [is_latest_value_graph_commit_mono]. *)
 Lemma exwa_preserved_commit :
   forall G V c cf d,
     (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
@@ -438,9 +408,6 @@ Proof.
     applys is_latest_value_graph_commit_mono Hedge Hfresh Hvcne Hnovold Hval.
 Qed.
 
-(* Likewise across a [graph_merge]: its fresh commit writes nothing at all
-   ([graph_writes_graph_merge_same_false]), so no side condition on a diff is
-   even needed. *)
 Lemma exwa_preserved_merge :
   forall G V p1 p2 cf,
     (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
@@ -466,15 +433,6 @@ Proof.
     applys is_latest_value_graph_merge_mono Hedge Hfresh Hvcne Hval.
 Qed.
 
-(* [wf_cfg] is preserved by [step]: finiteness ([step_preserves_finite]),
-   well-formedness and [root_commit]-membership of the graph (every graph
-   change is a [graph_commit]/[graph_merge] onto a fresh commit, from a
-   parent already in the graph -- [graph_commit_wf]/[graph_merge_wf] and
-   [graph_commit_indom]/[graph_merge_indom]), the terminated-thread shape
-   (only [StepEnd] produces one, with [te_ret] and an empty staging area),
-   and every thread's/lock's commit pointer staying in the graph (untouched
-   ones by the invariant, touched ones by the same [graph_commit]/
-   [graph_merge] indom facts). *)
 Theorem step_preserves_wf_cfg :
   forall cfg cfg',
     wf_cfg cfg ->
@@ -969,13 +927,6 @@ Qed.
 (* Progress (modulo deadlock, forbidden effects, and conflicts)          *)
 (* ===================================================================== *)
 
-(* [thread]/[lock_state * commit]-specialised re-statements of the generic
-   [LibMap] read/binds lemmas, with [Branching.inhab_thread]/[inhab_lock]
-   supplied *explicitly*. Typeclass search for a bare [Inhab thread] (a
-   [Definition], not folded back from its tuple expansion) does not reliably
-   find [Branching.inhab_thread] when the goal is stated in unfolded tuple
-   form (as [binds_inj]'s generic statement forces) -- pin it down here once
-   so the rest of the proof doesn't hit that ambiguity. *)
 Lemma thread_read_of_binds :
   forall {t : tid} {T : threads} {v : thread}, binds T t v -> T[t] = v.
 Proof. introv Hb. exact (@read_of_binds tid thread Branching.inhab_thread T t v Hb). Qed.
@@ -1109,14 +1060,7 @@ Proof.
                              replace (T[a]) with (state_running, te_exp e, d, h) in Hpull.
                              inverts Hpull.
                              simpl. rew_logic. split; [applys* Hvd|].
-                             (* [contra] gives SOME writer of [x] visible at [h]; by
-                                [Hexwa] (dominance is not enough on its own -- see
-                                [wf_cfg]) [vc_read V x] itself then has a well-defined
-                                latest value, and [is_latest_value_graph_merge_fresh]
-                                (the merge's dominant-parent existence survives the
-                                merge) carries it onto [c'']. This does not need to
-                                match [contra]'s own value [v]: only EXISTENCE at
-                                [c''] is needed to contradict [Hnex]. *)
+                             (* derive a latest value at [c''] to contradict [Hnex] *)
                              intros v contra. apply Hnex.
                              forwards (c & Hwrites & Hdomc & Hanc): is_latest_value_writer_indom contra.
                              forwards* (v0 & Hval0): Hexwa Hwrites.

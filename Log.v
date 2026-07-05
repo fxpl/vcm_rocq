@@ -1,5 +1,11 @@
 From Vcm Require Import Common.
 
+(* Execution logs: the sequence of [event]s a run produces (one per step),
+   plus well-formedness properties over such sequences. The Logging*.v
+   files pair each model's step relation with the event it produces, so
+   that different models' executions can be related through the log they
+   generate rather than through their own, differently-shaped states. *)
+
 Inductive event :=
 | event_spawn (t1 t2 : tid)
 | event_join (t1 t2 : tid)
@@ -192,6 +198,26 @@ Definition is_merge_event (e : event) : Prop :=
   | event_read _ x _ => x \in Volatiles
   | _ => False
   end.
+
+Definition is_sync_event (E : event) :=
+  match E with
+  | event_spawn t _
+  | event_join t _
+  | event_lock t _
+  | event_unlock t _
+  | event_start t
+  | event_end t => True
+  | _ => False
+  end.
+
+Fixpoint get_uncommitted' (t : tid) (l : log) (acc : log) :=
+  match l with
+  | nil => acc
+  | E :: log' => get_uncommitted' t log' (If is_sync_event E then nil else acc & E)
+  end.
+
+Definition get_uncommitted (t : tid) (log : log) :=
+  get_uncommitted' t log nil.
 
 (* (Absence of) out-of-thin-air reads *)
 Definition sourced_read (log : Log.log) (n : nat) : Prop :=

@@ -440,11 +440,7 @@ Hint Extern 1 (Inhab _) => typeclass : vcm.
 (* The replayed graph is always well-formed and totally ordered, and the
    replayed head is always its maximum -- i.e. [is_global_head]. Proved
    directly off [play_event]/[play_log] (mirrors [play_event_preserves_inv] /
-   [play_log_inv] / [play_log_graph_facts], which live in LinearEquivLemmas.v
-   and so cannot be imported here, since that file itself imports this one).
-   Needed to identify a step's own freshly-introduced [is_global_head]
-   witness with the head that replaying the log up to that point produces,
-   now that [g] is no longer tracked as data in [cfg]. *)
+   [play_log_inv] / [play_log_graph_facts]. *)
 Lemma play_event_preserves_head_wf :
   forall E Dp TCp Gp gp D TC G g,
     play_event E (Dp, TCp, Gp, gp) (D, TC, G, g) ->
@@ -758,7 +754,7 @@ Proof.
     + (* 7. Replay: PlayStart fast-forwards [t] to the global head [g] --
          [g] is the step's own [is_global_head] witness; [is_global_head_unique]
          identifies it with the replayed head [g0] so the rest of the proof can
-         refer to a single [g] as before. *)
+         refer to a single [g]. *)
       destruct Hdplay as (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC).
       match goal with Hh : is_global_head G _ |- _ => rename Hh into Hheadr end.
       forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.

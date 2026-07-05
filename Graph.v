@@ -1,5 +1,10 @@
 From Vcm Require Import Common.
 
+(* The commit graph: an append-only DAG of immutable commits, each holding a
+   diff (the variables it changed), connected by ancestry edges recording
+   which commits it was built on top of. Branching.v and Linear.v use this
+   to represent a thread's, lock's or branch's view of memory. *)
+
 Definition commit_data := map commit diff.
 
 Definition commit_rels := set (commit * commit).
@@ -75,9 +80,8 @@ Definition total_order (G : graph) : Prop :=
 
 (* [g] is the maximum commit of [G]: in the graph, and an ancestor of every
    other commit in it. In a well-formed, totally ordered graph this pins
-   [g] down uniquely (see [total_order_max_commit] in GraphFacts.v), so the
-   Linear model uses this predicate to characterise its single global head
-   instead of tracking it as data in the configuration. *)
+   [g] down uniquely (see [total_order_max_commit] in GraphFacts.v). The
+   Linear model uses this predicate to characterise its single global head. *)
 Definition is_global_head (G : graph) (g : commit) : Prop :=
   graph_indom G g /\ forall c, graph_indom G c -> ancestor G c g.
 
@@ -124,9 +128,9 @@ Definition graph_merge (G : graph) (c1 c2 c : commit) :=
 (* The latest value of [i] visible at commit [c] is the value written by some
    commit [c] that is an ancestor of [c] and is *maximal* among the i-writing
    ancestors of [c] (no other i-writer sits strictly between [c] and [c]).
-   The maximality clause is what makes this single-valued; dropping it (as the
-   previous inductive formulation did) makes the relation multivalued at
-   conflict-free "inherit vs. overwrite" merges. *)
+   The maximality clause is what makes this single-valued: without it, the
+   relation would be multivalued at conflict-free "inherit vs. overwrite"
+   merges. *)
 Definition is_latest_value (G : graph) (c : commit) (x : var) (v : val) : Prop :=
   exists c',
     graph_writes G c' x v /\

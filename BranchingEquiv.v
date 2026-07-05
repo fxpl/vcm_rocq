@@ -367,20 +367,12 @@ Proof.
       { apply binds_update_same. }
       asserts Hcneq0: (vc_read VC x <> c'').
       { intro Heq. rewrite Heq in Hcdom. applys commit_fresh_not_indom Hfresh Hcdom. }
-      (* OPEN DESIGN QUESTION (see final report): after the pull, the merge's
-         OWN fresh commit [c''] must be shown [is_latest_value G' c'' x v] for
-         the SharedMemory value [v] (from [Hwrite]/[Hfilter]).
-         [vc_read_is_latest_value] gives [is_latest_value G (vc_read VC x) x v0]
-         BEFORE the pull, at the volatile's OWN stored commit -- but
-         [is_latest_value_graph_merge_mono] only forward-preserves
-         [is_latest_value] at an OLD, UNRELATED commit; it does not apply to the
-         merge's own fresh node [c''] (whose value must instead be inherited
-         from whichever of its two parents -- [vc_read VC x] or [TC[t]] -- is
-         the maximal writer). This needs a new lemma of the shape "the merge of
-         two conflict-free-merge-related parents' [is_latest_value] transfers to
-         the fresh child", relying on [TC[t]]'s volatile writes (if any) always
-         being dominated by [vc_read VC x] (every prior pull already merged it
-         in). Not yet built -- admitted here pending that lemma. *)
+      (* The merge's own fresh commit [c''] must satisfy [is_latest_value] for
+         the SharedMemory value [v] (from [Hwrite]/[Hfilter]); this does not
+         follow from forward-preservation at an old, unrelated commit, since
+         [c''] is itself new. [is_latest_value_after_volatile_pull] supplies it
+         by inheriting the value from whichever of the merge's two parents --
+         [vc_read V x] or [TC[t]] -- is the maximal writer. *)
       asserts Hexfilter: (exists tw log', LibList.filter (fun e => writes_variable x e) log = log' & event_write tw x v).
       { exists t' log'0. exact Hfilter. }
       forwards Hlv0: (>> is_latest_value_after_volatile_pull Hwf Hcflog Hplay Hdt HtTC
@@ -414,10 +406,7 @@ Proof.
     destruct (classic (x \in Volatiles)) as [Hxvol | Hnv].
     * (* volatile write: pull-then-push, mirroring the volatile-read pull, then
          a commit fold-in of the new value -- no [is_latest_value] obligation
-         (unlike the read side), so this is purely mechanical: the
-         [conflict_free_merge] premise ([conflict_free_merge_holds], same as
-         the volatile read) plus threading the two fresh commits through
-         [pull_volatile]/[push_volatile]. *)
+         on this side, unlike the read case. *)
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
@@ -703,11 +692,8 @@ Proof.
     clears HdescSh HdescB.
     exists. split; [ constructors* | simpls*].
   + (* StepWriteVolatile: symmetric to [StepReadVolatile] above, but simpler --
-       a [SharedMemory.StepWrite] always matches (no [is_latest_value]
-       obligation on this side); the goal is purely bookkeeping, unfolding
-       [pull_volatile]/[push_volatile] so the resulting Branching threads
-       collapse, via repeated [update_update] (every update targets the same
-       key [t]), onto a single update matching the SharedMemory side. *)
+       a [SharedMemory.StepWrite] always matches, with no [is_latest_value]
+       obligation on this side. *)
     match goal with Hb0 : binds T t (state_running, te_exp e, d, c) |- _ => rename Hb0 into Hbd0 end.
     match goal with Hp0 : pull_volatile t x c' T G V = (T', G') |- _ => rename Hp0 into Hpull end.
     match goal with Hp0 : push_volatile t x c'' ?TT G' V = (T'', G'', V') |- _ => rename Hp0 into Hpush end.

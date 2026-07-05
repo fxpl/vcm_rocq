@@ -1,5 +1,20 @@
 From Vcm Require Import Common.
 
+(* ------------------------------------------------------------------------ *)
+(* The SharedMemory model: sequentially consistent threads communicating    *)
+(* through one global heap.                                                 *)
+(*                                                                          *)
+(* Every read sees the single most recently written value, and every write  *)
+(* updates it immediately and globally -- there is no notion of a thread's  *)
+(* own view of memory diverging from anyone else's. This is the reference   *)
+(* semantics that the commit-graph models (Branching.v, Linear.v) are built *)
+(* to be equivalent to under a conflict-freedom side condition; see         *)
+(* BranchingEquiv.v / LinearEquiv.v.                                        *)
+(*                                                                          *)
+(* Locks are a plain free/held flag with no history attached ([lock_read]   *)
+(* below); spawning, joining and returning behave as expected.              *)
+(* ------------------------------------------------------------------------ *)
+
 Definition thread := (thread_state * thread_exp)%type.
 
 Definition threads := (map tid thread).
