@@ -684,7 +684,7 @@ Proof.
     | q p lt1 lt2 ll HNsrc HNtgt Hlt
     | p q st1 st2 HNsrc HNtgt Hlt
     | p q jt1 jt2 HNsrc HNtgt Hlt
-    | p q vt1 vt2 vx vv vv' Hxvol HNsrc HNtgt Hlt
+    | p q vt1 vx vv ve2 Hxvol HNsrc HNtgt Hacc Hlt
     | p q k Hpk IHpk Hkq IHkq ];
     introv Hm Hgt Hn Hgne.
   - forwards Heq1: Nth_functional Hm HN1. forwards Heq2: Nth_functional Hn HN2.
@@ -704,7 +704,7 @@ Proof.
   - forwards Heq: Nth_functional Hm HNsrc. subst em.
     exists p (event_write vt1 vx vv). splits.
     + nat_math. + exact HNsrc. + simpls; exact Hgt. + simpl; exact Hxvol.
-    + applys HbVolatile Hxvol HNsrc HNtgt Hlt.
+    + applys HbVolatile Hxvol HNsrc HNtgt Hacc Hlt.
   - forwards (ek & HNk): hb_Nth_r Hpk.
     forwards Hltpk: hb_lt Hpk.
     destruct (classic (get_thread ek = t)) as [Hgek | Hgek].
@@ -1420,6 +1420,57 @@ Proof.
         applys Hmax Hcmdom.
 Qed.
 
+(* The write-write counterpart of [hb_volatile_pointer_ancestor]: a write to
+   a volatile [x] is also an ancestor of every LATER write of [x], not just
+   later reads. In [Linear] a volatile write commits directly onto the
+   current global head [g'] (no merge layer, unlike [Branching]), so this is
+   even more direct than the read case: the source's commit is graph-indom
+   (hence an ancestor of [g'] by [Hmax]), and the fresh write's own commit
+   [g''] is [g']'s child via [ancestor_graph_commit_edge] -- one more hop
+   than the read case, which stops at [g'] itself. *)
+Lemma hb_volatile_pointer_ancestor_write :
+  forall log D TC G g CH m n t1 t2 x v v' cm cn,
+    x \in Volatiles ->
+    wf_log log ->
+    play_log log init_play_cfg (D, TC, G, g) CH ->
+    LibList.Nth m log (event_write t1 x v) ->
+    LibList.Nth n log (event_write t2 x v') ->
+    m < n ->
+    LibList.Nth m CH cm -> LibList.Nth n CH cn ->
+    ancestor G cm cn.
+Proof.
+  introv Hxvol Hwf Hplay. unfold empty_graph, root_commit in Hplay. gen m n t1 t2 v v' cm cn.
+  inductions Hplay; introv HNlogm HNlogn Hlt HNchm HNchn.
+  - inverts HNlogn.
+  - forwards Hlen: play_log_CH_length Hplay.
+    forwards Hwf0: wf_log_last_inv Hwf.
+    forwards [HNn0 | (HnN & HenE)]: Nth_last_inv HNlogn.
+    + forwards Hibn: Nth_inbound HNn0.
+      forwards [HNm0 | (HmN & _)]: Nth_last_inv HNlogm. 2:{ nat_math. }
+      forwards [HNchm0 | (HmNc & _)]: Nth_last_inv HNchm. 2:{ rewrite Hlen in HmNc. nat_math. }
+      forwards [HNchn0 | (HnNc & _)]: Nth_last_inv HNchn. 2:{ rewrite Hlen in HnNc. nat_math. }
+      asserts Hanc: (ancestor G' cm cn).
+      {
+        applys* IHHplay Hlt.
+      }
+      eapply play_event_graph_extends; eassumption.
+    + subst E.
+      forwards [HNm0 | (HmN & _)]: Nth_last_inv HNlogm. 2:{ nat_math. }
+      forwards [HNchm0 | (HmNc & _)]: Nth_last_inv HNchm. 2:{ rewrite Hlen in HmNc. nat_math. }
+      asserts Hce: (is_commit_event (event_write t1 x v)). { simpl. exact Hxvol. }
+      forwards Hcmdom: CH_commit_event_indom Hplay HNchm0 HNm0 Hce.
+      forwards [HNchn0 | (HnNc & Hcneq)]: Nth_last_inv HNchn.
+      { forwards Hib: Nth_inbound HNchn0. rewrite <- Hlen in HnN. nat_math. }
+      inverts H.
+      * (* PlayWrite: contradicts [x \in Volatiles] *)
+        match goal with Hnv : x \notin Volatiles |- _ => false; applys Hnv Hxvol end.
+      * cbn [get_thread] in Hcneq. rewrite read_update_same in Hcneq. subst cn.
+        forwards Hinv: play_log_inv Hplay. destruct Hinv as (_ & Hmax & _).
+        apply ancestor_trans with (c' := g').
+        -- apply ancestor_graph_commit. applys Hmax Hcmdom.
+        -- apply ancestor_graph_commit_edge.
+Qed.
+
 (* [6] A happens-before edge maps to graph ancestry between the recorded pointers. *)
 Lemma hb_pointer_ancestor :
   forall log D TC G g CH m n cm cn,
@@ -1436,7 +1487,7 @@ Proof.
     | n m t1 t2 l HNu HNl Hlt
     | m n t1 t2 HNs HNst Hlt
     | m n t1 t2 HNe HNj Hlt
-    | m n vt1 vt2 vx vv vv' Hxvol HNvw HNvr Hlt
+    | m n vt1 vx vv ve2 Hxvol HNvw HNvr Hacc Hlt
     | m n k Hmk IHmk Hkn IHkn ];
     introv HNchm HNchn.
   - asserts Hle: (m <= n). { nat_math. }
@@ -1444,7 +1495,11 @@ Proof.
   - applys (>> hb_lock_pointer_ancestor Hwf Hplay HNu HNl Hlt HNchm HNchn).
   - applys (>> hb_spawn_pointer_ancestor Hwf Hplay HNs HNst Hlt HNchm HNchn).
   - applys (>> hb_join_pointer_ancestor Hwf Hplay HNe HNj Hlt HNchm HNchn).
-  - applys (>> hb_volatile_pointer_ancestor Hxvol Hwf Hplay HNvw HNvr Hlt HNchm HNchn).
+  - (* HbVolatile: [ve2] either reads or writes [x]; dispatch to whichever
+       pointer-ancestor lemma matches. *)
+    destruct ve2; simpl in Hacc; try contradiction.
+    + subst. applys (>> hb_volatile_pointer_ancestor Hxvol Hwf Hplay HNvw HNvr Hlt HNchm HNchn).
+    + subst. applys (>> hb_volatile_pointer_ancestor_write Hxvol Hwf Hplay HNvw HNvr Hlt HNchm HNchn).
   - forwards (ek & HNlogk): hb_Nth_r Hmk.
     forwards Hlenk: Nth_inbound HNlogk.
     forwards Hlench: play_log_CH_length Hplay.

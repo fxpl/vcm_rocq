@@ -85,6 +85,46 @@ Proof.
   introv Hfresh Hin. destruct G as (C & P). applys Hfresh Hin.
 Qed.
 
+(* A commit just created by a commit/merge has no outgoing edges even in the
+   result graph (the only new edges point INTO it, never out of it), so it
+   remains a sink: any ancestor path leaving it collapses to itself. Unlike
+   [commit_fresh_sink], this holds for the LARGER (post-commit/merge) graph,
+   not just the base one. *)
+Lemma commit_fresh_sink_after_commit :
+  forall G c c' d,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G c' ->
+    graph_indom G c ->
+    forall z, ancestor (graph_commit G c c' d) c' z -> z = c'.
+Proof.
+  introv Hedge_wf Hfresh Hcin Hanc.
+  inductions Hanc.
+  - reflexivity.
+  - lets ->: (IHHanc d c G Hedge_wf Hfresh Hcin JMeq.JMeq_refl).
+    destruct G as (C & P). unfolds graph_commit, graph_edge. rew_set in H.
+    destruct H as [Heq | HeP].
+    + false. inverts Heq. applys commit_fresh_not_indom Hfresh Hcin.
+    + false. forwards (Ha & _): Hedge_wf HeP. applys commit_fresh_not_indom Hfresh Ha.
+Qed.
+
+Lemma commit_fresh_sink_after_merge :
+  forall G p1 p2 h,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G h ->
+    graph_indom G p1 -> graph_indom G p2 ->
+    forall z, ancestor (graph_merge G p1 p2 h) h z -> z = h.
+Proof.
+  introv Hedge_wf Hfresh Hp1in Hp2in Hanc.
+  inductions Hanc.
+  - reflexivity.
+  - lets ->: (IHHanc p2 p1 G Hedge_wf Hfresh Hp1in Hp2in JMeq.JMeq_refl).
+    destruct G as (C & P). unfolds graph_merge, graph_edge. rew_set in H.
+    destruct H as [Heq | [Heq | HeP]].
+    + false. inverts Heq. applys commit_fresh_not_indom Hfresh Hp2in.
+    + false. inverts Heq. applys commit_fresh_not_indom Hfresh Hp1in.
+    + false. forwards (Ha & _): Hedge_wf HeP. applys commit_fresh_not_indom Hfresh Ha.
+Qed.
+
 (* In a well-formed graph, a commit with no data has no proper descendants:
    it is not an edge endpoint, so no ancestry path can leave it. This subsumes
    the explicit "fresh leaf" hypothesis needed by other graph lemmas. *)
@@ -359,6 +399,72 @@ Proof.
       apply AncestorTrans with (c2 := mid).
       * applys~ IH.
       * exact HedgeP.
+Qed.
+
+(* The dual of [ancestor_graph_commit_inv]: ancestry reaching all the way to
+   the fresh commit itself runs either through [c']'s own reflexivity or
+   through its unique parent [c]. Used to decompose ancestry into a freshly
+   created commit back into the graph it was built on top of. *)
+Lemma ancestor_graph_commit_target_inv :
+  forall G c c' d x y,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G c' ->
+    graph_indom G c ->
+    ancestor (graph_commit G c c' d) x y ->
+    (y = c' /\ (x = c' \/ ancestor G x c)) \/ (y <> c' /\ ancestor G x y).
+Proof.
+  introv Hedge_wf Hfresh Hcin Hanc.
+  asserts Hccne: (c <> c').
+  { intro Heq. subst. applys commit_fresh_not_indom Hfresh Hcin. }
+  destruct G as (C & P). unfold graph_commit in Hanc.
+  induction Hanc as [z | c1 c2 c3 Hsub IH Hedge].
+  - destruct (classic (z = c')) as [-> | Hne].
+    + left. split; [reflexivity | left; reflexivity].
+    + right. split; [exact Hne | apply ancestor_refl].
+  - rew_set in Hedge. destruct Hedge as [Heq | HedgeP].
+    + inverts Heq.
+      left. split; [reflexivity | right].
+      destruct IH as [(Hceq & _) | (_ & IHanc)]; [false; applys Hccne Hceq | exact IHanc].
+    + destruct (classic (c3 = c')) as [-> | Hc3ne].
+      * false. forwards (_ & Hin): Hedge_wf HedgeP. applys commit_fresh_not_indom Hfresh Hin.
+      * right. split; [exact Hc3ne |].
+        destruct IH as [(Hc2eq & _) | (_ & IHanc)].
+        -- false. subst c2. forwards (Ha & _): Hedge_wf HedgeP. applys commit_fresh_not_indom Hfresh Ha.
+        -- applys AncestorTrans IHanc HedgeP.
+Qed.
+
+(* The dual of [ancestor_graph_merge_inv]: ancestry reaching all the way to the
+   fresh merge commit [h] itself runs either through [h]'s own reflexivity or
+   through one of its two parents [p1]/[p2]. *)
+Lemma ancestor_graph_merge_target_inv :
+  forall G p1 p2 h x y,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G h ->
+    graph_indom G p1 -> graph_indom G p2 ->
+    ancestor (graph_merge G p1 p2 h) x y ->
+    (y = h /\ (x = h \/ ancestor G x p1 \/ ancestor G x p2)) \/ (y <> h /\ ancestor G x y).
+Proof.
+  introv Hedge_wf Hfresh Hp1in Hp2in Hanc.
+  asserts Hp1ne: (p1 <> h). { intro Heq. subst. applys commit_fresh_not_indom Hfresh Hp1in. }
+  asserts Hp2ne: (p2 <> h). { intro Heq. subst. applys commit_fresh_not_indom Hfresh Hp2in. }
+  destruct G as (C & P). unfold graph_merge in Hanc.
+  induction Hanc as [z | c1 c2 c3 Hsub IH Hedge].
+  - destruct (classic (z = h)) as [-> | Hne].
+    + left. split; [reflexivity | left; reflexivity].
+    + right. split; [exact Hne | apply ancestor_refl].
+  - rew_set in Hedge. destruct Hedge as [Heq | [Heq | HedgeP]].
+    + inverts Heq.
+      left. split; [reflexivity | right; right].
+      destruct IH as [(Hpeq & _) | (_ & IHanc)]; [ false; applys Hp2ne Hpeq | exact IHanc ].
+    + inverts Heq.
+      left. split; [reflexivity | right; left].
+      destruct IH as [(Hpeq & _) | (_ & IHanc)]; [ false; applys Hp1ne Hpeq | exact IHanc ].
+    + destruct (classic (c3 = h)) as [-> | Hc3ne].
+      * false. forwards (_ & Hin): Hedge_wf HedgeP. applys commit_fresh_not_indom Hfresh Hin.
+      * right. split; [exact Hc3ne |].
+        destruct IH as [(Hc2eq & _) | (_ & IHanc)].
+        -- false. subst c2. forwards (Ha & _): Hedge_wf HedgeP. applys commit_fresh_not_indom Hfresh Ha.
+        -- applys AncestorTrans IHanc HedgeP.
 Qed.
 
 Lemma graph_writes_graph_merge :

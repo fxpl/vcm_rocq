@@ -887,3 +887,671 @@ Proof.
            forwards Heqcf: (>> Hmax cf v' Hgwf Hanccwcf HancfTC).
            applys Hcfne Heqcf.
 Qed.
+
+(* A commit-event witness is never [root_commit]: [root_commit] is present
+   from the very first (empty) graph, hence never [commit_fresh], but every
+   commit event's own recorded commit is [commit_fresh] w.r.t. the graph
+   right before it. *)
+Lemma is_commit_event_pos_ne_root :
+  forall log D TC G LC VC CH k c e,
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    LibList.Nth k CH c -> LibList.Nth k log e -> is_commit_event e ->
+    c <> root_commit.
+Proof.
+  introv Hplay. gen k c e.
+  inductions Hplay; introv HNch HNlog Hce.
+  - forwards*: Nth_nil_inv HNch.
+  - forwards Hlen: play_log_CH_length Hplay.
+    forwards [HNch0 | (HkN & Hcx)]: Nth_last_inv HNch.
+    + forwards [HNlog0 | (HkN' & HeE)]: Nth_last_inv HNlog.
+      * applys (IHHplay D' TC' G' LC' VC' eq_refl eq_refl k c e HNch0 HNlog0 Hce).
+      * forwards Hib: Nth_inbound HNch0. nat_math.
+    + forwards [HNlog0 | (HkN' & HeE)]: Nth_last_inv HNlog.
+      * forwards Hib: Nth_inbound HNlog0. nat_math.
+      * subst e. intro Heqroot. subst c.
+        forwards (Hfr & _): play_event_commit_new H Hce.
+        rewrite Heqroot in Hfr.
+        forwards Hpgwf: play_log_graph_wf Hplay.
+        destruct Hpgwf as (_ & _ & _ & _ & Hrootin).
+        applys commit_fresh_not_indom Hfr Hrootin.
+Qed.
+
+
+
+(* [lc_read]'s companion to [vc_read_graph_indom]: a lock's stored commit
+   (or [root_commit], if never taken) is always graph-indom. *)
+Lemma lc_read_graph_indom :
+  forall D TC G LC VC CH log l,
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    graph_indom G (lc_read LC l).
+Proof.
+  introv Hplay.
+  forwards Hpgwf: play_log_graph_wf Hplay.
+  destruct Hpgwf as (_ & _ & HLC & _ & Hroot).
+  unfold lc_read. destruct (classic (l \indom LC)) as [Hindom|Hnotin].
+  - rewrite (read_default_indom Hindom). applys* HLC.
+  - rewrite (read_default_notindom Hnotin). exact Hroot.
+Qed.
+
+(* The acting thread of an event that carries no [binds TC _ _] premise of its
+   own (only [PlayRead]/[PlayWrite]/[PlayStart]) is still indom [TC]: it must
+   already have been spawned (or be root), by [wf_log]'s program-order
+   discipline, and [log_thread_indom_TC] turns that into TC-membership. The
+   side condition rules out the (vacuous, for these three event shapes) case
+   where [E] would itself be the very spawn event of its own acting thread. *)
+Lemma play_event_self_indom_TC :
+  forall log0 E D' TC' G' LC' VC' CH0,
+    wf_log (log0 & E) ->
+    play_log log0 init_play_cfg (D', TC', G', LC', VC') CH0 ->
+    (forall t1, E <> event_spawn t1 (get_thread E)) ->
+    get_thread E \indom TC'.
+Proof.
+  introv Hwf Hplay Hne.
+  forwards Hwf0: wf_log_last_inv Hwf.
+  asserts Hmem: (mem E (log0 & E)). { rewrite mem_last_eq. right. reflexivity. }
+  forwards Hgtr: event_thread_spawned_or_root Hwf Hmem (eq_refl (get_thread E)).
+  destruct Hgtr as [(t1 & Hmemsp) | Hroot].
+  - rewrite mem_last_eq in Hmemsp. destruct Hmemsp as [Hmemsp | Heq].
+    + applys log_thread_indom_TC Hwf0 Hplay. left. exists t1. exact Hmemsp.
+    + exfalso. applys (Hne t1). symmetry. exact Heq.
+  - applys log_thread_indom_TC Hwf0 Hplay. right. exact Hroot.
+Qed.
+
+(* The "self" recursion step shared by every [play_event] case whose target
+   pointer is the acting thread's OWN prior commit [TC'[get_thread E]]
+   (carried forward unchanged by Read/Write/Start, or consumed as one merge
+   /commit parent by ReadVolatile/WriteVolatile/Lock/Unlock/End/Spawn/Join):
+   chase [TC'[get_thread E]] back to its own witness position via
+   [tc_read_pointer], recurse there via the (curried) induction hypothesis,
+   then bridge forward to [E]'s own position ([length log0]) by plain program
+   order ([resolve_witness_hb], since the witness is owned by [get_thread E]
+   itself, or its spawn). *)
+Lemma ancestor_tc_self_hb :
+  forall log0 E D' TC' G' LC' VC' CH0 ka a ea,
+    wf_log (log0 & E) ->
+    play_log log0 init_play_cfg (D', TC', G', LC', VC') CH0 ->
+    LibList.Nth ka CH0 a -> LibList.Nth ka log0 ea -> is_commit_event ea ->
+    (forall kb0 b0 eb0,
+        LibList.Nth kb0 CH0 b0 -> LibList.Nth kb0 log0 eb0 ->
+        ancestor G' a b0 -> ka = kb0 \/ hb log0 ka kb0) ->
+    get_thread E \indom TC' ->
+    ancestor G' a (TC'[get_thread E]) ->
+    hb (log0 & E) ka (length log0).
+Proof.
+  introv Hwf Hplay HNcha HNloga Hcea IH Htin Hanc.
+  asserts HNEapp: (LibList.Nth (length log0) (log0 & E) E).
+  { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
+  forwards [Hrt | (k' & ek' & HNk' & HNk'ch & Hdisj)]: tc_read_pointer Hplay Htin.
+  - exfalso. unfold commit in *. rewrite Hrt in Hanc.
+    forwards Heqa: ancestor_into_root Hplay Hanc.
+    applys is_commit_event_pos_ne_root Hplay HNcha HNloga Hcea Heqa.
+  - forwards HNk'app: Nth_app_l HNk'.
+    forwards Hk'lt: Nth_inbound HNk'.
+    forwards Hhbend: (>> resolve_witness_hb Hwf HNk'app Hdisj HNEapp (eq_refl (get_thread E)) Hk'lt).
+    forwards Hkeq: (>> IH k' (TC'[get_thread E]) ek' HNk'ch HNk' Hanc).
+    destruct Hkeq as [Heqk | Hhb].
+    + rewrite Heqk. exact Hhbend.
+    + forwards Hhblift: (@hb_weaken_snoc log0 E ka k' Hhb).
+      applys HbTrans Hhblift Hhbend.
+Qed.
+
+(* The [graph_commit]-shaped recursion step: [a]'s ancestry into the freshly
+   committed [c'] either collapses to [a = c'] (impossible: [a] is already
+   graph-indom [G0], while [c'] is [commit_fresh G0]) or factors through the
+   single parent [c], handled by the caller-supplied [Hself]. Conclusion [P]
+   is left abstract, and [G0]'s own edge-well-formedness/[a]'s indom-ness are
+   taken as EXPLICIT hypotheses (rather than derived internally from a
+   [play_log] ending exactly at [G0]) so that callers with a two-layer graph
+   ([PlayWriteVolatile]'s outer commit over its own inner merge) can reuse
+   this for the outer layer, where [G0] is itself already an extended
+   ([graph_merge]) graph, not literally [play_log]'s own end-state. *)
+Lemma ancestor_commit_target_hb :
+  forall G0 a c c' d (P : Prop),
+    (forall x y, graph_edge G0 x y -> graph_indom G0 x /\ graph_indom G0 y) ->
+    graph_indom G0 a ->
+    commit_fresh G0 c' ->
+    graph_indom G0 c ->
+    (ancestor G0 a c -> P) ->
+    ancestor (graph_commit G0 c c' d) a c' ->
+    P.
+Proof.
+  introv Hedge Hadom Hfresh Hcin Hself Hanc.
+  forwards Hdec: ancestor_graph_commit_target_inv Hedge Hfresh Hcin Hanc.
+  destruct Hdec as [(_ & [Heq | Hancc]) | (Hneq & _)].
+  - exfalso. rewrite Heq in Hadom. applys commit_fresh_not_indom Hfresh Hadom.
+  - applys Hself Hancc.
+  - exfalso. applys Hneq. reflexivity.
+Qed.
+
+(* The [graph_merge]-shaped recursion step: same shape as
+   [ancestor_commit_target_hb], for a merge's two parents [p1]/[p2] instead
+   of a commit's single parent. *)
+Lemma ancestor_merge_target_hb :
+  forall G0 a p1 p2 h (P : Prop),
+    (forall x y, graph_edge G0 x y -> graph_indom G0 x /\ graph_indom G0 y) ->
+    graph_indom G0 a ->
+    commit_fresh G0 h ->
+    graph_indom G0 p1 -> graph_indom G0 p2 ->
+    (ancestor G0 a p1 -> P) ->
+    (ancestor G0 a p2 -> P) ->
+    ancestor (graph_merge G0 p1 p2 h) a h ->
+    P.
+Proof.
+  introv Hedge Hadom Hfresh Hp1in Hp2in Hself1 Hself2 Hanc.
+  forwards Hdec: ancestor_graph_merge_target_inv Hedge Hfresh Hp1in Hp2in Hanc.
+  destruct Hdec as [(_ & [Heq | [Hancc1 | Hancc2]]) | (Hneq & _)].
+  - exfalso. rewrite Heq in Hadom. applys commit_fresh_not_indom Hfresh Hadom.
+  - applys Hself1 Hancc1.
+  - applys Hself2 Hancc2.
+  - exfalso. applys Hneq. reflexivity.
+Qed.
+
+Lemma ancestor_pos_hb :
+  forall log D TC G LC VC CH ka a ea kb b eb,
+    wf_log log ->
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    LibList.Nth ka CH a -> LibList.Nth ka log ea -> is_commit_event ea ->
+    LibList.Nth kb CH b -> LibList.Nth kb log eb ->
+    ancestor G a b ->
+    ka = kb \/ hb log ka kb.
+Proof.
+  introv Hwf Hplay. gen ka a ea kb b eb.
+  inductions Hplay; introv HNcha HNloga Hcea HNchb HNlogb Hanc.
+  - false. applys Nth_nil_inv HNloga.
+  - rename H into Hpe.
+    forwards Hwf0: wf_log_last_inv Hwf.
+    forwards Hpgwf: play_log_graph_wf Hplay.
+    destruct Hpgwf as (Hedge & HTCin & HLCin & HVCin & Hrootin).
+    forwards Hlen: play_log_CH_length Hplay.
+    forwards [HNchb0 | (HkbN & Hcxb)]: Nth_last_inv HNchb.
+    + (* [b]'s witness lies in the smaller prefix: peel [Hanc] back through
+         [Hpe] via [play_event_ancestor_inv] (needs [graph_indom G' b], from
+         [CH_indom]), then recurse. If [a]'s own witness is instead the fresh
+         commit of THIS step, that is a contradiction: [a] would be
+         [commit_fresh G'] (via [play_event_commit_new]) while also being
+         [graph_indom G' a] (via [ancestor_src_indom] on [Hanc'], since [b]
+         is old) -- mirrors the two [exfalso] branches of the "b old, a
+         fresh" case in [ancestor_creation_order] exactly. *)
+      forwards [HNlogb0 | (HkbN' & HeEb)]: Nth_last_inv HNlogb.
+      2:{ forwards Hib: Nth_inbound HNchb0. nat_math. }
+      forwards Hbdom: CH_indom Hwf0 Hplay HNchb0.
+      forwards Hanc': (>> play_event_ancestor_inv Hpe Hedge HTCin HVCin Hrootin Hbdom Hanc).
+      forwards [HNcha0 | (HkaN & Hcxa)]: Nth_last_inv HNcha.
+      2:{ forwards Hdisj: ancestor_src_indom Hedge Hanc'.
+          asserts Hain: (graph_indom G' a).
+          { destruct Hdisj as [Hain | Haeq]; [ exact Hain | rewrite Haeq; exact Hbdom ]. }
+          forwards Hla: Nth_last_inv HNloga.
+          destruct Hla as [HNloga0 | (HkaN'' & HeEa)].
+          { forwards Hib: Nth_inbound HNloga0. nat_math. }
+          subst ea. forwards (Hfa & _): play_event_commit_new Hpe Hcea.
+          rewrite Hcxa in Hfa. exfalso. applys commit_fresh_not_indom Hfa Hain. }
+      forwards Hla: Nth_last_inv HNloga.
+      destruct Hla as [HNloga0 | (HkaN'' & HeEa)].
+      2:{ forwards Hib: Nth_inbound HNcha0. nat_math. }
+      destruct (IHHplay D' TC' G' LC' VC' Hwf0 eq_refl eq_refl ka a ea kb b eb HNcha0 HNloga0 Hcea HNchb0 HNlogb0 Hanc') as [Heq | Hhb].
+      * left. exact Heq.
+      * right. applys* hb_weaken_snoc.
+    + (* [b] is exactly this step's own recorded pointer,
+         [TC''[get_thread E]]. Case on [Hpe]:
+         - PlayRead/PlayWrite/PlayStart (no graph change, [b] merely
+           CARRIES FORWARD [TC'[get_thread E]] from the prefix, not
+           necessarily anything freshly created here): apply
+           [tc_read_pointer] to [get_thread E] within the prefix. If it
+           returns [root_commit], get [a = root_commit] via
+           [ancestor_into_root], then contradict via [is_commit_event ea]
+           (root is graph-indom from the very start, so it can never be
+           [commit_fresh], but [play_event_commit_new] would need it to be,
+           applied at whatever step actually created [a] -- need a small
+           inline argument, or reuse the "a fresh at [ka]" contradiction
+           machinery from the [b old] branch's second half applied with
+           [b := root_commit] treated as an "old" (indom-from-the-start)
+           target). If it returns a witness [(kb', eb', ...)], recurse via
+           IHHplay (target [kb', eb', TC'[get_thread E]], same [G'] since
+           unchanged) to get [ka = kb' \/ hb log ka kb'], then bridge
+           [kb'] (or [ka], if the disjunct was the equality) forward to
+           [length log] with [resolve_witness_hb] (using [get_thread E] as
+           the destination thread, [p := length log], [ep := E], trivially
+           [get_thread E = get_thread E]), composing with [HbTrans]/
+           [hb_weaken_snoc] as needed.
+         - PlayReadVolatile/PlayLock/PlayJoin (a merge: two parents, [c] the
+           puller's own prior pointer and [vc_read VC' x]/[lc_read LC'
+           l]/[TC'[t2]] the other party's stored pointer): apply
+           [ancestor_graph_merge_target_inv] to [Hanc] (needs
+           [graph_indom G' c]/[commit_fresh G' c'']/etc, all from [HTCin]/
+           the constructor's own [binds] premise). The ["a = fresh"] disjunct
+           is [false] the same way as above ([a] would need to be both
+           [commit_fresh] and [graph_indom G'], via [ancestor_src_indom]
+           applied one level further back -- actually simpler here: [a] is
+           [is_commit_event]-witnessed, and merges are never
+           [is_commit_event], so if [ka] = this step's own position that is
+           immediately [false] via [Hcea]; if [ka] is in the prefix, [a] is
+           [graph_indom G'] while the fresh merge commit is not, contra).
+           The "self" parent [c] recurses via [tc_read_pointer] (SAME
+           thread) + IHHplay + [resolve_witness_hb] exactly as above. The
+           "other" parent recurses via [lc_read_pointer]/[vc_read_pointer]
+           (for Lock/Volatile; for Join, [TC'[t2]] needs [tc_read_pointer]
+           applied to [t2], NOT a new lemma) + IHHplay, then bridges to
+           [length log] with ONE more hop -- [HbLock]/[HbVolatile]/[HbJoin]
+           respectively -- composed with [HbTrans] onto whatever
+           [resolve_witness_hb]-chain got us from the parent's own witness
+           to ITS flush position (mirroring [hb_lock_pointer_ancestor] et
+           al.'s case split, but assembling an actual [hb] witness instead
+           of consuming one).
+         - PlayEnd/PlaySpawn/PlayUnlock/PlayWriteVolatile (a commit, or two
+           layers for PlayWriteVolatile: single "self" parent [c], the
+           pusher's own prior pointer): apply
+           [ancestor_graph_commit_target_inv] (twice, nested, for
+           PlayWriteVolatile) to [Hanc]; the ["a = fresh"] disjunct is
+           [false] the same way; the "self" parent recurses via
+           [tc_read_pointer] + IHHplay + [resolve_witness_hb] exactly as
+           above (for PlaySpawn, this sources [t1]'s history, which
+           correctly ends up bridging to the spawn event itself regardless
+           of whether the ORIGINAL query concerned [t1] or the freshly
+           spawned [t2], since [b] here is a bare COMMIT VALUE, not tied to
+           either thread's identity). *)
+      destruct (classic (ka = kb)) as [Heqk | Hkn]; [ left; exact Heqk | right ].
+      forwards [HNcha0 | (HkaN & Hcxa)]: Nth_last_inv HNcha.
+      2:{ exfalso. applys Hkn. rewrite HkaN. symmetry. exact HkbN. }
+      forwards [HNloga0 | (HkaN' & HeEa)]: Nth_last_inv HNloga.
+      2:{ forwards Hib: Nth_inbound HNcha0. nat_math. }
+      subst b.
+      rewrite HkbN, Hlen.
+      asserts IH: (forall kb0 b0 eb0,
+          LibList.Nth kb0 CH b0 -> LibList.Nth kb0 log eb0 ->
+          ancestor G' a b0 -> ka = kb0 \/ hb log ka kb0).
+      { introv H1 H2 H3.
+        exact (IHHplay D' TC' G' LC' VC' Hwf0 eq_refl eq_refl ka a ea kb0 b0 eb0 HNcha0 HNloga0 Hcea H1 H2 H3). }
+      inverts Hpe.
+      * (* PlayRead *)
+        asserts Hnesp: (forall t1, event_read t x v <> event_spawn t1 t).
+        { introv Heq. discriminate. }
+        forwards Htin: play_event_self_indom_TC Hwf Hplay Hnesp.
+        applys (>> ancestor_tc_self_hb Hwf Hplay HNcha0 HNloga0 Hcea IH Htin Hanc).
+      * (* PlayReadVolatile *)
+        match goal with Hb : binds TC' _ _ |- _ => rename Hb into Hbc end.
+        match goal with Hf : commit_fresh G' _ |- _ => rename Hf into Hfresh end.
+        match goal with Hv : x \in Volatiles |- _ => rename Hv into Hxvol end.
+        cbn [get_thread] in Hanc. rewrite read_update_same in Hanc.
+        lets Htin: (indom_of_binds Hbc).
+        asserts Hp1in: (graph_indom G' (vc_read VC x)). { applys vc_read_graph_indom Hplay; typeclass. }
+        asserts Hp2in: (graph_indom G' c). { rewrite <- (read_of_binds Hbc). applys HTCin Htin. }
+        asserts Hself1: (ancestor G' a (vc_read VC x) ->
+                          hb (log & event_read t x v) ka (length log)).
+        { intro Hancx.
+          forwards [Hvrt | (kw & tw & vw & HNkw & HNkwch)]: vc_read_pointer Hplay.
+          - exfalso. unfold commit in *. rewrite Hvrt in Hancx.
+            forwards Heqa: ancestor_into_root Hplay Hancx.
+            applys is_commit_event_pos_ne_root Hplay HNcha0 HNloga0 Hcea Heqa.
+          - forwards Hkeq: (>> IH kw (vc_read VC x) (event_write tw x vw) HNkwch HNkw Hancx).
+            forwards HNkwapp: Nth_app_l HNkw.
+            asserts HNEapp: (LibList.Nth (length log) (log & event_read t x v) (event_read t x v)).
+            { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
+            forwards Hkwlt: Nth_inbound HNkw.
+            asserts Hacc: (accesses_variable x (event_read t x v)). { reflexivity. }
+            forwards Hhbvol: (>> HbVolatile Hxvol HNkwapp HNEapp Hacc Hkwlt).
+            destruct Hkeq as [Heqk' | Hhb].
+            + rewrite Heqk'. exact Hhbvol.
+            + forwards Hhblift: (@hb_weaken_snoc log (event_read t x v) ka kw Hhb).
+              applys HbTrans Hhblift Hhbvol. }
+        asserts Hself2: (ancestor G' a c -> hb (log & event_read t x v) ka (length log)).
+        { intro Hancc. rewrite <- (read_of_binds Hbc) in Hancc.
+          applys (>> ancestor_tc_self_hb Hwf Hplay HNcha0 HNloga0 Hcea IH Htin Hancc). }
+        forwards Hadom: CH_indom Hwf0 Hplay HNcha0.
+        applys (>> ancestor_merge_target_hb Hedge Hadom Hfresh Hp1in Hp2in Hself1 Hself2 Hanc).
+      * (* PlayWrite *)
+        asserts Hnesp: (forall t1, event_write t x v <> event_spawn t1 t).
+        { introv Heq. discriminate. }
+        forwards Htin: play_event_self_indom_TC Hwf Hplay Hnesp.
+        applys (>> ancestor_tc_self_hb Hwf Hplay HNcha0 HNloga0 Hcea IH Htin Hanc).
+      * (* PlayWriteVolatile: two layers -- outer [graph_commit] over the
+           inner [graph_merge]; the outer's own parent is the inner merge's
+           fresh target [c'], so the outer combinator's [Hself] IS the
+           inner decomposition. *)
+        match goal with Hv0 : x \in Volatiles |- _ => rename Hv0 into Hxvol end.
+        match goal with Hb0 : binds D' _ _ |- _ => rename Hb0 into Hbd end.
+        match goal with Hb1 : binds TC' _ _ |- _ => rename Hb1 into Hbc end.
+        match goal with Hf0 : commit_fresh G' _ |- _ => rename Hf0 into Hfresh1 end.
+        match goal with Hf1 : commit_fresh (graph_merge _ _ _ _) _ |- _ => rename Hf1 into Hfresh2 end.
+        cbn [get_thread] in Hanc. rewrite read_update_same in Hanc.
+        lets Htin: (indom_of_binds Hbc).
+        asserts Hp1in: (graph_indom G' (vc_read VC' x)). { applys vc_read_graph_indom Hplay. }
+        asserts Hp2in: (graph_indom G' c). { rewrite <- (read_of_binds Hbc). applys HTCin Htin. }
+        asserts Hmwf: (graph_indom (graph_merge G' (vc_read VC' x) c c') c').
+        { applys graph_merge_indom_same. }
+        asserts Hself1: (ancestor G' a (vc_read VC' x) ->
+                          hb (log & event_write t x v) ka (length log)).
+        { intro Hancx.
+          forwards [Hvrt | (kw & tw & vw & HNkw & HNkwch)]: vc_read_pointer Hplay.
+          - exfalso. unfold commit in *. rewrite Hvrt in Hancx.
+            forwards Heqa: ancestor_into_root Hplay Hancx.
+            applys is_commit_event_pos_ne_root Hplay HNcha0 HNloga0 Hcea Heqa.
+          - forwards Hkeq: (>> IH kw (vc_read VC' x) (event_write tw x vw) HNkwch HNkw Hancx).
+            forwards HNkwapp: Nth_app_l HNkw.
+            asserts HNEapp: (LibList.Nth (length log) (log & event_write t x v) (event_write t x v)).
+            { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
+            forwards Hkwlt: Nth_inbound HNkw.
+            asserts Hacc: (accesses_variable x (event_write t x v)). { reflexivity. }
+            forwards Hhbvol: (>> HbVolatile Hxvol HNkwapp HNEapp Hacc Hkwlt).
+            destruct Hkeq as [Heqk' | Hhb].
+            + rewrite Heqk'. exact Hhbvol.
+            + forwards Hhblift: (@hb_weaken_snoc log (event_write t x v) ka kw Hhb).
+              applys HbTrans Hhblift Hhbvol. }
+        asserts Hself2: (ancestor G' a c -> hb (log & event_write t x v) ka (length log)).
+        { intro Hancc. rewrite <- (read_of_binds Hbc) in Hancc.
+          applys (>> ancestor_tc_self_hb Hwf Hplay HNcha0 HNloga0 Hcea IH Htin Hancc). }
+        forwards Hadom: CH_indom Hwf0 Hplay HNcha0.
+        asserts HselfMerge: (ancestor (graph_merge G' (vc_read VC' x) c c') a c' ->
+                              hb (log & event_write t x v) ka (length log)).
+        { intro Hancc'.
+          applys (>> ancestor_merge_target_hb Hedge Hadom Hfresh1 Hp1in Hp2in Hself1 Hself2 Hancc'). }
+        asserts HadomMerge: (graph_indom (graph_merge G' (vc_read VC' x) c c') a).
+        { applys graph_merge_indom Hadom. }
+        asserts HedgeMerge:
+          (forall x0 y0, graph_edge (graph_merge G' (vc_read VC' x) c c') x0 y0 ->
+                         graph_indom (graph_merge G' (vc_read VC' x) c c') x0 /\
+                         graph_indom (graph_merge G' (vc_read VC' x) c c') y0).
+        { forwards HwfgG': play_log_wf_graph Hplay.
+          forwards HwfgM: graph_merge_wf HwfgG' Hfresh1 Hp1in Hp2in.
+          destruct HwfgM as (_ & _ & HedgeM). exact HedgeM. }
+        applys (>> ancestor_commit_target_hb HedgeMerge HadomMerge Hfresh2 Hmwf HselfMerge Hanc).
+      * (* PlayStart *)
+        asserts Hnesp: (forall t1, event_start t <> event_spawn t1 t).
+        { introv Heq. discriminate. }
+        forwards Htin: play_event_self_indom_TC Hwf Hplay Hnesp.
+        applys (>> ancestor_tc_self_hb Hwf Hplay HNcha0 HNloga0 Hcea IH Htin Hanc).
+      * (* PlayEnd *)
+        match goal with Hb : binds TC' _ _ |- _ => rename Hb into Hbc end.
+        match goal with Hf : commit_fresh G' _ |- _ => rename Hf into Hfresh end.
+        cbn [get_thread] in Hanc. rewrite read_update_same in Hanc.
+        lets Htin: (indom_of_binds Hbc).
+        asserts Hcin: (graph_indom G' c). { rewrite <- (read_of_binds Hbc). applys HTCin Htin. }
+        asserts Hself: (ancestor G' a c -> hb (log & event_end t) ka (length log)).
+        { intro Hancc. rewrite <- (read_of_binds Hbc) in Hancc.
+          applys (>> ancestor_tc_self_hb Hwf Hplay HNcha0 HNloga0 Hcea IH Htin Hancc). }
+        forwards Hadom: CH_indom Hwf0 Hplay HNcha0.
+        applys (>> ancestor_commit_target_hb Hedge Hadom Hfresh Hcin Hself Hanc).
+      * (* PlaySpawn *)
+        match goal with Hb : binds TC' _ _ |- _ => rename Hb into Hbc end.
+        match goal with Hf : commit_fresh G' _ |- _ => rename Hf into Hfresh end.
+        cbn [get_thread] in Hanc.
+        asserts HTCeq: (TC'[t1 := c'][t2 := c'][t1] = c').
+        { destruct (classic (t1 = t2)) as [-> | Hne].
+          - rewrite read_update_same. reflexivity.
+          - rewrite read_update_neq; [ | congruence ]. rewrite read_update_same. reflexivity. }
+        rewrite HTCeq in Hanc.
+        lets Htin: (indom_of_binds Hbc).
+        asserts Hcin: (graph_indom G' c). { rewrite <- (read_of_binds Hbc). applys HTCin Htin. }
+        asserts Hself: (ancestor G' a c -> hb (log & event_spawn t1 t2) ka (length log)).
+        { intro Hancc. rewrite <- (read_of_binds Hbc) in Hancc.
+          applys (>> ancestor_tc_self_hb Hwf Hplay HNcha0 HNloga0 Hcea IH Htin Hancc). }
+        forwards Hadom: CH_indom Hwf0 Hplay HNcha0.
+        applys (>> ancestor_commit_target_hb Hedge Hadom Hfresh Hcin Hself Hanc).
+      * (* PlayJoin *)
+        match goal with Hb1 : binds TC' t1 _ |- _ => rename Hb1 into Hbc1 end.
+        match goal with Hb2 : binds TC' t2 _ |- _ => rename Hb2 into Hbc2 end.
+        match goal with Hf : commit_fresh G' _ |- _ => rename Hf into Hfresh end.
+        cbn [get_thread] in Hanc. rewrite read_update_same in Hanc.
+        lets Htin1: (indom_of_binds Hbc1).
+        asserts Hp2in: (graph_indom G' c1). { rewrite <- (read_of_binds Hbc1). applys HTCin Htin1. }
+        lets Htin2: (indom_of_binds Hbc2).
+        asserts Hp1in: (graph_indom G' c2). { rewrite <- (read_of_binds Hbc2). applys HTCin Htin2. }
+        asserts Hself2: (ancestor G' a c1 -> hb (log & event_join t1 t2) ka (length log)).
+        { intro Hancc. rewrite <- (read_of_binds Hbc1) in Hancc.
+          applys (>> ancestor_tc_self_hb Hwf Hplay HNcha0 HNloga0 Hcea IH Htin1 Hancc). }
+        asserts Hself1: (ancestor G' a c2 -> hb (log & event_join t1 t2) ka (length log)).
+        { intro Hancc.
+          lets (_ & _ & _ & Hjoin & _): Hwf.
+          forwards Hmemend: Hjoin log (@nil event) t1 t2
+            (eq_refl : log & event_join t1 t2 = log ++ event_join t1 t2 :: nil).
+          forwards (m & HNm): mem_Nth Hmemend.
+          forwards Hmlt: Nth_inbound HNm.
+          asserts Hmlt': (m < length CH). { rewrite Hlen. exact Hmlt. }
+          forwards (cm & HNmch): Nth_inbound_inv Hmlt'.
+          forwards Hbcm: ended_thread_pointer Hwf0 Hplay HNm HNmch.
+          lets Heqcm: (binds_inj Hbcm Hbc2).
+          subst cm.
+          forwards Hkeq: (>> IH m c2 (event_end t2) HNmch HNm Hancc).
+          forwards HNmapp: Nth_app_l HNm.
+          asserts HNEapp: (LibList.Nth (length log) (log & event_join t1 t2) (event_join t1 t2)).
+          { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
+          forwards Hhbjoin: (>> HbJoin HNmapp HNEapp Hmlt).
+          destruct Hkeq as [Heqk' | Hhb].
+          - rewrite Heqk'. exact Hhbjoin.
+          - forwards Hhblift: (@hb_weaken_snoc log (event_join t1 t2) ka m Hhb).
+            applys HbTrans Hhblift Hhbjoin. }
+        forwards Hadom: CH_indom Hwf0 Hplay HNcha0.
+        applys (>> ancestor_merge_target_hb Hedge Hadom Hfresh Hp1in Hp2in Hself1 Hself2 Hanc).
+      * (* PlayLock *)
+        match goal with Hb : binds TC' _ _ |- _ => rename Hb into Hbc end.
+        match goal with Hf : commit_fresh G' _ |- _ => rename Hf into Hfresh end.
+        cbn [get_thread] in Hanc. rewrite read_update_same in Hanc.
+        lets Htin: (indom_of_binds Hbc).
+        asserts Hp1in: (graph_indom G' (lc_read LC l0)). { applys lc_read_graph_indom Hplay. }
+        asserts Hp2in: (graph_indom G' c1). { rewrite <- (read_of_binds Hbc). applys HTCin Htin. }
+        asserts Hself1: (ancestor G' a (lc_read LC l0) ->
+                          hb (log & event_lock t l0) ka (length log)).
+        { intro Hancx.
+          forwards [Hlrt | (kw & tw & HNkw & HNkwch)]: lc_read_pointer Hplay.
+          - exfalso. unfold commit in *. rewrite Hlrt in Hancx.
+            forwards Heqa: ancestor_into_root Hplay Hancx.
+            applys is_commit_event_pos_ne_root Hplay HNcha0 HNloga0 Hcea Heqa.
+          - forwards Hkeq: (>> IH kw (lc_read LC l0) (event_unlock tw l0) HNkwch HNkw Hancx).
+            forwards HNkwapp: Nth_app_l HNkw.
+            asserts HNEapp: (LibList.Nth (length log) (log & event_lock t l0) (event_lock t l0)).
+            { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
+            forwards Hkwlt: Nth_inbound HNkw.
+            forwards Hhblock: (>> HbLock HNkwapp HNEapp Hkwlt).
+            destruct Hkeq as [Heqk' | Hhb].
+            + rewrite Heqk'. exact Hhblock.
+            + forwards Hhblift: (@hb_weaken_snoc log (event_lock t l0) ka kw Hhb).
+              applys HbTrans Hhblift Hhblock. }
+        asserts Hself2: (ancestor G' a c1 -> hb (log & event_lock t l0) ka (length log)).
+        { intro Hancc. rewrite <- (read_of_binds Hbc) in Hancc.
+          applys (>> ancestor_tc_self_hb Hwf Hplay HNcha0 HNloga0 Hcea IH Htin Hancc). }
+        forwards Hadom: CH_indom Hwf0 Hplay HNcha0.
+        applys (>> ancestor_merge_target_hb Hedge Hadom Hfresh Hp1in Hp2in Hself1 Hself2 Hanc).
+      * (* PlayUnlock *)
+        match goal with Hb : binds TC' _ _ |- _ => rename Hb into Hbc end.
+        match goal with Hf : commit_fresh G' _ |- _ => rename Hf into Hfresh end.
+        cbn [get_thread] in Hanc. rewrite read_update_same in Hanc.
+        lets Htin: (indom_of_binds Hbc).
+        asserts Hcin: (graph_indom G' c). { rewrite <- (read_of_binds Hbc). applys HTCin Htin. }
+        asserts Hself: (ancestor G' a c -> hb (log & event_unlock t l0) ka (length log)).
+        { intro Hancc. rewrite <- (read_of_binds Hbc) in Hancc.
+          applys (>> ancestor_tc_self_hb Hwf Hplay HNcha0 HNloga0 Hcea IH Htin Hancc). }
+        forwards Hadom: CH_indom Hwf0 Hplay HNcha0.
+        applys (>> ancestor_commit_target_hb Hedge Hadom Hfresh Hcin Hself Hanc).
+Qed.
+
+(* ===========================================================================
+   A strictly stronger property than [no_thin_air]: every read's source write
+   actually [hb]-precedes it (not merely "not hb-after it, with no closer
+   candidate in between"). This is FALSE for [Linear] (an unrelated
+   synchronisation action can advance a thread's pointer past a write with no
+   hb edge to it), but holds for [Branching] because a thread's commit
+   pointer only ever advances along graph ancestry, and graph ancestry always
+   corresponds to an [hb] edge ([ancestor_pos_hb], above). This is
+   UNCONDITIONAL (no [conflict_free]): [HbVolatile] orders a volatile write
+   before every later ACCESS of it (read or write, not just a read -- a
+   volatile write is itself a read-modify-write, pulling in the current
+   stored commit before pushing its own), which is exactly the edge
+   [ancestor_pos_hb] needs to bridge a graph-ancestor volatile write forward
+   to the position doing the pulling, whether that position is a read or
+   (for [PlayWriteVolatile], inside [ancestor_pos_hb]'s own proof) a write.
+
+   The eight non-read steps reduce to [hb_sourced_snoc_nonread]. The three
+   read steps show the freshly appended read is [hb]-sourced:
+     - StepReadLocal:  source is [t]'s own last uncommitted x-write; [hb] by
+       plain program order (same thread).
+     - StepReadGlobal: source is the last write [kL] feeding the flush [fw] of
+       the [is_latest_value] ancestor [cw] of [TC[t]]. [ancestor_pos_hb] turns
+       [ancestor G cw TC[t]] into [hb log fw k] where [k] witnesses [TC[t]]
+       ([tc_read_pointer]); chain [kL <= fw] and [k] to the read itself via
+       [resolve_witness_hb].
+     - StepReadVolatile: same shape, but everything lives in the already-
+       extended play (graph + log both include the read), so the [TC[t]]
+       witness step is unnecessary: the read's own freshly merged commit
+       [c''] is directly the [b]-witness for [ancestor_pos_hb].
+   =========================================================================== *)
+
+Theorem step_preserves_hb_sourced :
+  forall cfg cfg' log log',
+    wf_log log ->
+    describes log cfg ->
+    step (cfg, log) (cfg', log') ->
+    hb_sourced log ->
+    hb_sourced log'.
+Proof.
+  introv Hwf Hdesc Hstep Hhs.
+  inverts Hstep;
+    try (applys hb_sourced_snoc_nonread Hhs; intros; discriminate).
+  - (* StepReadLocal: source is [t]'s own last uncommitted write [D[t][x]];
+       [hb] by program order (same thread, [m < length log]). *)
+    match goal with
+    | Hb : binds _ _ (state_running, te_exp _, ?dd, _), Hd : binds ?dd _ _ |- _ =>
+        rename Hb into HbT; rename Hd into Hbd
+    end.
+    destruct Hdesc as (_ & _ & _ & _ & _ & _ &
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
+    lets HtinT: (indom_of_binds HbT).
+    forwards (st' & e'' & Hbd'): Hdelta HtinT.
+    forwards~ Heqt: binds_inj HbT Hbd'. inverts Heqt.
+    forwards HtinD: HdomD HtinT.
+    forwards (m & HNm & Hunc & Hnw): delta_last_uncommitted_write Hplay HtinD Hbd.
+    intros n t0 x0 v0 Hnth.
+    forwards [Hnth' | (Hp & Heq)]: Nth_last_inv Hnth.
+    + forwards Hlt: Nth_inbound Hnth'.
+      forwards Hsr: hb_sourced_read_snoc Hlt (Hhs n). applys Hsr Hnth.
+    + inverts Heq. subst n.
+      forwards Hmlt: Nth_inbound HNm.
+      forwards HNmapp: Nth_app_l HNm.
+      exists m t0. split.
+      * exact HNmapp.
+      * applys HbPo HNmapp Hnth; [ reflexivity | exact Hmlt ].
+  - (* StepReadGlobal: source is the last write [kL] feeding the flush [fw] of
+       the [is_latest_value] ancestor [cw] of [TC[t0]]. *)
+    match goal with
+    | Hb : binds _ _ (state_running, te_exp _, _, ?cc), Hl : is_latest_value _ ?cc _ _ |- _ =>
+        rename Hb into HbT; rename Hl into Hlv
+    end.
+    destruct Hdesc as (_ & _ & _ & Hrun & _ & _ &
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
+    lets HtinT: (indom_of_binds HbT).
+    forwards (st' & e'' & Hbd'): Hdelta HtinT.
+    forwards~ Heqt: binds_inj HbT Hbd'. inverts Heqt.
+    destruct Hlv as (cw & Hgw & Hanc & Hmax).
+    forwards (fw & ef & tw & kw & HNfw & HNef & Hgtef & Hcef & Hkwlt & HNkw & Hncl):
+      graph_writes_flush Hplay Hgw.
+    intros n t0 x0 v0 Hnth.
+    forwards [Hnth' | (Hp & Heq)]: Nth_last_inv Hnth.
+    + forwards Hlt: Nth_inbound Hnth'.
+      forwards Hsr: hb_sourced_read_snoc Hlt (Hhs n). applys Hsr Hnth.
+    + inverts Heq. subst n.
+      forwards (kL & HkLlt & HNkL & HnclL & HnwL):
+        (>> flush_last_write Hwf Hplay HNfw HNef Hgtef Hcef Hgw).
+      exists kL tw. split.
+      * applys Nth_app_l HNkL.
+      * (* [kL] --(same thread [tw], program order)--> [fw]
+           --([ancestor_pos_hb] on [Hanc : ancestor G cw TC[t0]])--> [TC[t0]]'s
+           witness position [k] --([resolve_witness_hb])--> the read. *)
+        forwards (HstartT & HnoendT): (proj2 (Hrun t0)).
+        { exists (te_exp e) D[t0] TC[t0]. exact HbT. }
+        forwards HwfR: wf_log_read_last HstartT HnoendT Hwf.
+        forwards HtinTC: HdomTC HtinT.
+        forwards [HTCroot | (k & ek & HNk & HNkCH & Hdisj)]: tc_read_pointer Hplay HtinTC.
+        -- (* [TC[t0] = root_commit] is impossible: it would force [cw] itself
+              to be [root_commit] ([ancestor_into_root]), contradicting that
+              [cw] is witnessed by the genuine commit event [ef]
+              ([is_commit_event_pos_ne_root]). *)
+           exfalso.
+           unfold commit in *.
+           rewrite HTCroot in Hanc.
+           forwards Heqcw: ancestor_into_root Hplay Hanc.
+           applys is_commit_event_pos_ne_root Hplay HNfw HNef Hcef Heqcw.
+        -- forwards HNkapp: Nth_app_l HNk.
+           forwards Hklt: Nth_inbound HNk.
+           forwards Hhbkn: (>> resolve_witness_hb HwfR HNkapp Hdisj Hnth (eq_refl t0) Hklt).
+           forwards Hkeq: (>> ancestor_pos_hb Hwf Hplay HNfw HNef Hcef HNkCH HNk Hanc).
+           destruct Hkeq as [Heqfk | Hhbfk].
+           ++ rewrite <- Heqfk in Hhbkn.
+              destruct (classic (kL = fw)) as [-> | Hne].
+              ** exact Hhbkn.
+              ** asserts HkLltfw: (kL < fw). { nat_math. }
+                 forwards HNkLapp: Nth_app_l HNkL.
+                 forwards HNfwapp: Nth_app_l HNef.
+                 asserts Hhbklfw: (hb (log & event_read t0 x0 v0) kL fw).
+                 { applys HbPo HNkLapp HNfwapp; [ cbn [get_thread]; congruence | exact HkLltfw ]. }
+                 applys HbTrans Hhbklfw Hhbkn.
+           ++ forwards HNkLapp: Nth_app_l HNkL.
+              forwards HNfwapp: Nth_app_l HNef.
+              forwards Hhbfk': (@hb_weaken_snoc log (event_read t0 x0 v0) fw k Hhbfk).
+              destruct (classic (kL = fw)) as [-> | Hne].
+              ** applys HbTrans Hhbfk' Hhbkn.
+              ** asserts HkLltfw: (kL < fw). { nat_math. }
+                 asserts Hhbklfw: (hb (log & event_read t0 x0 v0) kL fw).
+                 { applys HbPo HNkLapp HNfwapp; [ cbn [get_thread]; congruence | exact HkLltfw ]. }
+                 asserts Hhbfkn: (hb (log & event_read t0 x0 v0) fw (length log)).
+                 { applys HbTrans Hhbfk' Hhbkn. }
+                 applys HbTrans Hhbklfw Hhbfkn.
+  - (* StepReadVolatile: same shape, but entirely within the already-extended
+       play [HplayR] (graph [G'] and log [log & read] both already include
+       the read), so the read's own freshly merged commit [c''] is directly
+       the [b]-witness for [ancestor_pos_hb] -- no separate [TC] lookup. *)
+    match goal with
+    | Hb : binds _ _ (state_running, te_exp _, _, ?cc), Hl : is_latest_value _ ?cc _ _ |- _ =>
+        rename Hb into HbT; rename Hl into Hlv
+    end.
+    match goal with
+    | Hb0 : binds T t (state_running, te_exp _, _, ?cc0) |- _ => rename Hb0 into HbT0
+    end.
+    match goal with Hxvol0 : x \in Volatiles |- _ => rename Hxvol0 into HxVol end.
+    match goal with Hfr0 : commit_fresh G c'' |- _ => rename Hfr0 into Hfresh end.
+    destruct Hdesc as (_ & _ & _ & Hrun & _ & _ &
+      (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
+    lets HtinT: (indom_of_binds HbT0).
+    forwards (st' & e'' & Hbd'): Hdelta HtinT.
+    forwards~ Heqt: binds_inj HbT0 Hbd'. inverts Heqt.
+    destruct Hlv as (cw & Hgw & Hanc & Hmax).
+    forwards (HstartT & HnoendT): (proj2 (Hrun t)).
+    { exists (te_exp e) D[t] TC[t]. exact HbT0. }
+    forwards HwfR: wf_log_read_last HstartT HnoendT Hwf.
+    asserts HbTCc: (binds TC t (TC[t])).
+    { applys binds_of_indom_read (HdomTC t HtinT); (reflexivity || typeclass). }
+    asserts HG'eq: (G' = graph_merge G (vc_read VC x) (TC[t]) c'').
+    { unfold Branching.pull_volatile, Branching.do_merge in H8.
+      rewrite (read_of_binds HbT0) in H8. cbn in H8. inverts* H8.
+    }
+    asserts HplayR:
+      (play_log (log & event_read t x v) init_play_cfg (D, TC[t := c''], G', LC, VC) (CH & c'')).
+    { rewrite HG'eq.
+      forwards Hpe: PlayReadVolatile HxVol HbTCc Hfresh.
+      forwards Hp2: PlaySnoc Hplay Hpe.
+      rewrite read_update_same in Hp2. exact Hp2. }
+    forwards HlenCH0: play_log_CH_length Hplay.
+    forwards (fw & ef & tw & kw & HNfw & HNef & Hgtef & Hcef & Hkwlt & HNkw & Hncl):
+      graph_writes_flush HplayR Hgw.
+    asserts Hfwlt: (fw < length log).
+    { forwards [Hfwlt' | (HfwN & HfwE)]: Nth_last_inv HNef.
+      - applys Nth_inbound Hfwlt'.
+      - subst ef. cbn [is_commit_event] in Hcef. contradiction. }
+    intros n t0 x0 v0 Hnth.
+    forwards [Hnth' | (Hp & Heq)]: Nth_last_inv Hnth.
+    + forwards Hlt: Nth_inbound Hnth'.
+      forwards Hsr: hb_sourced_read_snoc Hlt (Hhs n). applys Hsr Hnth.
+    + inverts Heq. subst n.
+      forwards (kL & HkLlt & HNkL & HnclL & HnwL):
+        (>> flush_last_write HwfR HplayR HNfw HNef Hgtef Hcef Hgw).
+      asserts HNcc'': (LibList.Nth (length log) (CH & c'') c'').
+      { apply Nth_app_r' with (m := 0); [ apply Nth_zero | rew_list; nat_math ]. }
+      exists kL tw. split.
+      * exact HNkL.
+      * forwards Hkeq: (>> ancestor_pos_hb HwfR HplayR HNfw HNef Hcef HNcc'' Hnth Hanc).
+        destruct Hkeq as [Heqfk | Hhbfk].
+        -- exfalso. nat_math.
+        -- destruct (classic (kL = fw)) as [-> | Hne].
+           ++ exact Hhbfk.
+           ++ asserts HkLltfw: (kL < fw). { nat_math. }
+              asserts Hhbklfw: (hb (log & event_read t0 x0 v0) kL fw).
+              { applys HbPo HNkL HNef; [ cbn [get_thread]; congruence | exact HkLltfw ]. }
+              applys HbTrans Hhbklfw Hhbfk.
+Qed.

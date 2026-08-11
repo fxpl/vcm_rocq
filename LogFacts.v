@@ -510,6 +510,24 @@ Proof.
   induction* Hhb.
 Qed.
 
+(* [hb] is monotone under extending the log on the right: an ordering that holds
+   in a prefix still holds once more events are appended.  ([LogFacts] only has
+   the inverse, [hb_app_inv].)  Needed to lift the [play_log] induction's
+   prefix-[hb] to the extended log. *)
+Lemma hb_weaken_snoc :
+  forall (lg : log) E m n, hb lg m n -> hb (lg & E) m n.
+Proof.
+  introv Hhb. induction Hhb.
+  - applys HbPo; [ applys* Nth_app_l | applys* Nth_app_l | assumption | assumption ].
+  - applys HbLock; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
+  - applys HbSpawn; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
+  - applys HbJoin; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
+  - forwards H0': Nth_app_l H0.
+    forwards H1': Nth_app_l H1.
+    applys HbVolatile H H0' H1' H2 H3.
+  - applys* HbTrans.
+Qed.
+
 Lemma hb_app_inv :
   forall l1 l2 m n,
     hb (l1 ++ l2) m n ->
@@ -647,7 +665,7 @@ Proof.
     | n m lt1 lt2 ll HNsrc HNtgt Hlt
     | m n st1 st2 HNsrc HNtgt Hlt
     | m n jt1 jt2 HNsrc HNtgt Hlt
-    | m n vt1 vt2 vx vv vv' Hvol HNsrc HNtgt Hlt
+    | m n vt1 vx vv ve2 Hvol HNsrc HNtgt Hacc Hlt
     | m n mid Hmk IHmk Hkn IHkn ];
     introv Hm Hgt Hns Hn.
   - (* HbPo: same thread *)
@@ -1057,4 +1075,67 @@ Proof.
   forwards* [Hnth' | (Heq & ->)]: Nth_last_inv Hnth.
   forwards Hlt: Nth_inbound Hnth'.
   apply* sourced_read_snoc.
+Qed.
+
+(* [hb_sourced_read]'s analogue of [sourced_read_snoc]: appending an event
+   preserves the hb-sourcing of every read already in the log ([hb] only
+   grows, by [hb_weaken_snoc]). *)
+Lemma hb_sourced_read_snoc :
+  forall log e n,
+    n < length log ->
+    hb_sourced_read log n ->
+    hb_sourced_read (log & e) n.
+Proof.
+  introv Hlt Hread.
+  introv Hnth.
+  asserts Hnth': (LibList.Nth n log (event_read t x v)).
+  { forwards* [Hnth' | (m & contra & _)]: Nth_app_inv Hnth. }
+  forwards (m & t' & Hmth & Hhb): Hread Hnth'.
+  exists m t'. split.
+  - applys* Nth_app_l.
+  - applys* hb_weaken_snoc.
+Qed.
+
+Lemma hb_sourced_snoc_nonread :
+  forall log e,
+    (forall t x v, e <> event_read t x v) ->
+    hb_sourced log ->
+    hb_sourced (log & e).
+Proof.
+  introv Hneq Hs.
+  introv Hnth.
+  forwards* [Hnth' | (Heq & ->)]: Nth_last_inv Hnth.
+  forwards Hlt: Nth_inbound Hnth'.
+  apply* hb_sourced_read_snoc.
+Qed.
+
+Lemma hb_sourced_nil : hb_sourced nil.
+Proof. intros n t x v HN. inverts HN. Qed.
+
+(* Every event's thread has either already been spawned or is the root
+   thread: an immediate consequence of [wf_log]'s "threads start by
+   starting" and "threads start after spawning, or are the root thread"
+   conjuncts. *)
+Lemma event_thread_spawned_or_root :
+  forall log e t,
+    wf_log log ->
+    mem e log ->
+    get_thread e = t ->
+    (exists t1, mem (event_spawn t1 t) log) \/ t = t_root.
+Proof.
+  introv Hwf Hmem Hgt.
+  lets (_ & _ & Hspawn & _ & Hstart & _ & _ & _ & _): Hwf.
+  destruct (classic (e = event_start t)) as [Heqs | Hneqs].
+  - subst e. forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
+    forwards [(t1 & Hmem1) | Hrt]: Hspawn Heq.
+    + left. exists t1. rewrite Heq. rew_listx*.
+    + right; exact Hrt.
+  - forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
+    forwards Hmemstart: Hstart Heq Hgt Hneqs.
+    asserts Hmemstart': (mem (event_start t) log).
+    { rewrite Heq. rew_listx*. }
+    forwards (l1' & l2' & Heq'): mem_inv_middle Hmemstart'.
+    forwards [(t1 & Hmem1) | Hrt]: Hspawn Heq'.
+    + left. exists t1. rewrite Heq'. rew_listx*.
+    + right; exact Hrt.
 Qed.

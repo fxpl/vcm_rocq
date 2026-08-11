@@ -84,13 +84,19 @@ Inductive hb (log : log) : nat -> nat -> Prop :=
     LibList.Nth n log (event_join t1 t2) ->
     m < n ->
     hb log m n
-| HbVolatile : forall m n t1 t2 x v v',
-    (* A write to a volatile variable is ordered before every later read of
-       it, regardless of thread -- this is the synchronisation edge that
-       distinguishes a volatile from a plain variable. *)
+| HbVolatile : forall m n t1 x v e2,
+    (* A write to a volatile variable is ordered before every later access
+       (read OR write) of it, regardless of thread -- this is the
+       synchronisation edge that distinguishes a volatile from a plain
+       variable. The write side counts too because a volatile write is
+       itself a read-modify-write: it always pulls in whatever is currently
+       stored before pushing its own update (see [Branching]/[Linear]'s
+       "pull, then push" semantics), so it synchronises with the previous
+       writer exactly as an ordinary read would. *)
     x \in Volatiles ->
     LibList.Nth m log (event_write t1 x v) ->
-    LibList.Nth n log (event_read t2 x v') ->
+    LibList.Nth n log e2 ->
+    accesses_variable x e2 ->
     m < n ->
     hb log m n
 | HbTrans : forall m n k,
@@ -237,3 +243,15 @@ Definition sourced_read (log : Log.log) (n : nat) : Prop :=
 (* Happens-before consistency: every read in the log is sourced. *)
 Definition hb_consistent (log : Log.log) : Prop :=
   forall n, sourced_read log n.
+
+(* A stronger form of [sourced_read]: the source write does not merely avoid
+   being hb-after the read (plus maximality), it actually happens-before the
+   read. This rules out "thin air" values more directly, at the cost of no
+   longer holding for models (e.g. Linear) where a thread's pointer can
+   advance past a write it has no synchronisation edge with. *)
+Definition hb_sourced_read (log : Log.log) (n : nat) : Prop :=
+  forall t x v,
+    LibList.Nth n log (event_read t x v) ->
+    exists m t', LibList.Nth m log (event_write t' x v) /\ hb log m n.
+
+Definition hb_sourced (log : Log.log) : Prop := forall n, hb_sourced_read log n.

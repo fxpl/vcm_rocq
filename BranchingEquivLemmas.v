@@ -951,6 +951,62 @@ Proof.
          ++ apply ancestor_graph_merge_edge_r.
 Qed.
 
+(* The write-write counterpart of [hb_volatile_pointer_ancestor]: a write of
+   a volatile [x] is also an ancestor of every LATER write of [x] (not just
+   later reads), since a volatile write is itself a pull-then-push: it
+   merges in [x]'s currently stored commit before pushing its own, so it
+   chains through [vc_read VC x] exactly as a read does, with one extra
+   [graph_commit] hop from the inner merge's target to the outer pushed
+   commit. *)
+Lemma hb_volatile_pointer_ancestor_write :
+  forall log s0 D TC G LC VC CH m n t1 t2 x v v' cm cn,
+    wf_log log ->
+    play_log log s0 (D, TC, G, LC, VC) CH ->
+    x \in Volatiles ->
+    LibList.Nth m log (event_write t1 x v) ->
+    LibList.Nth n log (event_write t2 x v') ->
+    m < n ->
+    LibList.Nth m CH cm -> LibList.Nth n CH cn ->
+    ancestor G cm cn.
+Proof.
+  introv Hwf Hplay Hxvol. gen m n t1 t2 v v' cm cn.
+  inductions Hplay; introv HNlogm HNlogn Hlt HNchm HNchn.
+  - inverts HNlogn.
+  - forwards Hlen: play_log_CH_length Hplay.
+    forwards Hwf0: wf_log_last_inv Hwf.
+    forwards [HNn0 | (HnN & HenE)]: Nth_last_inv HNlogn.
+    + (* target write is in the prefix: induction hypothesis *)
+      forwards Hibn: Nth_inbound HNn0.
+      forwards [HNm0 | (HmN & _)]: Nth_last_inv HNlogm. 2:{ nat_math. }
+      forwards [HNchm0 | (HmNc & _)]: Nth_last_inv HNchm. 2:{ rewrite Hlen in HmNc. nat_math. }
+      forwards [HNchn0 | (HnNc & _)]: Nth_last_inv HNchn. 2:{ rewrite Hlen in HnNc. nat_math. }
+      forwards Hanc:
+        (>> IHHplay Hwf0 (eq_refl : (D', TC', G', LC', VC') = (D', TC', G', LC', VC')) Hxvol
+            HNm0 HNn0 Hlt HNchm0 HNchn0).
+      eapply play_event_graph_extends; eassumption.
+    + (* target write is the last (appended) event: it pulls [x]'s stored
+         commit into a merge, then pushes the result *)
+      subst E.
+      forwards [HNm0 | (HmN & _)]: Nth_last_inv HNlogm. 2:{ nat_math. }
+      forwards [HNchm0 | (HmNc & _)]: Nth_last_inv HNchm. 2:{ rewrite Hlen in HmNc. nat_math. }
+      forwards Hanc_cm: (>> write_ancestor_VC Hwf0 Hplay Hxvol HNm0 HNchm0).
+      forwards Hanc_lift: play_event_graph_extends H Hanc_cm.
+      forwards [HNchn0 | (HnNc & Hcneq)]: Nth_last_inv HNchn.
+      { forwards Hib: Nth_inbound HNchn0. rewrite <- Hlen in HnN. nat_math. }
+      inverts H as Hxvol' Hbd Hbc Hfresh Hfresh2.
+      -- (* PlayWrite: impossible, since [x] IS volatile here *) false.
+      -- (* PlayWriteVolatile: pulls [vc_read VC x] into a merge with [t2]'s
+             own prior pointer [c], creating [c']; then pushes [c''] on top
+             of [c'] as the final commit *)
+         cbn [get_thread] in Hcneq.
+         rewrite read_update_same in Hcneq. subst cn.
+         apply ancestor_trans with (c' := vc_read VC' x).
+         ++ exact Hanc_lift.
+         ++ apply ancestor_trans with (c' := c').
+            ** apply ancestor_graph_commit. apply ancestor_graph_merge_edge_r.
+            ** apply ancestor_graph_commit_edge.
+Qed.
+
 (* happens-before implies commit-pointer ancestry. Every hb edge is one
    of the four cases above; transitivity composes them. *)
 Lemma hb_pointer_ancestor :
@@ -968,7 +1024,7 @@ Proof.
     | n m t1 t2 l HNu HNl Hlt
     | m n t1 t2 HNs HNst Hlt
     | m n t1 t2 HNe HNj Hlt
-    | m n t1 t2 x v v' Hxvol HNw HNr Hlt
+    | m n t1 x v e2 Hxvol HNw HNr Hacc Hlt
     | m n k Hmk IHmk Hkn IHkn ];
     introv HNchm HNchn.
   - (* HbPo *)
@@ -980,8 +1036,11 @@ Proof.
     applys (>> hb_spawn_pointer_ancestor Hwf Hplay HNs HNst Hlt HNchm HNchn).
   - (* HbJoin *)
     applys (>> hb_join_pointer_ancestor Hwf Hplay HNe HNj Hlt HNchm HNchn).
-  - (* HbVolatile *)
-    applys (>> hb_volatile_pointer_ancestor Hwf Hplay Hxvol HNw HNr Hlt HNchm HNchn).
+  - (* HbVolatile: [e2] either reads or writes [x]; dispatch to whichever
+       pointer-ancestor lemma matches. *)
+    destruct e2; simpl in Hacc; try contradiction.
+    + subst. applys (>> hb_volatile_pointer_ancestor Hwf Hplay Hxvol HNw HNr Hlt HNchm HNchn).
+    + subst. applys (>> hb_volatile_pointer_ancestor_write Hwf Hplay Hxvol HNw HNr Hlt HNchm HNchn).
   - (* HbTrans *)
     forwards (ek & HNlogk): hb_Nth_r Hmk.
     forwards Hlenk: Nth_inbound HNlogk.
@@ -1423,7 +1482,7 @@ Proof.
     | q p lt1 lt2 ll HNsrc HNtgt Hlt
     | p q st1 st2 HNsrc HNtgt Hlt
     | p q jt1 jt2 HNsrc HNtgt Hlt
-    | p q vt1 vt2 vx vv vv' Hxvol HNw HNr Hlt
+    | p q vt1 vx vv ve2 Hxvol HNw HNr Hacc Hlt
     | p q k Hpk IHpk Hkq IHkq ];
     introv Hm Hgt Hn Hgne.
   - (* HbPo: source and target are the same thread, contradicting [get_thread en <> t] *)
@@ -1449,7 +1508,7 @@ Proof.
     forwards Heq: Nth_functional Hm HNw. subst em.
     exists p (event_write vt1 vx vv). splits.
     + nat_math. + exact HNw. + simpls; exact Hgt. + simpl; exact Hxvol.
-    + applys HbVolatile Hxvol HNw HNr Hlt.
+    + applys HbVolatile Hxvol HNw HNr Hacc Hlt.
   - (* HbTrans through [k] *)
     forwards (ek & HNk): hb_Nth_r Hpk.
     forwards Hltpk: hb_lt Hpk.
@@ -2137,6 +2196,473 @@ Proof.
     (typeclass || (apply indom_update_of_indom; (exact Hin || typeclass))).
 Qed.
 
+(* A thread's membership in [TC] only grows along a play step. *)
+Lemma play_event_TC_indom_mono :
+  forall E D' TC' G' LC' VC' D'' TC'' G'' LC'' VC'' t,
+    play_event E (D', TC', G', LC', VC') (D'', TC'', G'', LC'', VC'') ->
+    t \indom TC' -> t \indom TC''.
+Proof.
+  introv Hpe Hin. inverts Hpe; try exact Hin;
+    try (apply indom_update_of_indom; (exact Hin || typeclass)).
+  (* PlaySpawn: two updates, [TC[t1:=c'][t2:=c']] *)
+  apply indom_update_of_indom;
+    (typeclass || (apply indom_update_of_indom; (exact Hin || typeclass))).
+Qed.
+
+(* Every thread ever recorded in [TC] was either spawned earlier in the log or
+   is the root thread -- the [play_log] counterpart of
+   [event_thread_spawned_or_root], tying [TC]'s domain to the log itself
+   rather than to a live configuration's [describes] invariant. *)
+Lemma log_thread_indom_TC :
+  forall log D TC G LC VC CH t,
+    wf_log log ->
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    (exists t1, mem (event_spawn t1 t) log) \/ t = t_root ->
+    t \indom TC.
+Proof.
+  introv Hwf Hplay. gen t.
+  inductions Hplay; introv Hsrc.
+  - destruct Hsrc as [(t1 & Hmem) | ->].
+    + false. applys mem_nil_inv Hmem.
+    + apply indom_update_same; typeclass.
+  - forwards Hwf0: wf_log_last_inv Hwf.
+    destruct Hsrc as [(t1 & Hmem) | ->].
+    + rew_listx in Hmem. destruct Hmem as [Hmem0 | Heq].
+      * asserts Hsrc0: ((exists t1, mem (event_spawn t1 t) log) \/ t = t_root).
+        { left. exists t1. exact Hmem0. }
+        lets Hin0: (IHHplay D' TC' G' LC' VC' Hwf0 eq_refl eq_refl t Hsrc0).
+        applys play_event_TC_indom_mono H Hin0.
+      * subst. inverts H. apply indom_update_same; typeclass.
+    + asserts Hsrc0: ((exists t1, mem (event_spawn t1 t_root) log) \/ t_root = t_root).
+      { right; reflexivity. }
+      lets Hin0: (IHHplay D' TC' G' LC' VC' Hwf0 eq_refl eq_refl t_root Hsrc0).
+      applys play_event_TC_indom_mono H Hin0.
+Qed.
+
+(* Every commit ever recorded in [CH] lives in the graph domain (unlike
+   [CH_commit_event_indom], this places no restriction on the kind of event
+   at that position -- a plain read or the start event carries forward an
+   already-domain commit just as well as a commit/merge event creates a
+   fresh one). *)
+Lemma CH_indom :
+  forall log D TC G LC VC CH k c,
+    wf_log log ->
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    LibList.Nth k CH c ->
+    graph_indom G c.
+Proof.
+  introv Hwf Hplay. gen k c.
+  inductions Hplay; introv HNch.
+  - forwards*: Nth_nil_inv HNch.
+  - forwards Hwf0: wf_log_last_inv Hwf.
+    forwards [HNch0 | (HkN & Hcx)]: Nth_last_inv HNch.
+    + lets Hin: (IHHplay D' TC' G' LC' VC' Hwf0 eq_refl eq_refl k c HNch0).
+      applys play_event_graph_indom_mono H Hin.
+    + subst c.
+      asserts HplayFull: (play_log (log & E) init_play_cfg (D, TC, G, LC, VC) (CH & TC[get_thread E])).
+      { applys PlaySnoc Hplay H. }
+      forwards Hpwf: play_log_graph_wf HplayFull.
+      destruct Hpwf as (_ & HTCin & _).
+      apply HTCin.
+      asserts Hmem: (mem E (log & E)). { rewrite mem_last_eq. right. reflexivity. }
+      forwards Hgtr: event_thread_spawned_or_root Hwf Hmem (eq_refl (get_thread E)).
+      applys log_thread_indom_TC Hwf HplayFull Hgtr.
+Qed.
+(* [root_commit] is never the target of a graph edge: it is present from the
+   very first (empty) graph, and every edge ever added targets a commit that
+   was [commit_fresh] (hence not yet [root_commit], which is always indom)
+   at the moment the edge was created. *)
+Lemma root_commit_no_incoming_edge :
+  forall log D TC G LC VC CH,
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    forall a, ~ graph_edge G a root_commit.
+Proof.
+  introv Hplay. inductions Hplay; introv He.
+  - unfolds graph_root, graph_edge. rew_set in He. false.
+  - rename H into Hpe.
+    forwards Hpgwf: play_log_graph_wf Hplay.
+    destruct Hpgwf as (_ & _ & _ & _ & Hrootin).
+    (* [root_commit] can never be a step's fresh commit (it is always
+       indom, never [commit_fresh]), so it is never the target of a
+       newly-added edge; old edges are ruled out by [IHHplay]. *)
+    inverts Hpe.
+    + (* PlayRead: [G] unchanged *) applys* IHHplay.
+    + (* PlayReadVolatile: single merge *)
+      destruct G' as (C0 & P0). unfolds graph_merge, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | [Heq | HeP]].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlayWrite: [G] unchanged *) applys* IHHplay.
+    + (* PlayWriteVolatile: two layers (merge then commit) *)
+      asserts Hrootin1: (graph_indom (graph_merge G' (vc_read VC' x) c c') root_commit).
+      { destruct G' as (C0 & P0). unfolds graph_merge, graph_indom.
+        apply indom_update_of_indom; (exact Hrootin || typeclass). }
+      destruct G' as (C0 & P0). unfolds graph_merge, graph_commit, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | [Heq | [Heq | HeP]]].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin1].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlayStart: [G] unchanged *) applys* IHHplay.
+    + (* PlayEnd *)
+      destruct G' as (C0 & P0). unfolds graph_commit, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | HeP].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlaySpawn *)
+      destruct G' as (C0 & P0). unfolds graph_commit, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | HeP].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlayJoin *)
+      destruct G' as (C0 & P0). unfolds graph_merge, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | [Heq | HeP]].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlayLock *)
+      destruct G' as (C0 & P0). unfolds graph_merge, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | [Heq | HeP]].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlayUnlock *)
+      destruct G' as (C0 & P0). unfolds graph_commit, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | HeP].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+Qed.
+
+(* A commit graph edge can never point into [root_commit], so ancestry into it
+   collapses to reflexivity. *)
+Lemma ancestor_into_root :
+  forall log D TC G LC VC CH a,
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    ancestor G a root_commit -> a = root_commit.
+Proof.
+  introv Hplay Hanc.
+  asserts Hno: (forall a, ~ graph_edge G a root_commit).
+  { applys root_commit_no_incoming_edge Hplay. }
+  inductions Hanc.
+  - reflexivity.
+  - false. applys Hno H.
+Qed.
+
+(* Whenever [t]'s pointer has ever moved past [root_commit], [TC[t]] is
+   exactly the commit recorded at the position that last set it -- the
+   thread-indexed counterpart of [lc_read_pointer]/[vc_read_pointer]. Unlike
+   those, the witnessing event need not itself touch [t]: a spawned child's
+   very first pointer is recorded under the *spawner's* thread (the event is
+   [t]'s own spawn), which is why the second disjunct is needed. *)
+Lemma tc_read_pointer :
+  forall log D TC G LC VC CH t,
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    t \indom TC ->
+    TC[t] = root_commit \/
+    exists k ek,
+      LibList.Nth k log ek /\ LibList.Nth k CH (TC[t]) /\
+      (get_thread ek = t \/ exists t0, ek = event_spawn t0 t).
+Proof.
+  introv Hplay. gen t. inductions Hplay; introv Htin.
+  - left. forwards Ht: indom_update_cases Htin.
+    destruct Ht as [-> | Hc]; [ | false; applys indom_empty_inv Hc ].
+    apply read_update_same.
+  - (* Recurse into the smaller log for [t], then lift the witness position
+       (if any) across the extra event [E] with [Nth_app_l]; stated purely in
+       terms of [TC'[t]] so the helper itself needs no rewriting, leaving any
+       [TC[t] = TC'[t]] conversion to each call site. *)
+    forwards Hlen: play_log_CH_length Hplay.
+    asserts Hunaffected:
+      (t \indom TC' ->
+       TC'[t] = root_commit \/
+       exists k ek, LibList.Nth k (log & E) ek /\ LibList.Nth k (CH & TC[get_thread E]) (TC'[t]) /\
+         (get_thread ek = t \/ exists t0, ek = event_spawn t0 t)).
+    { introv Htin'.
+      destruct (IHHplay D' TC' G' LC' VC' eq_refl eq_refl t Htin') as [Hrt | (k & ek & HNk & HNkch & Hdisj)].
+      - left. exact Hrt.
+      - right. exists k ek.
+        split.
+        { applys Nth_app_l HNk. }
+        split.
+        { applys Nth_app_l HNkch. }
+        exact Hdisj. }
+    inverts H.
+    + (* PlayRead: [TC] untouched *) applys Hunaffected Htin.
+    + (* PlayReadVolatile t0 x v: [TC = TC'[t0:=c']] *)
+      destruct (classic (t = t0)) as [-> | Hne].
+      * right. exists (length log) (event_read t0 x v). splits.
+        -- applys* Nth_app_r'.
+        -- cbn [get_thread]. rewrite read_update_same. applys Nth_app_r' (Nth_zero nil c'); nat_math.
+        -- left. reflexivity.
+      * asserts Htin': (t \indom TC').
+        { destruct (indom_update_inv Htin) as [Hc | Hd];
+          [ false; apply Hne; exact Hc | exact Hd ]. }
+        destruct (Hunaffected Htin') as [Hrt | (k & ek & HNk & HNkch & Hdisj)].
+        -- left. rewrite read_update_neq; [ | congruence ]. exact Hrt.
+        -- right. exists k ek.
+           asserts Heq: (TC'[t0:=c'][t] = TC'[t]). { apply read_update_neq. congruence. }
+           split; [ exact HNk | split; [ rewrite Heq; exact HNkch | exact Hdisj ] ].
+    + (* PlayWrite: [TC] untouched *) applys Hunaffected Htin.
+    + (* PlayWriteVolatile t0 x v: [TC = TC'[t0:=c'']] *)
+      destruct (classic (t = t0)) as [-> | Hne].
+      * right. exists (length log) (event_write t0 x v). splits.
+        -- applys* Nth_app_r'.
+        -- cbn [get_thread]. rewrite read_update_same. applys Nth_app_r' (Nth_zero nil c''); nat_math.
+        -- left. reflexivity.
+      * asserts Htin': (t \indom TC').
+        { destruct (indom_update_inv Htin) as [Hc | Hd];
+          [ false; apply Hne; exact Hc | exact Hd ]. }
+        destruct (Hunaffected Htin') as [Hrt | (k & ek & HNk & HNkch & Hdisj)].
+        -- left. rewrite read_update_neq; [ | congruence ]. exact Hrt.
+        -- right. exists k ek.
+           asserts Heq: (TC'[t0:=c''][t] = TC'[t]). { apply read_update_neq. congruence. }
+           split; [ exact HNk | split; [ rewrite Heq; exact HNkch | exact Hdisj ] ].
+    + (* PlayStart: [TC] untouched *) applys Hunaffected Htin.
+    + (* PlayEnd t0: [TC = TC'[t0:=c']] *)
+      destruct (classic (t = t0)) as [-> | Hne].
+      * right. exists (length log) (event_end t0). splits.
+        -- applys* Nth_app_r'.
+        -- cbn [get_thread]. rewrite read_update_same. applys Nth_app_r' (Nth_zero nil c'); nat_math.
+        -- left. reflexivity.
+      * asserts Htin': (t \indom TC').
+        { destruct (indom_update_inv Htin) as [Hc | Hd];
+          [ false; apply Hne; exact Hc | exact Hd ]. }
+        destruct (Hunaffected Htin') as [Hrt | (k & ek & HNk & HNkch & Hdisj)].
+        -- left. rewrite read_update_neq; [ | congruence ]. exact Hrt.
+        -- right. exists k ek.
+           asserts Heq: (TC'[t0:=c'][t] = TC'[t]). { apply read_update_neq. congruence. }
+           split; [ exact HNk | split; [ rewrite Heq; exact HNkch | exact Hdisj ] ].
+    + (* PlaySpawn t1 t2: [TC = TC'[t1:=c'][t2:=c']] *)
+      destruct (classic (t = t1)) as [-> | Hne1].
+      * right. exists (length log) (event_spawn t1 t2). splits.
+        -- applys* Nth_app_r'.
+        -- destruct (classic (t1 = t2)) as [-> | Hne2].
+           ++ cbn [get_thread]. rewrite read_update_same. applys Nth_app_r' (Nth_zero nil c'); nat_math.
+           ++ cbn [get_thread]. rewrite read_update_neq; [ | congruence ]. rewrite read_update_same.
+              applys Nth_app_r' (Nth_zero nil c'); nat_math.
+        -- left. reflexivity.
+      * destruct (classic (t = t2)) as [-> | Hne2].
+        -- right. exists (length log) (event_spawn t1 t2). splits.
+           ++ applys* Nth_app_r'.
+           ++ cbn [get_thread]. rewrite read_update_neq; [ | congruence ]. rewrite read_update_same. rewrite read_update_same.
+              applys Nth_app_r' (Nth_zero nil c'); nat_math.
+           ++ right. exists t1. reflexivity.
+        -- asserts Htin': (t \indom TC').
+           { destruct (indom_update_inv Htin) as [Hc2 | Hd2];
+             [ false; apply Hne2; exact Hc2 | ].
+             destruct (indom_update_inv Hd2) as [Hc1 | Hd1];
+             [ false; apply Hne1; exact Hc1 | exact Hd1 ]. }
+           destruct (Hunaffected Htin') as [Hrt | (k & ek & HNk & HNkch & Hdisj)].
+           ++ left. rewrite read_update_neq; [ | congruence ]. rewrite read_update_neq; [ | congruence ]. exact Hrt.
+           ++ right. exists k ek.
+              asserts Heq: (TC'[t1:=c'][t2:=c'][t] = TC'[t]).
+              { rewrite read_update_neq; [ | congruence ]. apply read_update_neq. congruence. }
+              split; [ exact HNk | split; [ rewrite Heq; exact HNkch | exact Hdisj ] ].
+    + (* PlayJoin t1 t2: [TC = TC'[t1:=c']] *)
+      destruct (classic (t = t1)) as [-> | Hne].
+      * right. exists (length log) (event_join t1 t2). splits.
+        -- applys* Nth_app_r'.
+        -- cbn [get_thread]. rewrite read_update_same. applys Nth_app_r' (Nth_zero nil c'); nat_math.
+        -- left. reflexivity.
+      * asserts Htin': (t \indom TC').
+        { destruct (indom_update_inv Htin) as [Hc | Hd];
+          [ false; apply Hne; exact Hc | exact Hd ]. }
+        destruct (Hunaffected Htin') as [Hrt | (k & ek & HNk & HNkch & Hdisj)].
+        -- left. rewrite read_update_neq; [ | congruence ]. exact Hrt.
+        -- right. exists k ek.
+           asserts Heq: (TC'[t1:=c'][t] = TC'[t]). { apply read_update_neq. congruence. }
+           split; [ exact HNk | split; [ rewrite Heq; exact HNkch | exact Hdisj ] ].
+    + (* PlayLock t0 l: [TC = TC'[t0:=c']] *)
+      destruct (classic (t = t0)) as [-> | Hne].
+      * right. exists (length log) (event_lock t0 l0). splits.
+        -- applys* Nth_app_r'.
+        -- cbn [get_thread]. rewrite read_update_same. applys Nth_app_r' (Nth_zero nil c'); nat_math.
+        -- left. reflexivity.
+      * asserts Htin': (t \indom TC').
+        { destruct (indom_update_inv Htin) as [Hc | Hd];
+          [ false; apply Hne; exact Hc | exact Hd ]. }
+        destruct (Hunaffected Htin') as [Hrt | (k & ek & HNk & HNkch & Hdisj)].
+        -- left. rewrite read_update_neq; [ | congruence ]. exact Hrt.
+        -- right. exists k ek.
+           asserts Heq: (TC'[t0:=c'][t] = TC'[t]). { apply read_update_neq. congruence. }
+           split; [ exact HNk | split; [ rewrite Heq; exact HNkch | exact Hdisj ] ].
+    + (* PlayUnlock t0 l: [TC = TC'[t0:=c']] *)
+      destruct (classic (t = t0)) as [-> | Hne].
+      * right. exists (length log) (event_unlock t0 l0). splits.
+        -- applys* Nth_app_r'.
+        -- cbn [get_thread]. rewrite read_update_same. applys Nth_app_r' (Nth_zero nil c'); nat_math.
+        -- left. reflexivity.
+      * asserts Htin': (t \indom TC').
+        { destruct (indom_update_inv Htin) as [Hc | Hd];
+          [ false; apply Hne; exact Hc | exact Hd ]. }
+        destruct (Hunaffected Htin') as [Hrt | (k & ek & HNk & HNkch & Hdisj)].
+        -- left. rewrite read_update_neq; [ | congruence ]. exact Hrt.
+        -- right. exists k ek.
+           asserts Heq: (TC'[t0:=c'][t] = TC'[t]). { apply read_update_neq. congruence. }
+           split; [ exact HNk | split; [ rewrite Heq; exact HNkch | exact Hdisj ] ].
+Qed.
+
+(* Whenever [l] has ever been unlocked, [lc_read LC l] is exactly the commit
+   recorded at that (most recent) unlock's position -- the equational
+   counterpart of [unlock_ancestor_LC], which only gives an ancestry bound. A
+   lock that has never been unlocked reads as [root_commit] instead. *)
+Lemma lc_read_pointer :
+  forall log D TC G LC VC CH l,
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    lc_read LC l = root_commit \/
+    exists k t, LibList.Nth k log (event_unlock t l) /\ LibList.Nth k CH (lc_read LC l).
+Proof.
+  introv Hplay. gen l. inductions Hplay; introv.
+  { left. unfold lc_read, read_default. case_if.
+    { false. applys indom_empty_inv C. }
+    { reflexivity. } }
+  destruct (classic (exists t3, E = event_unlock t3 l)) as [(t3 & HE) | Hne].
+  { subst E. inverts H as Hbc Hfresh Hbd.
+    forwards Hlen: play_log_CH_length Hplay.
+    right. exists (length log) t3.
+    asserts HLCeq: (lc_read LC'[l:=c'] l = c'). { unfold lc_read. apply read_default_update_same. }
+    split.
+    { applys* Nth_app_r'. }
+    { rewrite HLCeq. cbn [get_thread]. rewrite read_update_same.
+      applys Nth_app_r' (Nth_zero nil c'); nat_math. } }
+  asserts HLCeq: (lc_read LC l = lc_read LC' l).
+  { applys play_event_LC_preserved H. intros t3 Heq. apply Hne. exists t3. exact Heq. }
+  rewrite HLCeq.
+  destruct (IHHplay D' TC' G' LC' VC' eq_refl eq_refl l) as [Hrt | (k & t & HNk & HNch)].
+  { left. exact Hrt. }
+  { right. exists k t. split; [ applys* Nth_app_l | applys* Nth_app_l ]. }
+Qed.
+
+(* The volatile counterpart of [lc_read_pointer]. *)
+Lemma vc_read_pointer :
+  forall log D TC G LC VC CH x,
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    vc_read VC x = root_commit \/
+    exists k t v, LibList.Nth k log (event_write t x v) /\ LibList.Nth k CH (vc_read VC x).
+Proof.
+  introv Hplay. gen x. inductions Hplay; introv.
+  { left. unfold vc_read, read_default. case_if.
+    { false. applys indom_empty_inv C. }
+    { reflexivity. } }
+  destruct (classic (exists t3 v3, E = event_write t3 x v3)) as [(t3 & v3 & HE) | Hne].
+  { subst E. inverts H as Hxvol Hbd Hbc Hfresh Hfresh2.
+    { (* PlayWrite (non-volatile): VC is untouched, so the chase continues
+         unchanged in the smaller derivation *)
+      destruct (IHHplay D' TC G LC VC eq_refl eq_refl x) as [Hrt | (k & t & v & HNk & HNch)].
+      { left. exact Hrt. }
+      { right. exists k t v. split; [ applys* Nth_app_l | applys* Nth_app_l ]. } }
+    { forwards Hlen: play_log_CH_length Hplay.
+      right. exists (length log) t3 v3.
+      asserts HVeq: (vc_read VC'[x:=c''] x = c''). { unfold vc_read. apply read_default_update_same. }
+      split.
+      { applys* Nth_app_r'. }
+      { rewrite HVeq. cbn [get_thread]. rewrite read_update_same.
+        applys Nth_app_r' (Nth_zero nil c''); nat_math. } } }
+  asserts HVeq: (vc_read VC x = vc_read VC' x).
+  { applys play_event_VC_preserved H. intros t3 v3 Heq. apply Hne. exists t3 v3. exact Heq. }
+  rewrite HVeq.
+  destruct (IHHplay D' TC' G' LC' VC' eq_refl eq_refl x) as [Hrt | (k & t & v & HNk & HNch)].
+  { left. exact Hrt. }
+  { right. exists k t v. split; [ applys* Nth_app_l | applys* Nth_app_l ]. }
+Qed.
+
+(* A thread's (unique) spawn event always precedes its (unique) start event.
+   Needed to chain [HbSpawn] onto [HbPo] when a value inherited at spawn time
+   is traced back through a thread that has not yet acted on its own. *)
+Lemma spawn_before_start :
+  forall log t0 t' q0 kstart,
+    wf_log log ->
+    LibList.Nth q0 log (event_spawn t0 t') ->
+    LibList.Nth kstart log (event_start t') ->
+    q0 < kstart.
+Proof.
+  intros log. induction log using list_ind_last; introv Hwf HNq0 HNkstart.
+  - inverts HNq0.
+  - forwards Hwf0: wf_log_last_inv Hwf.
+    forwards [HNq0' | (Hq0N & Hq0E)]: Nth_last_inv HNq0.
+    + forwards [HNkstart' | (HkN & HkE)]: Nth_last_inv HNkstart.
+      * applys IHlog Hwf0 HNq0' HNkstart'.
+      * subst a. forwards Hib: Nth_inbound HNq0'. nat_math.
+    + subst a.
+      forwards [HNkstart' | (HkN & HkE)]: Nth_last_inv HNkstart.
+      * exfalso.
+        forwards Hmem: Nth_mem HNkstart'.
+        forwards (l1 & l2 & Heq): mem_inv_middle Hmem.
+        lets (_ & _ & Hspawn0 & _): Hwf0.
+        forwards [(t1 & Hmem1) | Hrt]: Hspawn0 Heq.
+        { lets (Huspawn & _): Hwf.
+          asserts Hmeml: (mem (event_spawn t1 t') log).
+          { rewrite Heq. rewrite mem_app_eq. left. exact Hmem1. }
+          applys Huspawn (eq_refl : log & event_spawn t0 t' = log ++ event_spawn t0 t' :: nil).
+          exists t1. rew_list. exact Hmeml. }
+        { lets (_ & _ & _ & _ & _ & _ & _ & _ & Hnoroot): Hwf.
+          subst t'. applys Hnoroot (Nth_mem HNq0). }
+      * congruence.
+Qed.
+
+(* A witness position is either directly owned by [t'], or is [t']'s own spawn
+   event (recorded under the spawner's thread, since a spawned child's very
+   first commit pointer is set by the spawner, not by the child). Either way,
+   it happens-before any later position genuinely owned by [t']: directly via
+   [HbPo] in the first case, or via [HbSpawn] onto [t']'s own start (which
+   must exist, since [t'] has since acted) followed by [HbPo] in the second. *)
+Lemma resolve_witness_hb :
+  forall log t' q0 eq0 p ep,
+    wf_log log ->
+    LibList.Nth q0 log eq0 ->
+    (get_thread eq0 = t' \/ exists t0, eq0 = event_spawn t0 t') ->
+    LibList.Nth p log ep -> get_thread ep = t' -> q0 < p ->
+    hb log q0 p.
+Proof.
+  introv Hwf HNq0 Hdisj HNp Hgp Hlt.
+  destruct Hdisj as [Hgq0 | (t0 & Heq0)].
+  - asserts Hgeq: (get_thread eq0 = get_thread ep). { rewrite Hgq0. rewrite Hgp. reflexivity. }
+    applys HbPo HNq0 HNp Hgeq Hlt.
+  - subst eq0.
+    destruct (classic (ep = event_start t')) as [-> | Hneqep].
+    + forwards Hlt': spawn_before_start Hwf HNq0 HNp.
+      applys HbSpawn HNq0 HNp Hlt'.
+    + forwards Hpib: Nth_inbound HNp.
+      forwards (l1 & ep0 & l2 & Heq & Hlen): list_middle_inv Hpib.
+      asserts HNp0: (LibList.Nth p (l1 ++ ep0 :: l2) ep0).
+      { applys Nth_app_r' (Nth_zero l2 ep0). nat_math. }
+      rewrite <- Heq in HNp0.
+      forwards <-: Nth_functional HNp HNp0.
+      lets (_ & _ & _ & _ & Hstart5 & _): Hwf.
+      forwards Hmem1: Hstart5 Heq Hgp Hneqep.
+      forwards (kstart & HNkstart1): mem_Nth Hmem1.
+      forwards HNkstart: Nth_app_l HNkstart1.
+      rewrite <- Heq in HNkstart.
+      forwards Hkstartlt: Nth_inbound HNkstart1.
+      forwards Hlt': spawn_before_start Hwf HNq0 HNkstart.
+      asserts Hgeq: (get_thread (event_start t') = get_thread ep). { rewrite Hgp. reflexivity. }
+      applys HbTrans.
+      * applys HbSpawn HNq0 HNkstart Hlt'.
+      * applys HbPo HNkstart HNp Hgeq. nat_math.
+Qed.
+
+(* Lifting a smaller-log witness across one more (irrelevant) event: the
+   position and its thread-relationship to [t] survive unchanged, and the
+   [hb] half of the disjunction only needs [hb_weaken_snoc]. *)
+Lemma ancestor_TC_hb_lift :
+  forall log0 E t ka q eq,
+    LibList.Nth q log0 eq ->
+    (get_thread eq = t \/ exists t0, eq = event_spawn t0 t) ->
+    (q = ka \/ hb log0 ka q) ->
+    exists q' eq',
+      LibList.Nth q' (log0 & E) eq' /\
+      (get_thread eq' = t \/ exists t0, eq' = event_spawn t0 t) /\
+      (q' = ka \/ hb (log0 & E) ka q').
+Proof.
+  introv HNq Hd Hqka.
+  exists q eq. splits.
+  - applys* Nth_app_l.
+  - exact Hd.
+  - destruct Hqka as [-> | Hhb]; [ left; reflexivity | right; applys* hb_weaken_snoc ].
+Qed.
+
+
 (* The commit produced by a commit event is fresh in the prefix graph and present
    in the new graph. *)
 Lemma play_event_commit_new :
@@ -2335,6 +2861,7 @@ Proof.
         exfalso. applys Hneq Heqab.
       * forwards Hib: Nth_inbound HNcha. rew_list in Hib. nat_math.
 Qed.
+
 
 (* Maximality: the commit [cs = CH[f]] of [tm]'s flush [f] of the LAST x-write is
    the maximal x-writer in the graph -- no strict graph-descendant of [cs] writes
