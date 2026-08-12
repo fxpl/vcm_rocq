@@ -476,17 +476,6 @@ Proof.
   destruct G as (C & P). unfold graph_commit, graph_binds. apply binds_update_same.
 Qed.
 
-Lemma graph_writes_graph_root_same_false :
-  forall c i v,
-    graph_writes (graph_root c) c i v -> False.
-Proof.
-  introv (dd & Hgb & Hbd).
-  unfolds graph_root, graph_binds.
-  forwards: binds_update_same_inv Hgb.
-  subst.
-  applys binds_empty_false Hbd; typeclass.
-Qed.
-
 (* A commit with no outgoing edge has no proper descendants. *)
 Lemma ancestor_no_out_edge :
   forall G a z,

@@ -927,10 +927,6 @@ Qed.
 (* Progress (modulo deadlock, forbidden effects, and conflicts)          *)
 (* ===================================================================== *)
 
-Lemma thread_read_of_binds :
-  forall {t : tid} {T : threads} {v : thread}, binds T t v -> T[t] = v.
-Proof. introv Hb. exact (@read_of_binds tid thread Branching.inhab_thread T t v Hb). Qed.
-
 Lemma thread_indom_of_binds :
   forall {t : tid} {T : threads} {v : thread}, binds T t v -> t \indom T.
 Proof. introv Hb. exact (@indom_of_binds tid thread Branching.inhab_thread T t v Hb). Qed.
@@ -942,10 +938,6 @@ Proof. introv Hin Heq. exact (@binds_of_indom_read tid thread Branching.inhab_th
 Lemma thread_binds_inj :
   forall {t : tid} {T : threads} {v1 v2 : thread}, binds T t v1 -> binds T t v2 -> v1 = v2.
 Proof. introv Hb1 Hb2. exact (@binds_inj tid t thread Branching.inhab_thread v1 v2 T Hb1 Hb2). Qed.
-
-Lemma lock_read_of_binds :
-  forall {ll : lid} {L : locks} {v : lock_state * commit}, binds L ll v -> L[ll] = v.
-Proof. introv Hb. exact (@read_of_binds lid (lock_state * commit) Branching.inhab_lock L ll v Hb). Qed.
 
 Lemma lock_indom_of_binds :
   forall {ll : lid} {L : locks} {v : lock_state * commit}, binds L ll v -> ll \indom L.

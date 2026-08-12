@@ -2010,7 +2010,7 @@ Qed.
    ([is_latest_value]) is exactly the value of the last write to [x] in the log.
    This simply packages the two directions -- [last_global_write_latest_value] and
    its converse [conflict_free_last_global_write]. *)
-Lemma is_latest_value_iff_last_write :
+Theorem is_latest_value_iff_last_write :
   forall log D TC G g CH t x v,
     x \notin Volatiles ->
     conflict_free (log & event_read t x v) ->

@@ -167,16 +167,6 @@ Proof.
 Qed.
 
 (* No mechanisation is complete without custom list lemmas *)
-Lemma single_eq_middle_inv :
-  forall A (x y : A) l1 l2,
-    x :: nil = l1 ++ y :: l2 ->
-    l1 = nil /\ x = y /\ l2 = nil.
-Proof.
-  introv Heq.
-  destruct l1; rew_list in *; inverts* Heq.
-  forwards: nil_eq_middle_inv y l1 l2; rew_list~.
-Qed.
-
 Lemma last_eq_middle_inv :
   forall A (xs : list A) x ys1 y ys2,
     xs & x = ys1 ++ y :: ys2 ->

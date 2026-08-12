@@ -2189,23 +2189,6 @@ Proof.
     split; applys~ indom_update_of_indom; typeclass.
 Qed.
 
-Lemma graph_commit_edge_wf :
-  forall G c c' d,
-    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
-    graph_indom G c ->
-    (forall a b, graph_edge (graph_commit G c c' d) a b ->
-                 graph_indom (graph_commit G c c' d) a /\ graph_indom (graph_commit G c c' d) b).
-Proof.
-  introv Hedge_wf Hin. destruct G as (C & P). introv He.
-  unfolds graph_commit, graph_edge, graph_indom.
-  rew_set in He. destruct He as [Heq | Hin'].
-  - inverts Heq. split.
-    + applys~ indom_update_of_indom. typeclass.
-    + applys indom_update_same. typeclass.
-  - forwards (Ha & Hb): Hedge_wf Hin'. unfolds graph_indom.
-    split; applys~ indom_update_of_indom; typeclass.
-Qed.
-
 (* Ancestry into an old (prefix-domain) commit is unaffected by the freshly
    created commit, which is a sink: invert it back to the prefix graph. The
    extra [TC'/VC'-indom] and root-indom premises are only needed for
@@ -2729,28 +2712,6 @@ Proof.
   apply indom_update_of_indom; (typeclass || assumption).
 Qed.
 
-(* A write to a volatile [x] anywhere in the log means [x] has been recorded in
-   [VC] by the end of the replay: [PlayWriteVolatile] adds it immediately
-   ([indom_update_same]), and [play_event_indom_VC_mono] carries this forward
-   through every later step. *)
-Lemma write_x_indom_VC :
-  forall log D TC G LC VC CH t x v m,
-    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
-    x \in Volatiles ->
-    LibList.Nth m log (event_write t x v) ->
-    x \indom VC.
-Proof.
-  introv Hplay Hxvol. gen m t v. inductions Hplay; introv HNlog.
-  - inverts HNlog.
-  - rename H into Hpe.
-    forwards [HN0 | (HmN & HemE)]: Nth_last_inv HNlog.
-    + forwards Hin: (>> IHHplay (eq_refl init_play_cfg) (eq_refl (D', TC', G', LC', VC')) Hxvol HN0).
-      applys play_event_indom_VC_mono Hpe Hin.
-    + subst E. inverts Hpe as Hxvol' Hbd Hbc Hfresh Hfresh2.
-      * false.
-      * apply indom_update_same; typeclass.
-Qed.
-
 (* A play step never removes a thread from the delta map. *)
 Lemma play_event_indom_D_mono :
   forall E D' TC' G' LC' VC' D'' TC'' G'' LC'' VC'' t,
@@ -3191,7 +3152,7 @@ Qed.
    ([is_latest_value]) is exactly the value of the last write to [x] in the log.
    This simply packages the two directions -- [last_global_write_latest_value] and
    its converse [conflict_free_last_global_write]. *)
-Lemma is_latest_value_iff_last_write :
+Theorem is_latest_value_iff_last_write :
   forall log D TC G LC VC CH t x v,
     x \notin Volatiles ->
     conflict_free (log & event_read t x v) ->

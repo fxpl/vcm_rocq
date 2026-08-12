@@ -18,34 +18,6 @@ Import LogFacts.
 Import LoggingBranching.
 
 
-(* ===========================================================================
-   No out-of-thin-air reads (branching), local case.
-
-   If a thread reads a value [v] for [x] from its own staging area [D[t]], then
-   [t] itself wrote that value earlier, and (being the same thread, by program
-   order) that write happens-before the read.  No conflict-freedom is needed.
-   =========================================================================== *)
-
-Lemma branching_no_ootar_local :
-  forall log D TC G LC VC CH t x v,
-    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
-    t \indom D ->
-    binds (D[t]) x v ->
-    exists m tw, LibList.Nth m log (event_write tw x v)
-              /\ hb (log & event_read t x v) m (length log).
-Proof.
-  introv Hplay Hdom Hbind.
-  forwards (m & HNm & _): delta_is_uncommitted_write Hplay Hdom Hbind.
-  forwards Hlt: Nth_inbound HNm.
-  exists m t. split.
-  - exact HNm.
-  - applys HbPo m (length log) (event_write t x v) (event_read t x v).
-    + applys* Nth_app_l.
-    + applys* Nth_app_r'.
-    + reflexivity.
-    + exact Hlt.
-Qed.
-
 (* Appending an event that is not a write of [x] by [t] preserves "no x-write by
    [t] after [m]".  (Companion to [no_commit_event_snoc].) *)
 Lemma no_xwrite_snoc :

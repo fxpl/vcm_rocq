@@ -501,26 +501,6 @@ Proof.
     rew_listx in Hmem'. branches; auto_star.
 Qed.
 
-Lemma unique_spawn_snoc :
-  forall lg e t2,
-    length (LibList.filter (fun e => exists t1, e = event_spawn t1 t2) lg) <= 1 ->
-    ~(exists t1 t2, e = event_spawn t1 t2) ->
-    length (LibList.filter (fun e => exists t1, e = event_spawn t1 t2) (lg & e)) <= 1.
-Proof.
-  introv Hlen Hnex.
-  induction lg; rew_listx in *.
-  - cases_if~. rew_list~.
-  - cases_if~. rew_list in *. cases_if~; rew_list in *; autos~.
-    false Hnex. unpack. substs*.
-Qed.
-
-Lemma conflict_free_nil :
-  conflict_free nil.
-Proof.
-  introv Hnth1 Hnth2 Hacc Hlt.
-  inverts Hnth1.
-Qed.
-
 Lemma hb_lt :
   forall log m n,
     hb log m n ->
@@ -528,24 +508,6 @@ Lemma hb_lt :
 Proof.
   introv Hhb.
   induction* Hhb.
-Qed.
-
-(* [hb] is monotone under extending the log on the right: an ordering that holds
-   in a prefix still holds once more events are appended.  ([LogFacts] only has
-   the inverse, [hb_app_inv].)  Needed to lift the [play_log] induction's
-   prefix-[hb] to the extended log. *)
-Lemma hb_weaken_snoc :
-  forall (lg : log) E m n, hb lg m n -> hb (lg & E) m n.
-Proof.
-  introv Hhb. induction Hhb.
-  - applys HbPo; [ applys* Nth_app_l | applys* Nth_app_l | assumption | assumption ].
-  - applys HbLock; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
-  - applys HbSpawn; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
-  - applys HbJoin; [ applys* Nth_app_l | applys* Nth_app_l | assumption ].
-  - forwards H0': Nth_app_l H0.
-    forwards H1': Nth_app_l H1.
-    applys HbVolatile H H0' H1' H2.
-  - applys* HbTrans.
 Qed.
 
 Lemma hb_app_inv :
@@ -1025,21 +987,6 @@ Proof.
     rewrite~ IHlog. rew_list~.
 Qed.
 
-Lemma get_uncommited_inv :
-  forall log t,
-    exists log', log = log' ++ get_uncommitted t log.
-Proof.
-  intros log t.
-  unfolds get_uncommitted.
-  induction log; simpls.
-  - exists* (@nil event).
-  - unpack. destruct (classic (Exists is_sync_event log)).
-    + rewrite~ get_uncommitted'_has_sync. exists (a :: log'). rew_list*.
-    + cases_if.
-      * rewrite~ get_uncommitted'_no_sync. exists (a :: nil). rew_list*.
-      * rewrite~ get_uncommitted'_no_sync. exists (@nil event). rew_list*.
-Qed.
-
 Example nil_log_wf : wf_log nil.
 Proof.
   splits 9; rew_list.
@@ -1060,9 +1007,6 @@ Proof.
   - introv contra.
     inverts contra as Hmem.
 Qed.
-
-Lemma no_thin_air_nil : no_thin_air nil.
-Proof. intros n t x v HN. inverts HN. Qed.
 
 (* Structural half of the invariant: appending one event preserves the
    sourcedness of every read already in the log. Both the "not hb-after" and the

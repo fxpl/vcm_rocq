@@ -156,17 +156,6 @@ Definition deadlocked (cfg : cfg) : Prop :=
       (exists t, t \indom T /\ inert cfg t)
   end.
 
-(* A binding in an updated map is either the updated entry or an untouched one. *)
-Lemma binds_update_inv' :
-  forall A B (M : map A B) i j v w,
-    binds (M[i := v]) j w ->
-    (j = i /\ w = v) \/ (j <> i /\ binds M j w).
-Proof.
-  introv Hb. destruct (classic (j = i)) as [-> | Hne].
-  - left. split; [ reflexivity | applys binds_update_same_inv Hb ].
-  - right. split; [ exact Hne | applys binds_update_neq_inv Hb Hne ].
-Qed.
-
 Lemma exists_fresh_tid :
   forall (T : threads),
     LibMap.finite T ->
@@ -189,10 +178,6 @@ Qed.
    forces). (Locks carry no commit in this model -- [locks := map lid
    lock_state] -- so [lock_state]'s single, canonical [Inhab] instance from
    [Common.v] is unambiguous and needs no such wrapper.) *)
-Lemma thread_read_of_binds :
-  forall {t : tid} {T : threads} {v : thread}, binds T t v -> T[t] = v.
-Proof. introv Hb. exact (@read_of_binds tid thread Linear.inhab_thread T t v Hb). Qed.
-
 Lemma thread_indom_of_binds :
   forall {t : tid} {T : threads} {v : thread}, binds T t v -> t \indom T.
 Proof. introv Hb. exact (@indom_of_binds tid thread Linear.inhab_thread T t v Hb). Qed.
@@ -229,47 +214,6 @@ Lemma finite_global_commit :
 Proof.
   introv Heq Hfin. unfolds global_commit. destruct (T[t]) as [[[st e] d] c].
   inverts Heq. rew_dom. apply~ LibSet.finite_union. apply LibSet.finite_single.
-Qed.
-
-(* A finite thread domain stays finite under a step: every rule either
-   updates existing threads in place (domain unchanged) or spawns exactly
-   one new thread ([StepSpawn], adding a single element). *)
-Lemma step_preserves_finite :
-  forall T G L cfg',
-    LibSet.finite (dom T) ->
-    step (T, G, L) cfg' ->
-    match cfg' with (T', _, _) => LibSet.finite (dom T') end.
-Proof.
-  introv Hfin Hstep.
-  hint LibSet.finite_single.
-  hint LibSet.finite_union.
-  inverts Hstep; simpl.
-  - (* StepStart *) rew_dom. autos.
-  - (* StepEnd *)
-    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ =>
-      forwards Hfin': finite_global_commit H Hfin end.
-    rew_dom. autos.
-  - (* StepReadLocal *) rew_dom. autos.
-  - (* StepReadGlobal *) rew_dom. autos.
-  - (* StepReadVolatile *) rew_dom. autos.
-  - (* StepWrite *) rew_dom. autos.
-  - (* StepWriteVolatile *)
-    asserts Hfin0: (LibSet.finite (dom (T[t := (state_running, te_exp e, d[x := v], c)]))).
-    { rew_dom. autos. }
-    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ =>
-      forwards Hfin': finite_global_commit H Hfin0 end.
-    rew_dom. autos.
-  - (* StepSpawn *)
-    asserts Hfin0:
-      (LibSet.finite (dom (T[t := (state_running, K t', d, c)][t' := (state_new, te_exp e', empty, g')]))).
-    { rew_dom. autos. }
-    applys* finite_global_commit.
-  - (* StepJoin *) rew_dom. autos.
-  - (* StepLock *) rew_dom. autos.
-  - (* StepRelease *)
-    match goal with H : global_commit _ _ _ _ _ = (_, _) |- _ =>
-      forwards Hfin': finite_global_commit H Hfin end.
-    rew_dom. autos.
 Qed.
 
 Theorem step_preserves_wf_cfg :

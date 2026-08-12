@@ -125,7 +125,7 @@ Qed.
 (* [wf_cfg] is preserved by [step]: the only rule that produces a terminated
    thread is [StepEnd], which gives it a [te_ret]; every other rule leaves a
    thread running or new, and untouched threads are covered by the hypothesis. *)
-Lemma step_preserves_wf_cfg :
+Theorem step_preserves_wf_cfg :
   forall cfg cfg',
     wf_cfg cfg ->
     step cfg cfg' ->
