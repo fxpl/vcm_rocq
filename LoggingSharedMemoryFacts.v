@@ -172,9 +172,9 @@ Proof.
         + exact Hnil.
         + exfalso. forwards [(t' & ->) | (t' & ->)]: filter_touches_lock_last_inv Heqf.
           * forwards Hb: (proj1 (Hdlock t' l)). { exists xs'. exact Heqf. }
-            lets Hin: (indom_of_binds Hb). apply Hnotin. exact Hin.
+            lets Hin: (indom_of_binds Hb). exact (Hnotin Hin).
           * forwards Hb: (proj1 (Hdunlock l)). { exists t' xs'. exact Heqf. }
-            lets Hin: (indom_of_binds Hb). apply Hnotin. exact Hin. }
+            lets Hin: (indom_of_binds Hb). exact (Hnotin Hin). }
     apply* wf_log_snoc_lock.
   - (* StepRelease: append [event_unlock t l] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & Hdlock & _).

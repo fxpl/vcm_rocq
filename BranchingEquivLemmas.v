@@ -627,7 +627,7 @@ Proof.
       rew_list in Hfilter.
       asserts Hmemfilt:
         (mem (event_lock t l) (LibList.filter (fun e => touches_lock l e) log)).
-      { rewrite Hfilter. rewrite mem_last_eq. right. reflexivity. }
+      { rewrite Hfilter, mem_last_eq. right. reflexivity. }
       forwards (Hmemf & _): mem_filter_inv Hmemfilt.
       forwards (klock & Hklock): mem_Nth Hmemf.
       forwards Hanccl:
@@ -1385,7 +1385,7 @@ Proof.
         left. split.
         -- split.
            ++ rewrite read_update_same. apply indom_update_same; typeclass.
-           ++ rewrite read_update_same. rewrite read_update_same. reflexivity.
+           ++ rewrite read_update_same, read_update_same. reflexivity.
         -- introv Hg HNg Hgg. forwards [HNg0 | (HgN & HgE)]: Nth_last_inv HNg.
            { forwards Hglt: Nth_inbound HNg0. nat_math. }
            { subst eg; simpl; auto. }
@@ -2382,7 +2382,7 @@ Proof.
   - (* same thread: [f] is a [tm]-commit strictly inside [[kw', f')] *)
     asserts Hni: (~ is_commit_event ef).
     { applys Hncl f ef; [ nat_math | exact Hflt | exact HNf | (rewrite Htw; exact Hgf) ]. }
-    apply Hni. exact Hcfe.
+    exact (Hni Hcfe).
   - (* other thread: a crossing flush of [tw'] sits inside [[kw', f')] *)
     asserts Hkwltm: (kw' < m).
     { destruct (classic (kw' = m)) as [He | Hlt].
@@ -2397,7 +2397,7 @@ Proof.
     forwards Hf''lt: hb_lt Hhbf''.
     asserts Hni: (~ is_commit_event ef'').
     { applys Hncl f'' ef''; [ exact Hkwf'' | nat_math | exact HNf'' | exact Hgf'' ]. }
-    apply Hni. exact Hcef''.
+    exact (Hni Hcef'').
 Qed.
 
 (* Existence + maximality: the last write of [x] is visible as the latest value at
@@ -2493,9 +2493,9 @@ Proof.
   { applys mem_filter; [ applys Nth_mem HN | reflexivity ]. }
   destruct (last_case (LibList.filter (fun e => writes_variable x e) log))
     as [Hnil | (e & lw & Hsnoc)].
-  - rewrite Hnil in Hmemf. rewrite mem_nil_eq in Hmemf. destruct Hmemf.
+  - rewrite Hnil, mem_nil_eq in Hmemf. destruct Hmemf.
   - asserts Hmx: (mem e (LibList.filter (fun e => writes_variable x e) log)).
-    { rewrite Hsnoc. rewrite mem_last_eq. right. reflexivity. }
+    { rewrite Hsnoc, mem_last_eq. right. reflexivity. }
     forwards (Hmemx & Hwx): mem_filter_inv Hmx.
     destruct e as [s1 s2 | j1 j2 | rt ri rv | tt jj ww | lt ll | ut ul | stt | ett];
       simpls; tryfalse.
@@ -2806,7 +2806,7 @@ Proof.
     apply (Hnc p ep); [ nat_math | exact HNp | exact Hgp | exact Hcie ]. }
   asserts Hgteq: (get_thread en = tm).
   { applys hb_preserves_thread Hhb HNm; try reflexivity; try exact Hncm; try exact HNn. }
-  apply Hgne. exact Hgteq.
+  exact (Hgne Hgteq).
 Qed.
 
 (* The bridge from log happens-before to graph ancestry between flush commits:

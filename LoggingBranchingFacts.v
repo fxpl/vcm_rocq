@@ -1055,7 +1055,7 @@ Proof.
                                              (T[t:=(state_running, K t', d, c)]
                                                [t':=(state_new, te_exp e', \{}, 0)]
                                                [t:=(state_running, K t', \{}, c')])).
-                      rewrite dom_update. rewrite dom_update. rewrite dom_update.
+                      rewrite dom_update, dom_update, dom_update.
                       rew_set. intros x. rew_set. splits*. }
       replace (dom (T[t:=(state_running, K t', d, c)]
                       [t':=(state_new, te_exp e', \{}, 0)]
@@ -1137,7 +1137,7 @@ Proof.
                  --- left. exists t1. rew_listx*.
                  --- right. rew_listx*.
               ** intros contra. rew_listx in contra. destruct contra as [contra|Heq].
-                 --- apply Hnmemst. exact contra.
+                 --- exact (Hnmemst contra).
                  --- congruence.
     + (* 3. Ended threads *)
       intros t0. split.

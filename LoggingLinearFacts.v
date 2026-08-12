@@ -412,9 +412,9 @@ Proof.
         + exact Hnil.
         + exfalso. forwards [(t' & ->) | (t' & ->)]: filter_touches_lock_last_inv Heqf.
           * forwards Hb: (proj1 (Hdlock t' l)). { exists xs'. exact Heqf. }
-            lets Hin: (indom_of_binds Hb). apply Hnotin. exact Hin.
+            lets Hin: (indom_of_binds Hb). exact (Hnotin Hin).
           * forwards Hb: (proj1 (Hdunlock l)). { exists t' xs'. exact Heqf. }
-            lets Hin: (indom_of_binds Hb). apply Hnotin. exact Hin. }
+            lets Hin: (indom_of_binds Hb). exact (Hnotin Hin). }
     apply* wf_log_snoc_lock.
   - (* StepRelease: append [event_unlock t l] *)
     destruct Hdesc as (_ & _ & _ & Hdrunning & Hdlock & _).
@@ -767,7 +767,7 @@ Proof.
            forwards (st' & e'' & Hbinds'): Hdelta t Htin.
            forwards* Heq: binds_inj Hbinds'.
            asserts Hd: (D[t] = d). { congruence. }
-           rewrite Hd. rewrite read_update_same.
+           rewrite Hd, read_update_same.
            exists state_running e. apply binds_update_same.
         -- forwards~ Hin': indom_update_inv Hin.
            destruct Hin' as [->|Hin']. { congruence. }
@@ -1002,7 +1002,7 @@ Proof.
            forwards (st_old & e_old & Hbinds_delta): Hdelta t Htin.
            forwards* Heq: binds_inj Hbinds_delta.
            asserts Hd: (D[t] = d). { congruence. }
-           rewrite Hd. rewrite read_update_same.
+           rewrite Hd, read_update_same.
            exists state_running (K (ret_val v)). apply binds_update_same.
         -- forwards~ Hin': indom_update_inv Hin.
            destruct Hin' as [->|Hin']. { congruence. }
@@ -1215,7 +1215,7 @@ Proof.
                  --- left. exists t1. rew_listx*.
                  --- right. rew_listx*.
               ** intros contra. rew_listx in contra. destruct contra as [contra|Heq].
-                 --- apply Hnmemst. exact contra.
+                 --- exact (Hnmemst contra).
                  --- congruence.
     + (* 3. Ended threads *)
       intros t0. split.
@@ -1367,7 +1367,7 @@ Proof.
            forwards (st' & e'' & Hbinds'): Hdelta t Htin.
            forwards* Heq: binds_inj Hbinds'.
            asserts Hd: (D[t] = d). { congruence. }
-           rewrite Hd. rewrite read_update_same.
+           rewrite Hd, read_update_same.
            exists state_running (K r). apply binds_update_same.
         -- forwards~ Hin': indom_update_inv Hin.
            destruct Hin' as [->|Hin']. { congruence. }
@@ -1445,7 +1445,7 @@ Proof.
            forwards (st' & e'' & Hbinds'): Hdelta t Htin.
            forwards* Heq: binds_inj Hbinds'.
            asserts Hd: (D[t] = d). { congruence. }
-           rewrite Hd. rewrite read_update_same.
+           rewrite Hd, read_update_same.
            exists state_running (K void). apply binds_update_same.
         -- forwards~ Hin': indom_update_inv Hin.
            destruct Hin' as [->|Hin']. { congruence. }

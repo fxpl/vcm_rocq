@@ -884,7 +884,7 @@ Proof.
     forwards~ Hmemstart: (>> Hstartby l1 (l2 & E) (event_end t2) t2).
     forwards (a & b & Heql1): mem_inv_middle Hmemstart.
     assert (Heq3: log & E = a ++ event_start t2 :: (b ++ event_end t2 :: (l2 & E))).
-    { rewrite Heq2. rewrite Heql1. rew_list~. }
+    { rewrite Heq2, Heql1. rew_list~. }
     forwards [(tsp & Hmemsp) | Hminit]: Hstartsp Heq3.
     + assert (Heq4: log & E = log ++ event_spawn t1 t2 :: nil)
         by (rewrite Heqsp; rew_list~).
@@ -921,7 +921,7 @@ Proof.
       by (rewrite Heqsp; rew_list~).
     forwards Hnospawn: Huspawn Heq4.
     apply Hnospawn. exists t1. rew_list.
-    rewrite Heq. rewrite mem_app_eq. right. rewrite~ mem_cons_eq.
+    rewrite Heq, mem_app_eq. right. rewrite~ mem_cons_eq.
 Qed.
 
 (* wf bookkeeping: a thread's start event is unique. *)
@@ -986,7 +986,7 @@ Proof.
         { rewrite Hsnoc' in Hfilter.
           change (e :: (lw' & x')) with ((e :: lw') & x') in Hfilter.
           forwards (Hlweq & Hxeq): last_eq_last_inv Hfilter.
-          rewrite Hsnoc'. rewrite Hxeq. reflexivity. }
+          rewrite Hsnoc', Hxeq. reflexivity. }
         forwards (m' & HNm' & Hmax'): IH Hsnoc2.
         exists (S m'). split.
         -- apply Nth_succ. exact HNm'.
