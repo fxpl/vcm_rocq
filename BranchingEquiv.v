@@ -410,8 +410,10 @@ Proof.
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
-      asserts Hmerge: (conflict_free_merge (D[t]) (TC[t]) (vc_read V x) G).
-      { subst. applys (>> conflict_free_merge_holds Hwf Hcflog Hplay Hdt HtTC Hcdom). }
+      asserts Hmerge: (conflict_free_merge (D[t][x := v]) (TC[t]) (vc_read V x) G).
+      { applys conflict_free_merge_add_var.
+        - subst. applys (>> conflict_free_merge_holds Hwf Hcflog Hplay Hdt HtTC Hcdom).
+        - subst. applys (>> vc_read_change_set_empty_conflict_free Hwf Hcf Hplay Hxvol HtTC). }
       forwards (c' & Hfresh1): exists_commit_fresh HwfG.
       asserts Hpull: (pull_volatile t x c' T G V = (T[t := (state_running, te_exp e, D[t], c')],
                                                        graph_merge G (vc_read V x) (TC[t]) c')).

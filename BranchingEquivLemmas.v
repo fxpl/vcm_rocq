@@ -1698,6 +1698,87 @@ Proof.
   Unshelve. all: typeclass.
 Qed.
 
+(* [root_commit] is never the target of a graph edge: it is present from the
+   very first (empty) graph, and every edge ever added targets a commit that
+   was [commit_fresh] (hence not yet [root_commit], which is always indom)
+   at the moment the edge was created. *)
+Lemma root_commit_no_incoming_edge :
+  forall log D TC G LC VC CH,
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    forall a, ~ graph_edge G a root_commit.
+Proof.
+  introv Hplay. inductions Hplay; introv He.
+  - unfolds graph_root, graph_edge. rew_set in He. false.
+  - rename H into Hpe.
+    forwards Hpgwf: play_log_graph_wf Hplay.
+    destruct Hpgwf as (_ & _ & _ & _ & Hrootin).
+    (* [root_commit] can never be a step's fresh commit (it is always
+       indom, never [commit_fresh]), so it is never the target of a
+       newly-added edge; old edges are ruled out by [IHHplay]. *)
+    inverts Hpe.
+    + (* PlayRead: [G] unchanged *) applys* IHHplay.
+    + (* PlayReadVolatile: single merge *)
+      destruct G' as (C0 & P0). unfolds graph_merge, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | [Heq | HeP]].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlayWrite: [G] unchanged *) applys* IHHplay.
+    + (* PlayWriteVolatile: two layers (merge then commit) *)
+      asserts Hrootin1: (graph_indom (graph_merge G' (vc_read VC' x) c c') root_commit).
+      { destruct G' as (C0 & P0). unfolds graph_merge, graph_indom.
+        apply indom_update_of_indom; (exact Hrootin || typeclass). }
+      destruct G' as (C0 & P0). unfolds graph_merge, graph_commit, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | [Heq | [Heq | HeP]]].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin1].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlayStart: [G] unchanged *) applys* IHHplay.
+    + (* PlayEnd *)
+      destruct G' as (C0 & P0). unfolds graph_commit, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | HeP].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlaySpawn *)
+      destruct G' as (C0 & P0). unfolds graph_commit, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | HeP].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlayJoin *)
+      destruct G' as (C0 & P0). unfolds graph_merge, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | [Heq | HeP]].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlayLock *)
+      destruct G' as (C0 & P0). unfolds graph_merge, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | [Heq | HeP]].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+    + (* PlayUnlock *)
+      destruct G' as (C0 & P0). unfolds graph_commit, graph_edge. simpl in He. rew_set in He.
+      destruct He as [Heq | HeP].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * applys* IHHplay.
+Qed.
+
+(* A commit graph edge can never point into [root_commit], so ancestry into it
+   collapses to reflexivity. *)
+Lemma ancestor_into_root :
+  forall log D TC G LC VC CH a,
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    ancestor G a root_commit -> a = root_commit.
+Proof.
+  introv Hplay Hanc.
+  asserts Hno: (forall a, ~ graph_edge G a root_commit).
+  { applys root_commit_no_incoming_edge Hplay. }
+  inductions Hanc.
+  - reflexivity.
+  - false. applys Hno H.
+Qed.
+
 (* [vc_read VC x] is always in the graph's domain: either [x] is stored
    ([HVC]) or the default [root_commit] applies ([Hroot]). Mirrors the
    [lc_read]/[LC] reasoning already inlined at each [PlayReadVolatile] /
@@ -3191,6 +3272,95 @@ Proof.
       forwards Hanc1: (>> CH_thread_monotone Hwf Hplay HNfclog Hgtc HNf' Hgf' Hfcf' HNfcCH HNf'CH).
       forwards Hanc2: (>> hb_pointer_ancestor Hwf Hplay Hhbf' HNf'CH HNktCH).
       applys ancestor_trans Hanc1. applys ancestor_trans Hanc2. exact Hanckt.
+Qed.
+
+(* Volatile write-write ordering: if [t] is about to write a volatile [x]
+   (making the log [log & event_write t x v] conflict-free), then [t]'s own
+   commit [TC[t]] already descends from [x]'s currently-stored commit
+   [vc_read VC x] -- i.e. pulling [vc_read VC x] into [t]'s own diff (now
+   including [x]) cannot conflict on [x] itself. Any change-set witness [c]
+   for [x] must be a writer of [x] (from [x \indom C[c]]); [conflict_free]
+   (applied at [c]'s own flush/write position, which -- since [x] is
+   volatile -- IS the write itself, [Hncl] ruling out any strictly earlier
+   flush) gives [hb] from that position to [t]'s write; the LAST hop of that
+   [hb] derivation must be program order on thread [t]
+   ([hb_last_write_same_thread_witness]), landing on some [t]-owned position
+   [q] within the existing log; [hb_pointer_ancestor] (or a direct
+   [Nth_functional] if the witness collapses to [c]'s own position) turns
+   that into graph ancestry, and [CH_ancestor_TC] finishes by relating [q]'s
+   own recorded commit to [TC[t]]. *)
+Lemma vc_read_change_set_empty_conflict_free :
+  forall log D TC G LC VC CH t x v,
+    wf_log log ->
+    conflict_free (log & event_write t x v) ->
+    play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
+    x \in Volatiles ->
+    t \indom TC ->
+    x \notin change_set G (TC[t]) (vc_read VC x).
+Proof.
+  introv Hwf0 Hcf Hplay Hxvol Httc.
+  forwards Hpgwf: play_log_graph_wf Hplay.
+  destruct Hpgwf as (Hedge & _).
+  forwards Hvcdom: (>> vc_read_graph_indom x Hplay).
+  destruct G as (C & P).
+  intro Hex. destruct Hex as (c & Hxc & Hancc & Hnanc).
+  asserts Hcdom: (graph_indom (C, P) c).
+  { forwards [Hin | Heq]: ancestor_src_indom Hedge Hancc; [ exact Hin | subst c; exact Hvcdom ]. }
+  asserts Hgwc: (graph_writes (C, P) c x (C[c][x])).
+  { exists (C[c]). split.
+    - unfold graph_binds. applys binds_of_indom_read Hcdom; (reflexivity || typeclass).
+    - applys binds_of_indom_read Hxc; (reflexivity || typeclass). }
+  forwards (f & ef & tw & kw & HNfCH & HNflog & Hgtef & Hcef & Hkwlt & HNkw & Hncl):
+    graph_writes_flush Hplay Hgwc.
+  asserts Hkweqf: (kw = f).
+  { destruct (classic (kw = f)) as [Heq | Hne]; [ exact Heq | exfalso ].
+    asserts Hltf: (kw < f). { nat_math. }
+    asserts Hle: (kw <= kw). { nat_math. }
+    forwards Hni: Hncl Hle Hltf HNkw (eq_refl : get_thread (event_write tw x (C[c][x])) = tw).
+    applys Hni. simpl. exact Hxvol. }
+  subst kw.
+  forwards Hflt: Nth_inbound HNflog.
+  asserts HNkwapp: (LibList.Nth f (log & event_write t x v) (event_write tw x (C[c][x]))).
+  { applys Nth_app_l HNkw. }
+  asserts HNenapp: (LibList.Nth (length log) (log & event_write t x v) (event_write t x v)).
+  { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
+  asserts Hacc: (accesses_variable x (event_write t x v)). { reflexivity. }
+  forwards Hhb: (>> Hcf HNkwapp HNenapp Hacc Hflt).
+  forwards (q & eq & Hqlt & HNqapp & Hgq & Hdisj): hb_last_write_same_thread_witness Hhb HNenapp.
+  forwards [HNqlog | (mm & Heqm & _)]: Nth_app_inv HNqapp.
+  2:{ nat_math. }
+  forwards Hlen: play_log_CH_length Hplay.
+  asserts HqltCH: (q < length CH). { rewrite Hlen. exact Hqlt. }
+  forwards (cq & HNqCH): Nth_inbound_inv HqltCH.
+  forwards HancqTC: (>> CH_ancestor_TC Hwf0 Hplay HNqlog Hgq HNqCH).
+  destruct Hdisj as [Heqfq | Hhbfq].
+  - (* [f = q]: [cq] is exactly [c] *)
+    subst q.
+    forwards Heqc: Nth_functional HNfCH HNqCH. subst cq.
+    applys Hnanc HancqTC.
+  - (* [hb (log & e) f q]: lift to the prefix, then [hb ==> ancestor] *)
+    forwards Hhbfq': hb_app_inv Hhbfq Hqlt.
+    forwards Hancfq: (>> hb_pointer_ancestor Hwf0 Hplay Hhbfq' HNfCH HNqCH).
+    applys Hnanc. applys ancestor_trans Hancfq HancqTC.
+Qed.
+
+(* Adding one more variable [x] to a diff [d] keeps a merge conflict-free, as
+   long as [x] itself isn't in the OTHER side's change set: [dom (d[x:=v])]
+   is just [dom d] plus [x], so the disjointness splits into the already-known
+   [conflict_free_merge d ...] plus the single fact [x \notin change_set ...]. *)
+Lemma conflict_free_merge_add_var :
+  forall d c1 c2 G x v,
+    conflict_free_merge d c1 c2 G ->
+    x \notin change_set G c1 c2 ->
+    conflict_free_merge (d[x := v]) c1 c2 G.
+Proof.
+  introv Hcfm Hxnin. unfold conflict_free_merge in *.
+  rew_set in Hcfm. rew_set. intros j Hj1 Hj2.
+  rew_set in Hj1. destruct Hj1 as [Hjd | Hjcs].
+  - lets [-> | Hjd']: (indom_update_inv Hjd).
+    + applys Hxnin Hj2.
+    + applys Hcfm j; [ rew_set; left; exact Hjd' | exact Hj2 ].
+  - applys Hcfm j; [ rew_set; right; exact Hjcs | exact Hj2 ].
 Qed.
 
 (* The merge obligation discharged: when a running thread [t] (pending delta
