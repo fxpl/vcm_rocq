@@ -107,14 +107,19 @@ Definition conflict_detected (cfg : cfg) : Prop :=
         \/
         (exists e K,
             binds T t (state_running, te_exp e, d, c) /\
-            ((exists e', step_ul e K (eff_spawn e')) \/
+            ((exists e', step_ul e K (eff_spawn e') /\
+                         ~ lin_conflict_free d c g G) \/
              (exists t' r d' c', step_ul e K (eff_join t') /\
-                                  binds T t' (state_terminated, te_ret r, d', c')) \/
-             (exists l, step_ul e K (eff_lock l) /\ lock_read L l = ls_free) \/
-             (exists l, step_ul e K (eff_unlock l) /\ lock_read L l = ls_held t) \/
-             (exists x, step_ul e K (eff_read x) /\ x \in Volatiles) \/
-             (exists x v, step_ul e K (eff_write x v) /\ x \in Volatiles)) /\
-            ~ lin_conflict_free d c g G))
+                                  binds T t' (state_terminated, te_ret r, d', c') /\
+                                  ~ lin_conflict_free d c g G) \/
+             (exists l, step_ul e K (eff_lock l) /\ lock_read L l = ls_free /\
+                        ~ lin_conflict_free d c g G) \/
+             (exists l, step_ul e K (eff_unlock l) /\ lock_read L l = ls_held t /\
+                        ~ lin_conflict_free d c g G) \/
+             (exists x, step_ul e K (eff_read x) /\ x \in Volatiles /\
+                        ~ lin_conflict_free d c g G) \/
+             (exists x v, step_ul e K (eff_write x v) /\ x \in Volatiles /\
+                          ~ lin_conflict_free d[x := v] c g G))))
   end.
 
 (* A thread has terminated. *)
@@ -483,10 +488,9 @@ Proof.
                      exists. applys (>> StepSpawn Hbth Hul Ht' Hhead Hcfm Hfresh Heq).
                  --- right. right. right.
                      exists a d c g. split; [ exact Hhead | ].
-                     right. exists e K. splits.
+                     right. exists e K. split.
                      +++ exact Hbth.
-                     +++ left. exists e0. exact Hul.
-                     +++ exact Hncfm.
+                     +++ left. exists e0. split; [exact Hul | exact Hncfm].
               ** (* join: not blocked => target terminated; then split on the
                     conflict check *)
                  rew_logic in Hnbl. destruct Hnbl as (r0 & d0 & c0 & Hbr).
@@ -496,10 +500,10 @@ Proof.
                      exists. applys StepJoin Hbth Hul Hbr Hhead Hcfm.
                  --- right. right. right.
                      exists a d c g. split; [ exact Hhead | ].
-                     right. exists e K. splits.
+                     right. exists e K. split.
                      +++ exact Hbth.
-                     +++ right. left. exists t r1 empty_diff c0. split; [exact Hul | exact Hbr].
-                     +++ exact Hncfm.
+                     +++ right. left. exists t r1 empty_diff c0.
+                         splits; [exact Hul | exact Hbr | exact Hncfm].
               ** (* read: volatile (a pull, conflict-checked, then read at
                     the global head [g]) or normal (local in [d], or global
                     at [c]); otherwise forbidden / conflict-detected *)
@@ -514,10 +518,10 @@ Proof.
                              simpl. rew_logic. splits*.
                      +++ right. right. right.
                          exists a d c g. split; [ exact Hhead | ].
-                         right. exists e K. splits.
+                         right. exists e K. split.
                          *** exact Hbth.
-                         *** right; right; right; right; left. exists x. split; [exact Hul | exact Hxvol].
-                         *** exact Hncfm.
+                         *** right; right; right; right; left. exists x.
+                             splits; [exact Hul | exact Hxvol | exact Hncfm].
                  --- (* normal: local (in [d]) or global ([is_latest_value]
                         at [c]), otherwise forbidden *)
                      destruct (classic (x \indom d)) as [Hxd | Hxnd].
@@ -532,8 +536,11 @@ Proof.
               ** (* write: volatile (a pull-then-push, conflict-checked) or
                     normal (always succeeds, staged into [d]) *)
                  destruct (classic (x \in Volatiles)) as [Hxvol | Hxnvol].
-                 --- (* volatile: split on the conflict check *)
-                     destruct (classic (lin_conflict_free d c g G)) as [Hcfm | Hncfm].
+                 --- (* volatile: split on the conflict check, which now covers
+                        [x] itself (folded into the diff) too, catching an
+                        unordered write-write race on the volatile as a
+                        conflict rather than silently overwriting it. *)
+                     destruct (classic (lin_conflict_free d[x := v] c g G)) as [Hcfm | Hncfm].
                      +++ right. left.
                          forwards (g'' & Hfresh): exists_commit_fresh Hwf.
                          destruct (global_commit a g g''
@@ -542,10 +549,10 @@ Proof.
                          exists. applys (>> StepWriteVolatile Hbth Hul Hxvol Hhead Hcfm Hfresh Heq).
                      +++ right. right. right.
                          exists a d c g. split; [ exact Hhead | ].
-                         right. exists e K. splits.
+                         right. exists e K. split.
                          *** exact Hbth.
-                         *** right; right; right; right; right. exists x v. split; [exact Hul | exact Hxvol].
-                         *** exact Hncfm.
+                         *** right; right; right; right; right. exists x v.
+                             splits; [exact Hul | exact Hxvol | exact Hncfm].
                  --- right. left. exists. applys StepWrite Hbth Hul Hxnvol.
               ** (* lock: not blocked => free; then split on the conflict
                     check *)
@@ -554,10 +561,9 @@ Proof.
                  --- right. left. exists. applys StepLock Hbth Hul Hnbl Hhead Hcfm.
                  --- right. right. right.
                      exists a d c g. split; [ exact Hhead | ].
-                     right. exists e K. splits.
+                     right. exists e K. split.
                      +++ exact Hbth.
-                     +++ right. right. left. exists l0. split; [exact Hul | exact Hnbl].
-                     +++ exact Hncfm.
+                     +++ right. right. left. exists l0. splits; [exact Hul | exact Hnbl | exact Hncfm].
               ** (* unlock: enabled (thread holds the lock) fires -- modulo
                     the conflict check -- otherwise forbidden *)
                  destruct (classic (lock_read L l0 = ls_held a)) as [Hheld | Hnheld].
@@ -568,10 +574,10 @@ Proof.
                          exists. applys (>> StepRelease Hbth Hul Hheld Hhead Hcfm Hfresh Heq).
                      +++ right. right. right.
                          exists a d c g. split; [ exact Hhead | ].
-                         right. exists e K. splits.
+                         right. exists e K. split.
                          *** exact Hbth.
-                         *** right. right. right. left. exists l0. split; [exact Hul | exact Hheld].
-                         *** exact Hncfm.
+                         *** right. right. right. left. exists l0.
+                             splits; [exact Hul | exact Hheld | exact Hncfm].
                  --- right. right. left.
                      exists a e d c K (eff_unlock l0). exists g. splits*.
            ++ (* every reduction is blocked: [a] is inert *)

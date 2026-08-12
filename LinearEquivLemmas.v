@@ -2121,6 +2121,84 @@ Proof.
   applys Hnanc. applys (>> delta_writer_ancestor Hwf Hcf Hplay Htd Hbdj Hgwc).
 Qed.
 
+(* Adding the volatile write's own variable [x] to the checked delta doesn't
+   introduce a NEW conflict: whatever last wrote [x] is already dominated by
+   [t]'s own pointer, given a [conflict_free] log ending in this very write.
+   Verbatim analogue of [lin_conflict_free_holds], specialised to the single
+   variable [x] being written -- [t] has no delta binding for [x] to appeal
+   to (it is ABOUT to write it), so the [hb] edge comes from [conflict_free]
+   applied directly to the appended write, not from [delta_writer_ancestor]. *)
+Lemma global_head_change_set_empty_conflict_free :
+  forall log D TC G g CH t x v,
+    wf_log log ->
+    conflict_free (log & event_write t x v) ->
+    play_log log init_play_cfg (D, TC, G, g) CH ->
+    x \in Volatiles ->
+    t \indom D ->
+    t \indom TC ->
+    x \notin change_set G (TC[t]) g.
+Proof.
+  introv Hwf0 Hcf Hplay Hxvol Htd Httc.
+  forwards Hpgwf: play_log_graph_wf Hplay.
+  destruct G as (C & P). destruct Hpgwf as (Hedge & Hdg).
+  asserts Hg: (graph_indom (C, P) g).
+  { destruct Hdg as [-> | Hin]; [ forwards*: indom_empty_inv Htd | exact Hin ]. }
+  intro Hex. destruct Hex as (c & Hxc & Hancc & Hnanc).
+  asserts Hcdom: (graph_indom (C, P) c).
+  { forwards [Hin | Heq]: ancestor_src_indom Hedge Hancc; [ exact Hin | subst c; exact Hg ]. }
+  asserts Hgwc: (graph_writes (C, P) c x (C[c][x])).
+  { exists (C[c]). split.
+    - unfold graph_binds. applys binds_of_indom_read Hcdom; (reflexivity || typeclass).
+    - applys binds_of_indom_read Hxc; (reflexivity || typeclass). }
+  forwards (f & ef & tw & kw & HNfCH & HNflog & Hgtef & Hcef & Hkwlt & HNkw & Hncl):
+    graph_writes_flush Hplay Hgwc.
+  asserts Hkweqf: (kw = f).
+  { destruct (classic (kw = f)) as [Heq | Hne]; [ exact Heq | exfalso ].
+    asserts Hltf: (kw < f). { nat_math. }
+    asserts Hle: (kw <= kw). { nat_math. }
+    forwards Hni: Hncl Hle Hltf HNkw (eq_refl : get_thread (event_write tw x (C[c][x])) = tw).
+    applys Hni. simpl. exact Hxvol. }
+  subst kw.
+  forwards Hflt: Nth_inbound HNflog.
+  asserts HNkwapp: (LibList.Nth f (log & event_write t x v) (event_write tw x (C[c][x]))).
+  { applys Nth_app_l HNkw. }
+  asserts HNenapp: (LibList.Nth (length log) (log & event_write t x v) (event_write t x v)).
+  { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
+  asserts Hacc: (accesses_variable x (event_write t x v)). { reflexivity. }
+  forwards Hhb: (>> Hcf HNkwapp HNenapp Hacc Hflt).
+  forwards (q & eq & Hqlt & HNqapp & Hgq & Hdisj): hb_last_write_same_thread_witness Hhb HNenapp.
+  forwards [HNqlog | (mm & Heqm & _)]: Nth_app_inv HNqapp.
+  2:{ nat_math. }
+  forwards Hlen: play_log_CH_length Hplay.
+  asserts HqltCH: (q < length CH). { rewrite Hlen. exact Hqlt. }
+  forwards (cq & HNqCH): Nth_inbound_inv HqltCH.
+  forwards HancqTC: (>> CH_ancestor_TC Hwf0 Hplay HNqlog Hgq HNqCH).
+  destruct Hdisj as [Heqfq | Hhbfq].
+  - subst q.
+    forwards Heqc: Nth_functional HNfCH HNqCH. subst cq.
+    applys Hnanc HancqTC.
+  - forwards Hhbfq': hb_app_inv Hhbfq Hqlt.
+    forwards Hancfq: (>> hb_pointer_ancestor Hwf0 Hplay Hhbfq' HNfCH HNqCH).
+    applys Hnanc. applys ancestor_trans Hancfq HancqTC.
+Qed.
+
+(* Folding the newly-checked variable [x] into the diff preserves
+   conflict-freedom, given it does not itself land in the change set --
+   the [lin_conflict_free] analogue of [conflict_free_merge_add_var]
+   (simpler: no merge, so no second, symmetric change-set term). *)
+Lemma lin_conflict_free_add_var :
+  forall d c g G x v,
+    lin_conflict_free d c g G ->
+    x \notin change_set G c g ->
+    lin_conflict_free (d[x := v]) c g G.
+Proof.
+  introv Hlcf Hxnin. unfold lin_conflict_free in *.
+  rew_set in Hlcf. rew_set. intros j Hj1 Hj2.
+  lets [-> | Hjd']: (indom_update_inv Hj1).
+  - applys Hxnin Hj2.
+  - applys Hlcf Hjd' Hj2.
+Qed.
+
 (* ===========================================================================
    Soundness of conflict detection (linear).
 

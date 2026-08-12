@@ -112,13 +112,14 @@ Inductive step : cfg -> cfg -> Prop :=
     x \in Volatiles ->
     is_global_head G g ->
     (* writing a volatile is a *pull, then push*: the current diff
-       is checked for conflict-freedom against the current global
-       head [g], then immediately committed onto it with the write
-       folded into it (flushing the whole diff, exactly like
-       [StepEnd]/[StepRelease] already do), producing a fresh
-       commit [g'] that becomes both the thread's commit and the
-       new global head. *)
-    lin_conflict_free d c g G ->
+       (with the write itself folded in, so a write-write race on [x]
+       against the global head is caught too, not just a race on the
+       rest of the diff) is checked for conflict-freedom against the
+       current global head [g], then immediately committed onto it
+       (flushing the whole diff, exactly like [StepEnd]/[StepRelease]
+       already do), producing a fresh commit [g'] that becomes both
+       the thread's commit and the new global head. *)
+    lin_conflict_free d[x := v] c g G ->
     commit_fresh G g' ->
     global_commit t g g' (T[t := (state_running, te_exp e, d[x := v], c)]) G = (T', G') ->
     step (T, G, L) (T'[t := (state_running, K void, empty, g')], G', L)

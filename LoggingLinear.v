@@ -174,7 +174,7 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
     step_ul e K (eff_write x v) ->
     x \in Volatiles ->
     is_global_head G g ->
-    lin_conflict_free d c g G ->
+    lin_conflict_free d[x := v] c g G ->
     commit_fresh G g' ->
     global_commit t g g' (T[t := (state_running, te_exp e, d[x := v], c)]) G = (T', G') ->
     step ((T, G, L), log) ((T'[t := (state_running, K void, empty, g')], G', L), log & event_write t x v)
