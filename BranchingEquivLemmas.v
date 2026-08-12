@@ -3463,3 +3463,72 @@ Proof.
   apply Hncf.
   applys (>> conflict_free_merge_holds Hwf Hcflog Hplay HtD HtTC Hcdom).
 Qed.
+
+(* Reading a volatile [x] is a pull against [vc_read V x], graph-indom by
+   [vc_read_graph_indom] regardless of any relationship between [t] and
+   whoever last wrote [x] -- so, just like locks and joins, this is a direct
+   corollary of [conflict_free_merge_holds]: no extra argument is needed
+   because a read never adds [x] itself to the checked diff. *)
+Theorem branching_volatile_read_conflict_sound :
+  forall log T G L V t e d c K x,
+    wf_log log ->
+    describes log (T, G, L, V) ->
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_read x) ->
+    x \in Volatiles ->
+    ~ conflict_free_merge d c (vc_read V x) G ->
+    ~ conflict_free log.
+Proof.
+  introv Hwf Hdesc Hbt Hul Hxvol Hncf Hcflog.
+  destruct Hdesc as (_ & _ & _ & _ & _ & _ &
+    (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
+  subst V.
+  lets Htin: (indom_of_binds Hbt).
+  asserts HtD: (t \indom D). { applys HdomD Htin. }
+  asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
+  forwards (ts0 & e0 & Hbd): Hdelta Htin.
+  forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
+  forwards Hcdom: (>> vc_read_graph_indom x Hplay).
+  apply Hncf.
+  applys (>> conflict_free_merge_holds Hwf Hcflog Hplay HtD HtTC Hcdom).
+Qed.
+
+(* Writing a volatile [x] additionally folds [x] itself into the checked
+   diff ([d[x := v]], per the write-write race fix), so -- unlike the other
+   four synchronisations -- this is NOT a direct corollary of
+   [conflict_free_merge_holds] alone: [x]'s own membership in the OTHER
+   party's change set is exactly the fact [vc_read_change_set_empty_conflict_free]
+   supplies, but only relative to the log EXTENDED with this very write ([HbVolatile]
+   being write-then-read-only, unlike locks/joins/reads there is no rule making
+   [t]'s not-yet-logged pull of [x] unconditionally consistent with [conflict_free
+   log] alone -- see the discussion on [ancestor_pos_hb] in BranchingOOTA.v).
+   Concretely: if the check fails, appending this very write would ALREADY
+   break conflict-freedom -- matching exactly the guard [branching_complete]
+   relies on ([BranchingEquiv.v]) to admit a real [conflict_free (log &
+   event_write t x v)] step. *)
+Theorem branching_volatile_write_conflict_sound :
+  forall log T G L V t e d c K x v,
+    wf_log log ->
+    describes log (T, G, L, V) ->
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_write x v) ->
+    x \in Volatiles ->
+    ~ conflict_free_merge d[x := v] c (vc_read V x) G ->
+    ~ conflict_free (log & event_write t x v).
+Proof.
+  introv Hwf Hdesc Hbt Hul Hxvol Hncf Hcflog.
+  destruct Hdesc as (_ & _ & _ & _ & _ & _ &
+    (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
+  subst V.
+  lets Htin: (indom_of_binds Hbt).
+  asserts HtD: (t \indom D). { applys HdomD Htin. }
+  asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
+  forwards (ts0 & e0 & Hbd): Hdelta Htin.
+  forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
+  forwards Hcdom: (>> vc_read_graph_indom x Hplay).
+  forwards Hcflog0: conflict_free_last_inv Hcflog.
+  apply Hncf.
+  applys conflict_free_merge_add_var.
+  - applys (>> conflict_free_merge_holds Hwf Hcflog0 Hplay HtD HtTC Hcdom).
+  - applys (>> vc_read_change_set_empty_conflict_free Hwf Hcflog Hplay Hxvol HtTC).
+Qed.

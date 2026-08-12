@@ -2234,6 +2234,45 @@ Proof.
   applys (>> lin_conflict_free_holds Hwf Hcflog Hplay HtD HtTC).
 Qed.
 
+(* Writing a volatile [x] additionally folds [x] itself into the checked
+   diff ([d[x := v]], per the write-write race fix), so -- unlike the other
+   five synchronisations -- this is NOT a direct instance of
+   [linear_sync_conflict_sound]: [x]'s own membership in the global head's
+   change set is exactly the fact [global_head_change_set_empty_conflict_free]
+   supplies, but only relative to the log EXTENDED with this very write (there
+   is no [hb] rule making [t]'s not-yet-logged write of [x] unconditionally
+   consistent with [conflict_free log] alone). Concretely: if the check fails,
+   appending this very write would ALREADY break conflict-freedom -- matching
+   exactly the guard [linear_complete] relies on ([LinearEquiv.v]) to admit a
+   real [conflict_free (log & event_write t x v)] step. *)
+Theorem linear_volatile_write_conflict_sound :
+  forall log T G g L t e d c K x v,
+    wf_log log ->
+    describes log (T, G, L) ->
+    is_global_head G g ->
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_write x v) ->
+    x \in Volatiles ->
+    ~ lin_conflict_free d[x := v] c g G ->
+    ~ conflict_free (log & event_write t x v).
+Proof.
+  introv Hwf Hdesc Hhead Hbt Hul Hxvol Hncf Hcflog.
+  destruct Hdesc as (_ & _ & _ & _ & _ & _ &
+    (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
+  forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
+  forwards Heqg: is_global_head_unique HwfG Hhead0 Hhead. subst g0.
+  lets Htin: (indom_of_binds Hbt).
+  asserts HtD: (t \indom D). { applys HdomD Htin. }
+  asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
+  forwards (st0 & e0 & Hbd): Hdelta Htin.
+  forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
+  forwards Hcflog0: conflict_free_last_inv Hcflog.
+  apply Hncf.
+  applys lin_conflict_free_add_var.
+  - applys (>> lin_conflict_free_holds Hwf Hcflog0 Hplay HtD HtTC).
+  - applys (>> global_head_change_set_empty_conflict_free Hwf Hcflog Hplay Hxvol HtD HtTC).
+Qed.
+
 (* The graph-membership half of [wf_cfg], read straight off the replay (no
    [wf_log] needed): the graph stays well formed (graph_commit only ever extends
    the totally-ordered chain at the in-graph head), the head is in the graph, and
