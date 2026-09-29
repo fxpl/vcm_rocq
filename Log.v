@@ -219,7 +219,10 @@ Fixpoint get_uncommitted' (t : tid) (l : log) (acc : log) :=
 Definition get_uncommitted (t : tid) (log : log) :=
   get_uncommitted' t log nil.
 
-(* (Absence of) out-of-thin-air reads *)
+(* A read at position [n] is sourced when there is a write to give it its
+   value that is not hb-after it, and no other write to the same variable
+   sits hb-between that source and the read (no closer, competing writer).
+   This pins the read to the happens-before order. *)
 Definition sourced_read (log : Log.log) (n : nat) : Prop :=
   forall t x v,
     LibList.Nth n log (event_read t x v) ->
@@ -231,5 +234,6 @@ Definition sourced_read (log : Log.log) (n : nat) : Prop :=
                /\ LibList.Nth m' log (event_write t'' x v')
                /\ hb log m m' /\ hb log m' n).
 
-Definition no_thin_air (log : Log.log) : Prop :=
+(* Happens-before consistency: every read in the log is sourced. *)
+Definition hb_consistent (log : Log.log) : Prop :=
   forall n, sourced_read log n.

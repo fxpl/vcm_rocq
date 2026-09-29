@@ -16,7 +16,7 @@ Import LogFacts.
 Import LoggingLinear.
 
 (* ============================================================================
-   No out-of-thin-air reads (holds even for racy / conflicting executions).
+   Happens-before consistency (holds even for racy executions).
 
    A read at position [n] is [sourced] when its value [v] of [x] is written by
    some earlier write at position [m], and that write is a *maximal visible*
@@ -583,7 +583,7 @@ Proof.
   applys ancestor_trans Hanc1. applys ancestor_trans Hanc2 Hanc3.
 Qed.
 
-(* The step invariant. The 7 non-read steps reduce to [no_thin_air_snoc_nonread];
+(* The step invariant. The 7 non-read steps reduce to [hb_consistent_snoc_nonread];
    the two read steps additionally establish sourcedness of the freshly appended
    read at position [length log]:
      - StepReadLocal: the source is [t]'s own last uncommitted write [D[t][x]]
@@ -593,17 +593,17 @@ Qed.
        ancestor of [TC[t]] ([is_latest_value_log_write]); its graph-maximality,
        together with hb =>_ graph-ancestry, rules out an intervening x-write.
    Both directions are UNCONDITIONAL (no [race_free]). *)
-Theorem step_preserves_no_thin_air :
+Theorem step_preserves_hb_consistent :
   forall cfg cfg' log log',
     wf_log log ->
     describes log cfg ->
     step (cfg, log) (cfg', log') ->
-    no_thin_air log ->
-    no_thin_air log'.
+    hb_consistent log ->
+    hb_consistent log'.
 Proof.
-  introv Hwf Hdesc Hstep Hnta.
+  introv Hwf Hdesc Hstep Hhbc.
   inverts Hstep;
-    try (applys no_thin_air_snoc_nonread Hnta; intros; discriminate).
+    try (applys hb_consistent_snoc_nonread Hhbc; intros; discriminate).
   - (* StepReadLocal: source is [t]'s own last uncommitted write [D[t][x]]. *)
     match goal with
     | Hb : binds _ _ (state_running, te_exp _, ?dd, _), Hd : binds ?dd _ _ |- _ =>
@@ -620,7 +620,7 @@ Proof.
     forwards [Hnth' | (Hp & Heq)]: Nth_last_inv Hnth.
     + (* an older read: preserved by [sourced_read_snoc] *)
       forwards Hlt: Nth_inbound Hnth'.
-      forwards Hsr: sourced_read_snoc Hlt (Hnta n). applys Hsr Hnth.
+      forwards Hsr: sourced_read_snoc Hlt (Hhbc n). applys Hsr Hnth.
     + (* the freshly appended read at position [length log] *)
       inverts Heq. subst n.
       exists m t0. splits.
@@ -658,7 +658,7 @@ Proof.
     intros n t0 x0 v0 Hnth.
     forwards [Hnth' | (Hp & Heq)]: Nth_last_inv Hnth.
     + forwards Hlt: Nth_inbound Hnth'.
-      forwards Hsr: sourced_read_snoc Hlt (Hnta n). applys Hsr Hnth.
+      forwards Hsr: sourced_read_snoc Hlt (Hhbc n). applys Hsr Hnth.
     + inverts Heq. subst n.
       (* Strengthen the source to the LAST [tw]-write of [x0] before the flush [fw]. *)
       forwards (kL & HkLlt & HNkL & HnclL & HnwL):
@@ -822,7 +822,7 @@ Proof.
     intros n t0 x0 v0 Hnth.
     forwards [Hnth' | (Hp & Heq)]: Nth_last_inv Hnth.
     + forwards Hlt: Nth_inbound Hnth'.
-      forwards Hsr: sourced_read_snoc Hlt (Hnta n). applys Hsr Hnth.
+      forwards Hsr: sourced_read_snoc Hlt (Hhbc n). applys Hsr Hnth.
     + inverts Heq. subst n.
       forwards (kL & HkLlt & HNkL & HnclL & HnwL):
         (>> flush_last_write HwfR HplayR HNfw HNef Hgtef Hcef Hgw).

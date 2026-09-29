@@ -3462,7 +3462,7 @@ Qed.
    supplies, but only relative to the log EXTENDED with this very write ([HbVolatile]
    being write-then-read-only, unlike locks/joins/reads there is no rule making
    [t]'s not-yet-logged pull of [x] unconditionally consistent with [race_free
-   log] alone -- see the discussion on [ancestor_pos_hb] in BranchingOOTA.v).
+   log] alone -- see the discussion on [ancestor_pos_hb] in BranchingConsistency.v).
    Concretely: if the check fails, appending this very write would ALREADY
    break race-freedom -- matching exactly the guard [branching_complete]
    relies on ([BranchingEquiv.v]) to admit a real [race_free (log &

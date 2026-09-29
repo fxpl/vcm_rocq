@@ -1046,11 +1046,11 @@ Qed.
 
 (* Appending a non-read event preserves the whole invariant: old reads by
    [sourced_read_snoc], and the new last position is not a read (vacuous). *)
-Lemma no_thin_air_snoc_nonread :
+Lemma hb_consistent_snoc_nonread :
   forall log e,
     (forall t x v, e <> event_read t x v) ->
-    no_thin_air log ->
-    no_thin_air (log & e).
+    hb_consistent log ->
+    hb_consistent (log & e).
 Proof.
   introv Hneq Hnt.
   introv Hnth.

@@ -16,7 +16,7 @@ LoggingLinear.v
 LoggingLinearFacts.v
 LinearEquivLemmas.v
 LinearEquiv.v
-LinearOOTA.v
+LinearConsistency.v
 Graph.v
 GraphFacts.v
 Branching.v
@@ -25,4 +25,4 @@ LoggingBranching.v
 LoggingBranchingFacts.v
 BranchingEquivLemmas.v
 BranchingEquiv.v
-BranchingOOTA.v
+BranchingConsistency.v
