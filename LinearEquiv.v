@@ -218,10 +218,8 @@ Proof.
          obligation *)
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
-      asserts Hlcf: (lin_conflict_free (D[t][x := v]) (TC[t]) g G).
-      { applys lin_conflict_free_add_var.
-        - applys lin_conflict_free_holds Hwf Hrflog Hplay Hdt HtTC.
-        - applys (>> global_head_change_set_empty_race_free Hwf Hrf Hplay Hxvol Hdt HtTC). }
+      asserts Hlcf: (lin_conflict_free (D[t]) (TC[t]) g G).
+      { applys lin_conflict_free_holds Hwf Hrflog Hplay Hdt HtTC. }
       forwards (g' & Hfresh): exists_commit_fresh HwfG.
       asserts (T' & G' & Heq): (exists T' G', global_commit t g g'
           (T[t := (state_running, te_exp e, D[t][x := v], TC[t])]) G = (T', G')).

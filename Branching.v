@@ -165,7 +165,7 @@ Inductive step : cfg -> cfg -> Prop :=
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_write x v) ->
     x \in Volatiles ->
-    conflict_free_merge d[x := v] h (vc_read V x) G ->
+    conflict_free_merge d h (vc_read V x) G ->
     commit_fresh G h' ->
     pull_volatile t x h' T G V = (T', G') ->
     binds T' t (state_running, te_exp e, d, h') ->

@@ -2176,84 +2176,6 @@ Proof.
   applys Hnanc. applys (>> delta_writer_ancestor Hwf Hrf Hplay Htd Hbdj Hgwc).
 Qed.
 
-(* Adding the volatile write's own variable [x] to the checked delta doesn't
-   introduce a NEW conflict: whatever last wrote [x] is already dominated by
-   [t]'s own pointer, given a [race_free] log ending in this very write.
-   Verbatim analogue of [lin_conflict_free_holds], specialised to the single
-   variable [x] being written -- [t] has no delta binding for [x] to appeal
-   to (it is ABOUT to write it), so the [hb] edge comes from [race_free]
-   applied directly to the appended write, not from [delta_writer_ancestor]. *)
-Lemma global_head_change_set_empty_race_free :
-  forall log D TC G g CH t x v,
-    wf_log log ->
-    race_free (log & event_write t x v) ->
-    play_log log init_play_cfg (D, TC, G, g) CH ->
-    x \in Volatiles ->
-    t \indom D ->
-    t \indom TC ->
-    x \notin change_set G (TC[t]) g.
-Proof.
-  introv Hwf0 Hrf Hplay Hxvol Htd Httc.
-  forwards Hpgwf: play_log_graph_wf Hplay.
-  destruct G as (C & P). destruct Hpgwf as (Hedge & Hdg).
-  asserts Hg: (graph_indom (C, P) g).
-  { destruct Hdg as [-> | Hin]; [ forwards*: indom_empty_inv Htd | exact Hin ]. }
-  intro Hex. destruct Hex as (c & Hxc & Hancc & Hnanc).
-  asserts Hcdom: (graph_indom (C, P) c).
-  { forwards [Hin | Heq]: ancestor_src_indom Hedge Hancc; [ exact Hin | subst c; exact Hg ]. }
-  asserts Hgwc: (graph_writes (C, P) c x (C[c][x])).
-  { exists (C[c]). split.
-    - unfold graph_binds. applys binds_of_indom_read Hcdom; (reflexivity || typeclass).
-    - applys binds_of_indom_read Hxc; (reflexivity || typeclass). }
-  forwards (f & ef & tw & kw & HNfCH & HNflog & Hgtef & Hcef & Hkwlt & HNkw & Hncl):
-    graph_writes_flush Hplay Hgwc.
-  asserts Hkweqf: (kw = f).
-  { destruct (classic (kw = f)) as [Heq | Hne]; [ exact Heq | exfalso ].
-    asserts Hltf: (kw < f). { nat_math. }
-    asserts Hle: (kw <= kw). { nat_math. }
-    forwards Hni: Hncl Hle Hltf HNkw (eq_refl : get_thread (event_write tw x (C[c][x])) = tw).
-    applys Hni. simpl. exact Hxvol. }
-  subst kw.
-  forwards Hflt: Nth_inbound HNflog.
-  asserts HNkwapp: (LibList.Nth f (log & event_write t x v) (event_write tw x (C[c][x]))).
-  { applys Nth_app_l HNkw. }
-  asserts HNenapp: (LibList.Nth (length log) (log & event_write t x v) (event_write t x v)).
-  { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
-  asserts Hacc: (accesses_variable x (event_write t x v)). { reflexivity. }
-  forwards Hhb: (>> Hrf HNkwapp HNenapp Hacc Hflt).
-  forwards (q & eq & Hqlt & HNqapp & Hgq & Hdisj): hb_last_write_same_thread_witness Hhb HNenapp.
-  forwards [HNqlog | (mm & Heqm & _)]: Nth_app_inv HNqapp.
-  2:{ nat_math. }
-  forwards Hlen: play_log_CH_length Hplay.
-  asserts HqltCH: (q < length CH). { rewrite Hlen. exact Hqlt. }
-  forwards (cq & HNqCH): Nth_inbound_inv HqltCH.
-  forwards HancqTC: (>> CH_ancestor_TC Hwf0 Hplay HNqlog Hgq HNqCH).
-  destruct Hdisj as [Heqfq | Hhbfq].
-  - subst q.
-    forwards Heqc: Nth_functional HNfCH HNqCH. subst cq.
-    applys Hnanc HancqTC.
-  - forwards Hhbfq': hb_app_inv Hhbfq Hqlt.
-    forwards Hancfq: (>> hb_pointer_ancestor Hwf0 Hplay Hhbfq' HNfCH HNqCH).
-    applys Hnanc. applys ancestor_trans Hancfq HancqTC.
-Qed.
-
-(* Folding the newly-checked variable [x] into the diff preserves
-   conflict-freedom, given it does not itself land in the change set --
-   the [lin_conflict_free] analogue of [conflict_free_merge_add_var]
-   (simpler: no merge, so no second, symmetric change-set term). *)
-Lemma lin_conflict_free_add_var :
-  forall d c g G x v,
-    lin_conflict_free d c g G ->
-    x \notin change_set G c g ->
-    lin_conflict_free (d[x := v]) c g G.
-Proof.
-  introv Hlcf Hxnin. unfold lin_conflict_free in *.
-  rew_set in Hlcf. rew_set. intros j Hj1 Hj2.
-  lets [-> | Hjd']: (indom_update_inv Hj1).
-  - applys Hxnin Hj2.
-  - applys Hlcf Hjd' Hj2.
-Qed.
-
 (* ===========================================================================
    Soundness of conflict detection (linear).
 
@@ -2287,45 +2209,6 @@ Proof.
   forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
   apply Hncf.
   applys (>> lin_conflict_free_holds Hwf Hrflog Hplay HtD HtTC).
-Qed.
-
-(* Writing a volatile [x] additionally folds [x] itself into the checked
-   diff ([d[x := v]], per the write-write race fix), so -- unlike the other
-   five synchronisations -- this is NOT a direct instance of
-   [linear_sync_conflict_sound]: [x]'s own membership in the global head's
-   change set is exactly the fact [global_head_change_set_empty_race_free]
-   supplies, but only relative to the log EXTENDED with this very write (there
-   is no [hb] rule making [t]'s not-yet-logged write of [x] unconditionally
-   consistent with [race_free log] alone). Concretely: if the check fails,
-   appending this very write would ALREADY break race-freedom -- matching
-   exactly the guard [linear_complete] relies on ([LinearEquiv.v]) to admit a
-   real [race_free (log & event_write t x v)] step. *)
-Theorem linear_volatile_write_conflict_sound :
-  forall log T G g L t e d c K x v,
-    wf_log log ->
-    describes log (T, G, L) ->
-    is_global_head G g ->
-    binds T t (state_running, te_exp e, d, c) ->
-    step_ul e K (eff_write x v) ->
-    x \in Volatiles ->
-    ~ lin_conflict_free d[x := v] c g G ->
-    ~ race_free (log & event_write t x v).
-Proof.
-  introv Hwf Hdesc Hhead Hbt Hul Hxvol Hncf Hrflog.
-  destruct Hdesc as (_ & _ & _ & _ & _ & _ &
-    (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
-  forwards (HwfG & _ & Hhead0): play_log_head_wf Hplay.
-  forwards Heqg: is_global_head_unique HwfG Hhead0 Hhead. subst g0.
-  lets Htin: (indom_of_binds Hbt).
-  asserts HtD: (t \indom D). { applys HdomD Htin. }
-  asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
-  forwards (st0 & e0 & Hbd): Hdelta Htin.
-  forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
-  forwards Hrflog0: race_free_last_inv Hrflog.
-  apply Hncf.
-  applys lin_conflict_free_add_var.
-  - applys (>> lin_conflict_free_holds Hwf Hrflog0 Hplay HtD HtTC).
-  - applys (>> global_head_change_set_empty_race_free Hwf Hrflog Hplay Hxvol HtD HtTC).
 Qed.
 
 (* The graph-membership half of [wf_cfg], read straight off the replay (no

@@ -134,7 +134,7 @@ Definition conflict_detected (cfg : cfg) : Prop :=
          (exists x v,
              step_ul e K (eff_write x v) /\
              x \in Volatiles /\
-             ~conflict_free_merge d[x := v] h (vc_read V x) G))
+             ~conflict_free_merge d h (vc_read V x) G))
   end.
 
 (* A thread has terminated. *)
@@ -1082,7 +1082,7 @@ Proof.
                         no [is_latest_value] obligation here (unlike the read side),
                         so the conflict-free case is purely mechanical: pull, then
                         push the folded-in write. *)
-                     destruct (classic (conflict_free_merge d[x := v] h (vc_read V x) G)) as [Hcfm | Hncfm].
+                     destruct (classic (conflict_free_merge d h (vc_read V x) G)) as [Hcfm | Hncfm].
                      +++ right. left.
                          forwards (c'' & Hfresh): exists_commit_fresh Hwf.
                          asserts (T' & G' & Hpull & Hbinds'):

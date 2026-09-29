@@ -599,51 +599,6 @@ Proof.
   introv Hhb. induction Hhb; eauto.
 Qed.
 
-(* If [hb log m n] and the event at [n] is a write [event_write t x v], the
-   LAST hop of the derivation reaching [n] must be [HbPo] (same thread as [n],
-   i.e. thread [t]): no other constructor's target side can match a write's
-   shape ([HbLock]/[HbSpawn]/[HbJoin] need [event_lock]/[event_start]/
-   [event_join], [HbVolatile] needs [event_read]). So there is always some
-   position [q < n] on thread [t] with either [m = q] or [hb log m q] --
-   [m]'s own edge into [n] "passes through" [t]'s own program order. Used to
-   turn [race_free]'s abstract [hb log m n] (for [n] a volatile write)
-   into a concrete, log-position witness on the WRITER's own thread that a
-   [CH]-lookup can act on. *)
-Lemma hb_last_write_same_thread_witness :
-  forall log m n t x v,
-    hb log m n ->
-    LibList.Nth n log (event_write t x v) ->
-    exists q eq, q < n /\ LibList.Nth q log eq /\ get_thread eq = t /\ (m = q \/ hb log m q).
-Proof.
-  introv Hhb. gen t x v.
-  induction Hhb as
-    [ p q e1 e2 HN1 HN2 Heq Hlt
-    | q p t1 t2 l HNu HNl Hlt
-    | p q t1 t2 HNs HNst Hlt
-    | p q t1 t2 HNe HNj Hlt
-    | p q t1 t2 x' v' v'' Hxvol HNw HNr Hlt
-    | p q k Hpk IHpk Hkq IHkq ];
-    introv HNen.
-  - (* HbPo: [e2] is the write, so [get_thread e1 = get_thread e2 = t] *)
-    forwards Heq2: Nth_functional HN2 HNen. subst e2.
-    cbn [get_thread] in Heq.
-    exists p e1. splits; [ exact Hlt | exact HN1 | exact Heq | left; reflexivity ].
-  - (* HbLock: target is [event_lock t2 l], contradicting the write shape *)
-    forwards Heq2: Nth_functional HNl HNen. false.
-  - (* HbSpawn: target is [event_start t2] *)
-    forwards Heq2: Nth_functional HNst HNen. false.
-  - (* HbJoin: target is [event_join t1 t2] *)
-    forwards Heq2: Nth_functional HNj HNen. false.
-  - (* HbVolatile: target is [event_read t2 x' v''] *)
-    forwards Heq2: Nth_functional HNr HNen. false.
-  - (* HbTrans: recurse on the [k -> n] half, which targets the SAME [n] *)
-    forwards (q1 & eq1 & Hqlt & HNq & Hgq & Hdisj): IHkq t x v HNen.
-    exists q1 eq1. splits; [ exact Hqlt | exact HNq | exact Hgq | ].
-    destruct Hdisj as [-> | Hhbkq].
-    + right. exact Hpk.
-    + right. applys HbTrans Hpk Hhbkq.
-Qed.
-
 (* If [m] is an event of thread [t] and [t] performs no [is_commit_event] event at
    any index [>= m], then every event [t] happens-before lies on thread [t].
    Reason: every cross-thread hb edge has an [is_commit_event] source, and a chain

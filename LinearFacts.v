@@ -119,7 +119,7 @@ Definition conflict_detected (cfg : cfg) : Prop :=
              (exists x, step_ul e K (eff_read x) /\ x \in Volatiles /\
                         ~ lin_conflict_free d c g G) \/
              (exists x v, step_ul e K (eff_write x v) /\ x \in Volatiles /\
-                          ~ lin_conflict_free d[x := v] c g G))))
+                          ~ lin_conflict_free d c g G))))
   end.
 
 (* A thread has terminated. *)
@@ -480,11 +480,8 @@ Proof.
               ** (* write: volatile (a pull-then-push, conflict-checked) or
                     normal (always succeeds, staged into [d]) *)
                  destruct (classic (x \in Volatiles)) as [Hxvol | Hxnvol].
-                 --- (* volatile: split on the conflict check, which now covers
-                        [x] itself (folded into the diff) too, catching an
-                        unordered write-write race on the volatile as a
-                        conflict rather than silently overwriting it. *)
-                     destruct (classic (lin_conflict_free d[x := v] c g G)) as [Hcfm | Hncfm].
+                 --- (* volatile: split on the conflict check *)
+                     destruct (classic (lin_conflict_free d c g G)) as [Hcfm | Hncfm].
                      +++ right. left.
                          forwards (g'' & Hfresh): exists_commit_fresh Hwf.
                          destruct (global_commit a g g''
