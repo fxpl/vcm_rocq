@@ -592,7 +592,7 @@ Qed.
      - StepReadGlobal: the source is the [is_latest_value] maximal x-writing
        ancestor of [TC[t]] ([is_latest_value_log_write]); its graph-maximality,
        together with hb =>_ graph-ancestry, rules out an intervening x-write.
-   Both directions are UNCONDITIONAL (no [conflict_free]). *)
+   Both directions are UNCONDITIONAL (no [race_free]). *)
 Theorem step_preserves_no_thin_air :
   forall cfg cfg' log log',
     wf_log log ->

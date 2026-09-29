@@ -583,7 +583,7 @@ Qed.
      - StepReadGlobal: source is the [is_latest_value] maximal x-writing ancestor
        of [TC[t]]; maximality rules out an intervening x-write via the (existing)
        [hb ==> ancestor] direction ([hb_pointer_ancestor]).
-   Both directions are UNCONDITIONAL (no [conflict_free]).
+   Both directions are UNCONDITIONAL (no [race_free]).
    ============================================================================ *)
 
 Theorem step_preserves_no_thin_air :

@@ -160,7 +160,7 @@ Definition wf_log (log : log) : Prop :=
 
 (* A write to [x] happens-before any later access (read or write) of [x]. This
    rules out both write-write and (stale) read-write races on a variable. *)
-Definition conflict_free (log : log) : Prop :=
+Definition race_free (log : log) : Prop :=
   forall m n t1 x v1 e2,
     LibList.Nth m log (event_write t1 x v1) ->
     LibList.Nth n log e2 ->

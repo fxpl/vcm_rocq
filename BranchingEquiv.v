@@ -307,7 +307,7 @@ Theorem branching_complete :
     match cfgSh, cfgB with
     | (TSh, _, _), (TB, _, _, _) => matching_threads TSh TB
     end ->
-    conflict_free log' ->
+    race_free log' ->
     LoggingSharedMemory.step (cfgSh, log) (cfgSh', log') ->
     exists cfgB',
       LoggingBranching.step (cfgB, log) (cfgB', log') /\
@@ -315,7 +315,7 @@ Theorem branching_complete :
       | (TSh', _, _), (TB', _, _, _) => matching_threads TSh' TB'
       end.
 Proof.
-  introv Hwf HdescSh HdescB Hthr Hcf Hstep.
+  introv Hwf HdescSh HdescB Hthr Hrf Hstep.
   destruct cfgB as [[(T & G) L] V].
   forwards HwfB: describes_wf_cfg HdescB.
   destruct HwfB as (HwfG & HwfRoot & _ & Hlockcommits & _).
@@ -346,7 +346,7 @@ Proof.
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
-    forwards Hcflog: conflict_free_last_inv Hcf.
+    forwards Hrflog: race_free_last_inv Hrf.
     destruct (classic (x \in Volatiles)) as [Hxvol | Hnv].
     * (* volatile read: always a pull, regardless of [D[t]] -- a volatile
          variable is never pending in a delta ([volatile_notin_delta]). *)
@@ -354,7 +354,7 @@ Proof.
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
       asserts Hmerge: (conflict_free_merge (D[t]) (TC[t]) (vc_read V x) G).
-      { subst. applys (>> conflict_free_merge_holds Hwf Hcflog Hplay Hdt HtTC Hcdom). }
+      { subst. applys (>> conflict_free_merge_holds Hwf Hrflog Hplay Hdt HtTC Hcdom). }
       forwards (c'' & Hfresh): exists_commit_fresh HwfG.
       asserts Hpull: (pull_volatile t x c'' T G V = (T[t := (state_running, te_exp e, D[t], c'')],
                                                        graph_merge G (vc_read V x) (TC[t]) c'')).
@@ -375,7 +375,7 @@ Proof.
          [vc_read V x] or [TC[t]] -- is the maximal writer. *)
       asserts Hexfilter: (exists tw log', LibList.filter (fun e => writes_variable x e) log = log' & event_write tw x v).
       { exists t' log'0. exact Hfilter. }
-      forwards Hlv0: (>> is_latest_value_after_volatile_pull Hwf Hcflog Hplay Hdt HtTC
+      forwards Hlv0: (>> is_latest_value_after_volatile_pull Hwf Hrflog Hplay Hdt HtTC
         Hfresh Hcneq0 Hxvol Hexfilter).
       asserts* Hlv: (is_latest_value (graph_merge G (vc_read V x) (TC[t]) c'') c'' x v).
       exists. split;
@@ -387,14 +387,14 @@ Proof.
         asserts Hdt: (t \indom D). { applys HdomD Htin. }
         asserts Hbdi: (binds (D[t]) x (D[t][x])).
         { applys binds_of_indom_read Hin; (reflexivity || typeclass). }
-        forwards (log'' & Hfilt2): conflict_free_last_local_write Hcflog Hplay Hdt Hbdi.
+        forwards (log'' & Hfilt2): race_free_last_local_write Hrflog Hplay Hdt Hbdi.
         rewrite Hfilter in Hfilt2.
         forwards (_ & Heqw): last_eq_last_inv Hfilt2. inverts Heqw.
         exists. split; [ applys LoggingBranching.StepReadLocal Hbinds; [ eassumption | exact Hnv | exact Hbdi ] | simpls* ]. }
       { (* global (committed) read: [x] is visible as the latest committed value *)
         lets [_ Hback]: Hrun t. forwards (Hms & Hmne): Hback. { do 3 eexists. exact Hbinds. }
         asserts Hwfr: (wf_log (log & event_read t x v)). { applys wf_log_read_last Hms Hmne Hwf. }
-        forwards Hlv: (>> last_global_write_latest_value Hnv Hcf Hwfr Hplay Hnin Hfilter).
+        forwards Hlv: (>> last_global_write_latest_value Hnv Hrf Hwfr Hplay Hnin Hfilter).
         exists. split; [ applys LoggingBranching.StepReadGlobal Hbinds; [ eassumption | exact Hnv | exact Hnin | exact Hlv ] | simpls* ]. }
   + (* StepWrite *)
     destruct HdescB as (_ & _ & _ & _ & _ & _ &
@@ -402,7 +402,7 @@ Proof.
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
-    forwards Hcflog: conflict_free_last_inv Hcf.
+    forwards Hrflog: race_free_last_inv Hrf.
     destruct (classic (x \in Volatiles)) as [Hxvol | Hnv].
     * (* volatile write: pull-then-push, mirroring the volatile-read pull, then
          a commit fold-in of the new value -- no [is_latest_value] obligation
@@ -412,8 +412,8 @@ Proof.
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
       asserts Hmerge: (conflict_free_merge (D[t][x := v]) (TC[t]) (vc_read V x) G).
       { applys conflict_free_merge_add_var.
-        - subst. applys (>> conflict_free_merge_holds Hwf Hcflog Hplay Hdt HtTC Hcdom).
-        - subst. applys (>> vc_read_change_set_empty_conflict_free Hwf Hcf Hplay Hxvol HtTC). }
+        - subst. applys (>> conflict_free_merge_holds Hwf Hrflog Hplay Hdt HtTC Hcdom).
+        - subst. applys (>> vc_read_change_set_empty_race_free Hwf Hrf Hplay Hxvol HtTC). }
       forwards (c' & Hfresh1): exists_commit_fresh HwfG.
       asserts Hpull: (pull_volatile t x c' T G V = (T[t := (state_running, te_exp e, D[t], c')],
                                                        graph_merge G (vc_read V x) (TC[t]) c')).
@@ -495,7 +495,7 @@ Proof.
     {
       destruct HdescB as (_ & _ & _ & _ & _ & _ &
         (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC)).
-      forwards Hcflog: conflict_free_last_inv Hcf.
+      forwards Hrflog: race_free_last_inv Hrf.
       lets HtT: (indom_of_binds Hbinds').
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
       forwards* Heqt: binds_inj Hbinds' Hbdt. inverts Heqt.
@@ -503,7 +503,7 @@ Proof.
       forwards (ts1 & e1 & Hbdt'): Hdelta Ht'T.
       forwards* Heqt': binds_inj Hbinds Hbdt'. inverts Heqt'.
       forwards Hpgwf: play_log_graph_wf Hplay. destruct Hpgwf as (_ & HTCdom & _).
-      applys conflict_free_merge_holds Hwf Hcflog Hplay;
+      applys conflict_free_merge_holds Hwf Hrflog Hplay;
         [ applys HdomD HtT | applys HdomTC HtT | applys HTCdom; applys HdomTC Ht'T ].
     }
     clears HdescSh HdescB.
@@ -535,11 +535,11 @@ Proof.
     {
       destruct HdescB as (_ & _ & _ & _ & _ & _ &
         (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC)).
-      forwards Hcflog: conflict_free_last_inv Hcf.
+      forwards Hrflog: race_free_last_inv Hrf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
       forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
-      applys conflict_free_merge_holds Hwf Hcflog Hplay;
+      applys conflict_free_merge_holds Hwf Hrflog Hplay;
         [ applys HdomD HtT | applys HdomTC HtT | exact Hc'indom ].
     }
     asserts (T' & G' & Hpull & Hbinds''): (exists T' G', pull_lock t l0 c'' T G L = (T', G') /\
@@ -595,7 +595,7 @@ Theorem branching_sound :
     match cfgSh, cfgB with
     | (TSh, _, _), (TB, _, _, _) => matching_threads TSh TB
     end ->
-    conflict_free log' ->
+    race_free log' ->
     LoggingBranching.step (cfgB, log) (cfgB', log') ->
     exists cfgSh',
       LoggingSharedMemory.step (cfgSh, log) (cfgSh', log') /\
@@ -603,7 +603,7 @@ Theorem branching_sound :
       | (TSh', _, _), (TB', _, _, _) => matching_threads TSh' TB'
       end.
 Proof.
-  introv Hwf HdescSh HdescB Hthr Hcf Hstep.
+  introv Hwf HdescSh HdescB Hthr Hrf Hstep.
   destruct cfgSh as ((Tsh & Hp) & Lsh).
   destruct cfgB as [[(T & G) L] V].
   forwards Hlck: matching_locks_describes HdescSh HdescB.
@@ -631,9 +631,9 @@ Proof.
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       apply Hwrite.
-      forwards Hcf': conflict_free_last_inv Hcf.
+      forwards Hrf': race_free_last_inv Hrf.
       forwards* Hbinds'': HdomD t.
-      forwards* Hex: conflict_free_last_local_write Hplay. }
+      forwards* Hex: race_free_last_local_write Hplay. }
     clears HdescSh HdescB.
     simpls*.
   + (* StepReadGlobal *)
@@ -657,7 +657,7 @@ Proof.
       asserts* Hdom: (t \indom T).
       forwards~ Hdom': HdomTC Hdom.
       match goal with Hnv : x \notin Volatiles |- _ =>
-        forwards* Hex: (>> conflict_free_last_global_write Hnv Hcf Hwfr Hplay) end.
+        forwards* Hex: (>> race_free_last_global_write Hnv Hrf Hwfr Hplay) end.
     }
     clears HdescSh HdescB.
     simpls*.
@@ -685,8 +685,8 @@ Proof.
     asserts Hcdom: (graph_indom G (vc_read VC x)). { applys vc_read_graph_indom Hplay. }
     asserts Hcneq: (vc_read VC x <> c'').
     { intro Heqc. rewrite Heqc in Hcdom. applys commit_fresh_not_indom Hfresh Hcdom. }
-    forwards Hcf': conflict_free_last_inv Hcf.
-    subst. forwards* Hex: (>> is_latest_value_after_volatile_pull_inv Hwf Hcf' Hplay Hdt HtTC Hfresh Hcneq Hxvol Hlv).
+    forwards Hrf': race_free_last_inv Hrf.
+    subst. forwards* Hex: (>> is_latest_value_after_volatile_pull_inv Hwf Hrf' Hplay Hdt HtTC Hfresh Hcneq Hxvol Hlv).
     exists. split.
     { constructors*. apply Hwrite. exact Hex. }
     repeat rewrite update_update; simpls*.
@@ -773,11 +773,11 @@ Corollary branching_equiv :
     match cfgSh, cfgB with
     | (TSh, _, _), (TB, _, _, _) => matching_threads TSh TB
     end ->
-    conflict_free log' ->
+    race_free log' ->
       (exists cfgSh', LoggingSharedMemory.step (cfgSh, log) (cfgSh', log')) <->
       (exists cfgB', LoggingBranching.step (cfgB, log) (cfgB', log')).
 Proof.
-  introv Hwf HdescSh HdescB Hmatch Hcf. split.
+  introv Hwf HdescSh HdescB Hmatch Hrf. split.
   - introv (cfgSh' & Hstep).
     forwards* (cfgB' & Hb & _): branching_complete.
   - introv (cfgB' & Hstep).

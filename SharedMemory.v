@@ -8,7 +8,7 @@ From Vcm Require Import Common.
 (* updates it immediately and globally -- there is no notion of a thread's  *)
 (* own view of memory diverging from anyone else's. This is the reference   *)
 (* semantics that the commit-graph models (Branching.v, Linear.v) are built *)
-(* to be equivalent to under a conflict-freedom side condition; see         *)
+(* to be equivalent to under a race-freedom side condition; see           *)
 (* BranchingEquiv.v / LinearEquiv.v.                                        *)
 (*                                                                          *)
 (* Locks are a plain free/held flag with no history attached ([lock_read]   *)

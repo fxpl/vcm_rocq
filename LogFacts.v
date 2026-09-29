@@ -550,17 +550,17 @@ Proof.
     applys* HbTrans.
 Qed.
 
-Lemma conflict_free_last_inv :
+Lemma race_free_last_inv :
   forall lg e,
-    conflict_free (lg & e) ->
-    conflict_free lg.
+    race_free (lg & e) ->
+    race_free lg.
 Proof.
-  introv Hcf.
+  introv Hrf.
   introv Hnth1 Hnth2 Hacc Hlt.
   hint Nth_app_l.
   asserts* Hnth1': (LibList.Nth m (lg & e) (event_write t1 x v1)).
   asserts* Hnth2': (LibList.Nth n (lg & e) e2).
-  forwards* Hhb: Hcf Hnth1' Hnth2' Hacc.
+  forwards* Hhb: Hrf Hnth1' Hnth2' Hacc.
   applys* hb_app_inv.
   applys* Nth_inbound.
 Qed.
@@ -588,7 +588,7 @@ Qed.
    [event_join], [HbVolatile] needs [event_read]). So there is always some
    position [q < n] on thread [t] with either [m = q] or [hb log m q] --
    [m]'s own edge into [n] "passes through" [t]'s own program order. Used to
-   turn [conflict_free]'s abstract [hb log m n] (for [n] a volatile write)
+   turn [race_free]'s abstract [hb log m n] (for [n] a volatile write)
    into a concrete, log-position witness on the WRITER's own thread that a
    [CH]-lookup can act on. *)
 Lemma hb_last_write_same_thread_witness :

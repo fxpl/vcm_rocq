@@ -115,7 +115,7 @@ Theorem linear_complete :
     match cfgSh, cfgL with
     | (TSh, _, LSh), (TL, _, LL) => matching_threads TSh TL /\ LSh = LL
     end ->
-    conflict_free log' ->
+    race_free log' ->
     LoggingSharedMemory.step (cfgSh, log) (cfgSh', log') ->
     exists cfgL',
       LoggingLinear.step (cfgL, log) (cfgL', log') /\
@@ -123,7 +123,7 @@ Theorem linear_complete :
         | (TSh', _, LSh'), (TL', _, LL') => matching_threads TSh' TL' /\ LSh' = LL'
         end.
 Proof.
-  introv Hwf HdescSh HdescL Hmatch Hcf Hstep.
+  introv Hwf HdescSh HdescL Hmatch Hrf Hstep.
   destruct cfgL as ((T & G) & L).
   forwards HwfL: describes_wf_cfg HdescL.
   destruct HwfL as (HwfG & Htotal & Hhex & Hcorr).
@@ -152,7 +152,7 @@ Proof.
       destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards (_ & _ & Hhead0): play_log_head_wf Hplay.
       forwards Heqg0: is_global_head_unique HwfG Hhead0 Hhead. subst g0.
-      forwards Hcflog: conflict_free_last_inv Hcf.
+      forwards Hrflog: race_free_last_inv Hrf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
       forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
@@ -172,17 +172,17 @@ Proof.
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
-    forwards Hcflog: conflict_free_last_inv Hcf.
+    forwards Hrflog: race_free_last_inv Hrf.
     destruct (classic (x \in Volatiles)) as [Hxvol | Hnv].
     * (* volatile read: always a pull (fast-forward to [g]), regardless of
          [D[t]] -- a volatile variable is never pending in a delta *)
       asserts Hdt: (t \indom D). { applys HdomD Htin. }
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       asserts Hlcf: (lin_conflict_free (D[t]) (TC[t]) g G).
-      { applys lin_conflict_free_holds Hwf Hcflog Hplay Hdt HtTC. }
+      { applys lin_conflict_free_holds Hwf Hrflog Hplay Hdt HtTC. }
       asserts Hexfilter: (exists tw log', LibList.filter (fun e => writes_variable x e) log = log' & event_write tw x v).
       { exists t' log'0. exact Hfilter. }
-      forwards Hlv: is_latest_value_after_volatile_pull Hwf Hcflog Hplay Hxvol Hexfilter.
+      forwards Hlv: is_latest_value_after_volatile_pull Hwf Hrflog Hplay Hxvol Hexfilter.
       exists. split;
         [ applys (>> StepReadVolatile Hbinds H5 Hxvol Hhead Hlcf Hlv)
         | simpls* ].
@@ -192,7 +192,7 @@ Proof.
         asserts Hdt: (t \indom D). { applys HdomD Htin. }
         asserts Hbdi: (binds (D[t]) x (D[t][x])).
         { applys* binds_of_indom_read Hin. }
-        forwards (log'' & Hfilt2): conflict_free_last_local_write Hcflog Hplay Hdt Hbdi.
+        forwards (log'' & Hfilt2): race_free_last_local_write Hrflog Hplay Hdt Hbdi.
         rewrite Hfilter in Hfilt2.
         forwards (_ & Heqw): last_eq_last_inv Hfilt2. inverts Heqw.
         exists. split; [ applys StepReadLocal Hbinds; [ eassumption | exact Hnv | exact Hbdi ] |].
@@ -200,7 +200,7 @@ Proof.
       { (* global (committed) read: [x] is visible as the latest committed value *)
         lets [_ Hback]: Hrun t. forwards* (Hms & Hmne): Hback.
         asserts Hwfr: (wf_log (log & event_read t x v)). { applys wf_log_read_last Hms Hmne Hwf. }
-        forwards Hlv: (>> last_global_write_latest_value Hnv Hcf Hwfr Hplay Hnin Hfilter).
+        forwards Hlv: (>> last_global_write_latest_value Hnv Hrf Hwfr Hplay Hnin Hfilter).
         exists. split; [ applys StepReadGlobal Hbinds; [ eassumption | exact Hnv | exact Hnin | exact Hlv ] |].
         simpls*. }
   - (* StepWrite *)
@@ -210,7 +210,7 @@ Proof.
     lets Htin: (indom_of_binds Hbinds).
     forwards (ts0 & e0 & Hbd): Hdelta Htin.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
-    forwards Hcflog: conflict_free_last_inv Hcf.
+    forwards Hrflog: race_free_last_inv Hrf.
     destruct (classic (x \in Volatiles)) as [Hxvol | Hnv].
     * (* volatile write: conflict-check then commit in one step, mirroring
          [StepEnd]'s [global_commit] handling but on a diff pre-updated with
@@ -220,8 +220,8 @@ Proof.
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       asserts Hlcf: (lin_conflict_free (D[t][x := v]) (TC[t]) g G).
       { applys lin_conflict_free_add_var.
-        - applys lin_conflict_free_holds Hwf Hcflog Hplay Hdt HtTC.
-        - applys (>> global_head_change_set_empty_conflict_free Hwf Hcf Hplay Hxvol Hdt HtTC). }
+        - applys lin_conflict_free_holds Hwf Hrflog Hplay Hdt HtTC.
+        - applys (>> global_head_change_set_empty_race_free Hwf Hrf Hplay Hxvol Hdt HtTC). }
       forwards (g' & Hfresh): exists_commit_fresh HwfG.
       asserts (T' & G' & Heq): (exists T' G', global_commit t g g'
           (T[t := (state_running, te_exp e, D[t][x := v], TC[t])]) G = (T', G')).
@@ -257,7 +257,7 @@ Proof.
       destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards (_ & _ & Hhead0): play_log_head_wf Hplay.
       forwards Heqg0: is_global_head_unique HwfG Hhead0 Hhead. subst g0.
-      forwards Hcflog: conflict_free_last_inv Hcf.
+      forwards Hrflog: race_free_last_inv Hrf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
       forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
@@ -305,7 +305,7 @@ Proof.
       destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards (_ & _ & Hhead0): play_log_head_wf Hplay.
       forwards Heqg0: is_global_head_unique HwfG Hhead0 Hhead. subst g0.
-      forwards Hcflog: conflict_free_last_inv Hcf.
+      forwards Hrflog: race_free_last_inv Hrf.
       lets HtT: (indom_of_binds Hbinds').
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
       forwards* Heqt: binds_inj Hbinds' Hbdt. inverts Heqt.
@@ -321,7 +321,7 @@ Proof.
       destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards (_ & _ & Hhead0): play_log_head_wf Hplay.
       forwards Heqg0: is_global_head_unique HwfG Hhead0 Hhead. subst g0.
-      forwards Hcflog: conflict_free_last_inv Hcf.
+      forwards Hrflog: race_free_last_inv Hrf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
       forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
@@ -344,7 +344,7 @@ Proof.
       destruct HdescL as (_ & _ & _ & _ & _ & _ & (D & TC & g0 & CH & Hplay & Hdelta & HdomD & HdomTC)).
       forwards (_ & _ & Hhead0): play_log_head_wf Hplay.
       forwards Heqg0: is_global_head_unique HwfG Hhead0 Hhead. subst g0.
-      forwards Hcflog: conflict_free_last_inv Hcf.
+      forwards Hrflog: race_free_last_inv Hrf.
       lets HtT: (indom_of_binds Hbinds).
       forwards (ts0 & e0 & Hbdt): Hdelta HtT.
       forwards* Heqt: binds_inj Hbinds Hbdt. inverts Heqt.
@@ -365,7 +365,7 @@ Theorem linear_sound :
     match cfgSh, cfgL with
     | (TSh, _, LSh), (TL, _, LL) => matching_threads TSh TL /\ LSh = LL
     end ->
-    conflict_free log' ->
+    race_free log' ->
     LoggingLinear.step (cfgL, log) (cfgL', log') ->
     exists cfgSh',
       LoggingSharedMemory.step (cfgSh, log) (cfgSh', log') /\
@@ -373,7 +373,7 @@ Theorem linear_sound :
         | (TSh', _, LSh'), (TL', _, LL') => matching_threads TSh' TL' /\ LSh' = LL'
         end.
 Proof.
-  introv Hwf HdescSh HdescL Hmatch Hcf Hstep.
+  introv Hwf HdescSh HdescL Hmatch Hrf Hstep.
   destruct cfgSh as ((Tsh & Hp) & Lsh).
   inverts Hstep;
     destruct Hmatch as (Hsame & ->);
@@ -399,10 +399,10 @@ Proof.
       forwards~ (ts & e' & Hbinds'): Hdelta t.
       asserts* ->: (d = D[t]).
       apply Hwrite.
-      forwards Hcf': conflict_free_last_inv Hcf.
+      forwards Hrf': race_free_last_inv Hrf.
       forwards* Hbinds'': HdomD t.
       exists t.
-      applys* conflict_free_last_local_write Hcf' Hplay Hbinds''.
+      applys* race_free_last_local_write Hrf' Hplay Hbinds''.
     * clears HdescSh HdescL.
       simpls*.
   + (* StepReadGlobal *)
@@ -425,7 +425,7 @@ Proof.
       }
       asserts* Hdom: (t \indom T).
       forwards~ Hdom': HdomTC Hdom.
-      applys* conflict_free_last_global_write Hcf Hwfr Hplay.
+      applys* race_free_last_global_write Hrf Hwfr Hplay.
     * clears HdescSh HdescL.
       simpls*.
   + (* StepReadVolatile: the SharedMemory side has no volatile distinction, so
@@ -438,8 +438,8 @@ Proof.
       forwards (HwfG0 & _ & Hhead0): play_log_head_wf Hplay.
       forwards Heqg0: is_global_head_unique HwfG0 Hhead0 Hheadr. subst g0.
       apply Hwrite.
-      forwards Hcf': conflict_free_last_inv Hcf.
-      applys* is_latest_value_after_volatile_pull_inv Hwf Hcf' Hplay.
+      forwards Hrf': race_free_last_inv Hrf.
+      applys* is_latest_value_after_volatile_pull_inv Hwf Hrf' Hplay.
     * clears HdescSh HdescL.
       simpls*.
   + (* StepWrite *)
@@ -504,11 +504,11 @@ Theorem linear_equiv :
     match cfgSh, cfgL with
     | (TSh, _, LSh), (TL, _, LL) => matching_threads TSh TL /\ LSh = LL
     end ->
-    conflict_free log' ->
+    race_free log' ->
       (exists cfgSh', LoggingSharedMemory.step (cfgSh, log) (cfgSh', log')) <->
       (exists cfgL', LoggingLinear.step (cfgL, log) (cfgL', log')).
 Proof.
-  introv Hwf HdescSh HdescL Hmatch Hcf.
+  introv Hwf HdescSh HdescL Hmatch Hrf.
   split.
   - introv (cfgSh' & Hstep).
     forwards* (cfgL' & Hstep' & _): linear_complete.

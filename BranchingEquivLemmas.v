@@ -152,16 +152,16 @@ Proof.
           | applys no_commit_event_snoc wHns; intros Hgt; simpl in Hgt; congruence ]. }
 Qed.
 
-Lemma conflict_free_last_local_write :
+Lemma race_free_last_local_write :
   forall log D TC G LC VC CH t x v,
-    conflict_free log ->
+    race_free log ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     t \indom D ->
     binds D[t] x v ->
     exists log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t x v.
 Proof.
-  introv Hcf Hplay Hdom Hdelta.
-  hint conflict_free_last_inv.
+  introv Hrf Hplay Hdom Hdelta.
+  hint race_free_last_inv.
   inductions Hplay.
   - (* PlayNil: D = empty *)
     rew_dom. rew_set in Hdom.
@@ -211,7 +211,7 @@ Proof.
              (LibList.Nth (length log) (log & event_write t0 x0 v0) (event_write t0 x0 v0)).
            { applys* Nth_app_r'. }
            asserts Hacc: (accesses_variable x0 (event_write t0 x0 v0)). { reflexivity. }
-           forwards Hhb: Hcf HN0f Hnth Hacc Hlt0.
+           forwards Hhb: Hrf HN0f Hnth Hacc Hlt0.
            asserts Hns0f:
              (forall p ep, m0 <= p ->
                 LibList.Nth p (log & event_write t0 x0 v0) ep ->
@@ -223,7 +223,7 @@ Proof.
         -- rew_list*.
     + (* PlayWriteVolatile: flushes D[t0] to empty, so [t = t0] is impossible
          given [binds D[t] x v]; the cross-thread case is otherwise the same
-         conflict-freedom argument as [PlayWrite]. *)
+         race-freedom argument as [PlayWrite]. *)
       asserts Hneq: (t <> t0).
       { intros contra.
         subst. rewrite read_update_same in Hdelta.
@@ -245,7 +245,7 @@ Proof.
            (LibList.Nth (length log) (log & event_write t0 x0 v0) (event_write t0 x0 v0)).
          { applys* Nth_app_r'. }
          asserts Hacc: (accesses_variable x0 (event_write t0 x0 v0)). { reflexivity. }
-         forwards Hhb: Hcf HN0f Hnth Hacc Hlt0.
+         forwards Hhb: Hrf HN0f Hnth Hacc Hlt0.
          asserts Hns0f:
            (forall p ep, m0 <= p ->
               LibList.Nth p (log & event_write t0 x0 v0) ep ->
@@ -2341,7 +2341,7 @@ Qed.
    [x]. *)
 Lemma last_write_maximal :
   forall log D TC G LC VC CH m tm x vm f ef cs,
-    conflict_free log ->
+    race_free log ->
     wf_log log ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     LibList.Nth m log (event_write tm x vm) ->
@@ -2354,7 +2354,7 @@ Lemma last_write_maximal :
     forall c' v', graph_writes G c' x v' -> ancestor G cs c' -> c' = cs.
 Proof.
   intros log D TC G LC VC CH m tm x vm f ef cs.
-  intros Hcf Hwf Hplay HNm Hlast HNf Hgf Hcfe Hmf HNchf Hncf Hcsw c' v' Hc'w Hanc.
+  intros Hrf Hwf Hplay HNm Hlast HNf Hgf Hcfe Hmf HNchf Hncf Hcsw c' v' Hc'w Hanc.
   destruct (classic (c' = cs)) as [Heq | Hne]; [ exact Heq | exfalso ].
   forwards (f' & ef' & tw' & kw' & HNfCH & HNflog & Hgtf' & Hcef' & Hkwlt & HNkw & Hncl):
     graph_writes_flush Hplay Hc'w.
@@ -2372,7 +2372,7 @@ Proof.
       - subst kw'. forwards Heqw: Nth_functional HNkw HNm. inverts Heqw. false.
       - nat_math. }
     asserts Hacc: (accesses_variable x (event_write tm x vm)). { simpl. reflexivity. }
-    forwards Hhb: (>> Hcf HNkw HNm Hacc Hkwltm).
+    forwards Hhb: (>> Hrf HNkw HNm Hacc Hkwltm).
     asserts Hgtw: (get_thread (event_write tw' x v') = tw'). { reflexivity. }
     asserts Hgtmne: (get_thread (event_write tm x vm) <> tw'). { simpl. auto. }
     forwards (f'' & ef'' & Hkwf'' & HNf'' & Hgf'' & Hcef'' & Hhbf''):
@@ -2391,7 +2391,7 @@ Qed.
 Lemma last_write_visible_commit :
   forall log D TC G LC VC CH m n tm x vm en,
     wf_log log ->
-    conflict_free log ->
+    race_free log ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     LibList.Nth m log (event_write tm x vm) ->
     (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
@@ -2400,7 +2400,7 @@ Lemma last_write_visible_commit :
     hb log m n ->
     is_latest_value G (TC[get_thread en]) x vm.
 Proof.
-  introv Hwf Hcf Hplay HNm Hlast Hndom HNn Hhb.
+  introv Hwf Hrf Hplay HNm Hlast Hndom HNn Hhb.
   forwards [((Hidom & _) & _) |
             (f & ef & cs & Hmf & HNf & Hgf & Hcfe & HNchf & Hcsw & Hncf)]:
     (>> last_write_committed_or_delta Hwf Hplay HNm Hlast).
@@ -2438,7 +2438,7 @@ Proof.
     + (* maximality *)
       introv Hc'w Hanc1 Hanc2.
       assert (Hmax: forall c'' v'', graph_writes G c'' x v'' -> ancestor G cs c'' -> c'' = cs).
-      { applys (>> last_write_maximal Hcf Hwf Hplay HNm Hlast HNf Hgf Hcfe Hmf
+      { applys (>> last_write_maximal Hrf Hwf Hplay HNm Hlast HNf Hgf Hcfe Hmf
                    HNchf Hncf Hcsw). }
       applys Hmax Hc'w Hanc1.
 Qed.
@@ -2446,7 +2446,7 @@ Qed.
 Lemma hb_last_write_visible :
   forall log D TC G LC VC CH m n tm x vm en,
     wf_log log ->
-    conflict_free log ->
+    race_free log ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     LibList.Nth m log (event_write tm x vm) ->
     (forall k tk vk, LibList.Nth k log (event_write tk x vk) -> k <= m) ->
@@ -2455,8 +2455,8 @@ Lemma hb_last_write_visible :
     hb log m n ->
     is_latest_value G (TC[get_thread en]) x vm.
 Proof.
-  introv Hwf Hcf Hplay HNm Hlast Hndom HNn Hhb.
-  applys (>> last_write_visible_commit Hwf Hcf Hplay HNm Hlast Hndom HNn Hhb).
+  introv Hwf Hrf Hplay HNm Hlast Hndom HNn Hhb.
+  applys (>> last_write_visible_commit Hwf Hrf Hplay HNm Hlast Hndom HNn Hhb).
 Qed.
 
 (* [is_latest_value] guarantees a committed x-write exists, hence the x-write
@@ -2489,7 +2489,7 @@ Qed.
    step that inserts a key into a delta is [PlayWrite], which requires
    [x \notin Volatiles]; every other step either leaves [D] untouched or
    resets a whole thread's delta to [empty]. Phrased via [binds] plus
-   [t \indom D] (mirroring every call site, and [conflict_free_last_local_write]'s
+   [t \indom D] (mirroring every call site, and [race_free_last_local_write]'s
    own convention) to sidestep reasoning about reading an unbound key of the
    OUTER [deltas] map, whose [Inhab] default is classically opaque. *)
 Lemma volatile_notin_delta :
@@ -2815,18 +2815,18 @@ Proof.
 Qed.
 
 (* Any two writers of the SAME variable [x] are ancestor-comparable in a
-   conflict-free log. Extracted from (and reused by)
-   [conflict_free_log_describes_conflict_free_graph]. *)
+   race-free log. Extracted from (and reused by)
+   [race_free_log_describes_conflict_free_graph]. *)
 Lemma graph_writes_comparable :
   forall log D TC G LC VC CH x va vb ha hbb,
     wf_log log ->
-    conflict_free log ->
+    race_free log ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     graph_writes G ha x va ->
     graph_writes G hbb x vb ->
     ancestor G ha hbb \/ ancestor G hbb ha.
 Proof.
-  introv Hwf Hcf Hplay Hgwa Hgwb.
+  introv Hwf Hrf Hplay Hgwa Hgwb.
   forwards (fa & ea & ta & ka & HNfaCH & HNfalog & Hgta & Hcea & Hkalt & HNka & Hncla):
     graph_writes_flush Hplay Hgwa.
   forwards (fb & eb & tb & kb & HNfbCH & HNfblog & Hgtb & Hceb & Hkblt & HNkb & Hnclb):
@@ -2842,7 +2842,7 @@ Proof.
       applys Htne. congruence. }
     destruct (classic (ka < kb)) as [Hlt | Hge].
     + asserts Hacc: (accesses_variable x (event_write tb x vb)). reflexivity.
-      forwards Hhbab: (>> Hcf HNka HNkb Hacc Hlt).
+      forwards Hhbab: (>> Hrf HNka HNkb Hacc Hlt).
       left.
       applys (>> write_hb_flush_ancestor Hwf Hplay
         (conj HNka (conj HNfaCH (conj HNfalog (conj Hgta (conj Hcea (conj Hkalt Hncla))))))
@@ -2850,7 +2850,7 @@ Proof.
         Htne Hhbab).
     + asserts Hltba: (kb < ka). nat_math.
       asserts Hacc: (accesses_variable x (event_write ta x va)). reflexivity.
-      forwards Hhbba: (>> Hcf HNkb HNka Hacc Hltba).
+      forwards Hhbba: (>> Hrf HNkb HNka Hacc Hltba).
       right. asserts Htne2: (tb <> ta). { intros HH. apply Htne. symmetry. exact HH. }
       applys (>> write_hb_flush_ancestor Hwf Hplay
         (conj HNkb (conj HNfbCH (conj HNfblog (conj Hgtb (conj Hceb (conj Hkblt Hnclb))))))
@@ -2904,7 +2904,7 @@ Qed.
 Lemma is_latest_value_after_volatile_pull :
   forall log D TC G LC VC CH t x v c'',
     wf_log log ->
-    conflict_free log ->
+    race_free log ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     t \indom D ->
     t \indom TC ->
@@ -2914,7 +2914,7 @@ Lemma is_latest_value_after_volatile_pull :
     (exists tw log', LibList.filter (fun e => writes_variable x e) log = log' & event_write tw x v) ->
     is_latest_value (graph_merge G (vc_read VC x) (TC[t]) c'') c'' x v.
 Proof.
-  introv Hwf Hcf Hplay Htd Httc Hfresh Hcneq Hxvol (tw & log' & Hfilter).
+  introv Hwf Hrf Hplay Htd Httc Hfresh Hcneq Hxvol (tw & log' & Hfilter).
   forwards Hpgwf: play_log_graph_wf Hplay.
   destruct Hpgwf as (Hedge & HTC & _ & _ & _).
   asserts Hp1dom: (graph_indom G (vc_read VC x)). { applys vc_read_graph_indom Hplay. }
@@ -2946,7 +2946,7 @@ Proof.
       asserts Hf3lelw: (f3 <= lw). { applys Hlast HNkw3. }
       asserts Hcelw: (is_commit_event (event_write tw x v)). { simpl. exact Hxvol. }
       asserts Hne': (c_lw <> c''0). { intro Heq. applys Hne (eq_sym Heq). }
-      forwards [Hc | Hc]: graph_writes_comparable Hwf Hcf Hplay Hgwlw Hgw3.
+      forwards [Hc | Hc]: graph_writes_comparable Hwf Hrf Hplay Hgwlw Hgw3.
       + (* [ancestor c_lw c''0] *)
         forwards Hlwltf3: (>> ancestor_creation_order Hplay HNlwCH HNlw Hcelw HNf3CH HNf3log Hcef3 Hc Hne').
         nat_math.
@@ -2978,7 +2978,7 @@ Qed.
 Lemma is_latest_value_after_volatile_pull_inv :
   forall log D TC G LC VC CH t x v c'',
     wf_log log ->
-    conflict_free log ->
+    race_free log ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     t \indom D ->
     t \indom TC ->
@@ -2988,7 +2988,7 @@ Lemma is_latest_value_after_volatile_pull_inv :
     is_latest_value (graph_merge G (vc_read VC x) (TC[t]) c'') c'' x v ->
     exists tw log', LibList.filter (fun e => writes_variable x e) log = log' & event_write tw x v.
 Proof.
-  introv Hwf Hcf Hplay Hdt HtTC Hfresh Hcneq Hxvol Hlv.
+  introv Hwf Hrf Hplay Hdt HtTC Hfresh Hcneq Hxvol Hlv.
   destruct (last_case (LibList.filter (fun e => writes_variable x e) log)) as [Hnil | (e0 & l0 & Heq)].
   - exfalso.
     destruct Hlv as (cw & Hgw & Hanc & Hmax).
@@ -3006,7 +3006,7 @@ Proof.
       forwards (_ & Hwv0): mem_filter_inv Hmeme0. exact Hwv0. }
     destruct e0 as [ | | | tw0 x0 v0 | | | | ]; try (simpl in Hwv; contradiction).
     simpl in Hwv. subst x0.
-    forwards Hval: (>> is_latest_value_after_volatile_pull Hwf Hcf Hplay Hdt HtTC Hfresh Hcneq Hxvol).
+    forwards Hval: (>> is_latest_value_after_volatile_pull Hwf Hrf Hplay Hdt HtTC Hfresh Hcneq Hxvol).
     { exists tw0 l0. exact Heq. }
     destruct Hlv as (cw1 & Hgw1 & Hanc1 & Hmax1).
     destruct Hval as (cw2 & Hgw2 & Hanc2 & Hmax2).
@@ -3014,7 +3014,7 @@ Proof.
     asserts Hcw2ne: (cw2 <> c''). { intro Heqc. subst cw2. applys graph_writes_graph_merge_same_false Hgw2. }
     forwards Hgw1': graph_writes_graph_merge_inv Hcw1ne Hgw1.
     forwards Hgw2': graph_writes_graph_merge_inv Hcw2ne Hgw2.
-    forwards [Hc | Hc]: graph_writes_comparable Hwf Hcf Hplay Hgw1' Hgw2'.
+    forwards [Hc | Hc]: graph_writes_comparable Hwf Hrf Hplay Hgw1' Hgw2'.
     + (* [ancestor G cw1 cw2]: [cw1]'s own maximality collapses [cw2] onto it *)
       forwards Hcmerge: ancestor_graph_merge Hc.
       forwards Heqcw: Hmax1 cw2 v0 Hgw2 Hcmerge Hanc2.
@@ -3030,14 +3030,14 @@ Proof.
 Qed.
 
 (* A data-race-free log replays to a conflict-free commit graph. *)
-Theorem conflict_free_log_describes_conflict_free_graph :
+Theorem race_free_log_describes_conflict_free_graph :
   forall log D TC G LC VC CH,
     wf_log log ->
-    conflict_free log ->
+    race_free log ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     conflict_free_graph G.
 Proof.
-  introv Hwf Hcf Hplay.
+  introv Hwf Hrf Hplay.
   forwards Hpgwf: play_log_graph_wf Hplay.
   intros h1 h2 Hd1 Hd2.
   unfold conflict_free_merge. rew_set. intros x Hmem1 Hmem2.
@@ -3060,7 +3060,7 @@ Proof.
     - unfold graph_binds. applys binds_of_indom_read Hdomhb; (reflexivity || typeclass).
     - applys binds_of_indom_read Hidomb; (reflexivity || typeclass). }
   asserts Hcmp: (ancestor (C, P) ha hbb \/ ancestor (C, P) hbb ha).
-  { applys graph_writes_comparable Hwf Hcf Hplay Hgwa Hgwb. }
+  { applys graph_writes_comparable Hwf Hrf Hplay Hgwa Hgwb. }
   destruct Hcmp as [Hc | Hc].
   - applys Hnanca2. applys ancestor_trans Hc Hancb2.
   - applys Hnancb1. applys ancestor_trans Hc Hanca1.
@@ -3072,19 +3072,19 @@ Qed.
    ([is_latest_value]).
 
    This is the shared core that both directions of the global-read equivalence
-   build on: [branching_complete] uses it as is, and [conflict_free_last_global_write]
+   build on: [branching_complete] uses it as is, and [race_free_last_global_write]
    (its converse) recovers it via [is_latest_value_inj]. *)
 Lemma last_global_write_latest_value :
   forall log D TC G LC VC CH t x vr v t' log',
     x \notin Volatiles ->
-    conflict_free (log & event_read t x vr) ->
+    race_free (log & event_read t x vr) ->
     wf_log (log & event_read t x vr) ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     x \notindom (D[t]) ->
     LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v ->
     is_latest_value G (TC[t]) x v.
 Proof.
-  introv Hnvol Hcf Hwf Hplay Hndom Hfilter.
+  introv Hnvol Hrf Hwf Hplay Hndom Hfilter.
   forwards (mw & HNL & Hlast): last_write_position Hfilter.
   forwards HLlt: Nth_inbound HNL.
   (* Play the read as a no-op, and place the write and the read in [log & read]. *)
@@ -3100,30 +3100,30 @@ Proof.
   { introv HNk. forwards [HN' | (Hpe & Hee)]: Nth_last_inv HNk.
     - applys Hlast HN'.
     - inverts Hee. }
-  (* conflict-freedom: the last write happens-before the read (they share [x]). *)
+  (* race-freedom: the last write happens-before the read (they share [x]). *)
   asserts Hacc: (accesses_variable x (event_read t x vr)). { reflexivity. }
-  forwards Hhb: Hcf HNLf HNread Hacc HLlt.
+  forwards Hhb: Hrf HNLf HNread Hacc HLlt.
   (* the last writer has flushed [x]. *)
   asserts HndomL: (x \notindom (D[t'])).
   { destruct (classic (t' = t)) as [-> | Hne].
     - exact Hndom.
     - applys last_writer_not_in_delta Hplayf HNLf Hlastf HNread Hhb.
       simpl. congruence. }
-  forwards Hlv: (>> hb_last_write_visible Hwf Hcf Hplayf HNLf Hlastf HndomL HNread Hhb).
+  forwards Hlv: (>> hb_last_write_visible Hwf Hrf Hplayf HNLf Hlastf HndomL HNread Hhb).
   simpl in Hlv. exact Hlv.
 Qed.
 
-(* Global counterpart of [conflict_free_last_local_write]: when [t] reads [x]
+(* Global counterpart of [race_free_last_local_write]: when [t] reads [x]
    globally (it is not in [t]'s delta), the value [t] sees ([is_latest_value]) is
    the last write to [x] in the log. This is the converse of
    [last_global_write_latest_value].
 
-   [conflict_free_graph G] is not assumed: it is recovered from the conflict-free
-   [log] via [conflict_free_log_describes_conflict_free_graph]. *)
-Lemma conflict_free_last_global_write :
+   [conflict_free_graph G] is not assumed: it is recovered from the race-free
+   [log] via [race_free_log_describes_conflict_free_graph]. *)
+Lemma race_free_last_global_write :
   forall log D TC G LC VC CH t x v c,
     x \notin Volatiles ->
-    conflict_free (log & event_read t x v) ->
+    race_free (log & event_read t x v) ->
     wf_log (log & event_read t x v) ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     x \notindom (D[t]) ->
@@ -3132,15 +3132,15 @@ Lemma conflict_free_last_global_write :
     is_latest_value G c x v ->
     exists t' log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v.
 Proof.
-  introv Hnvol Hcf Hwf Hplay Hndom Hdom HTC Hval.
+  introv Hnvol Hrf Hwf Hplay Hndom Hdom HTC Hval.
   (* [conflict_free_graph] is recovered from the conflict-free log. *)
   forwards Hwf': wf_log_last_inv Hwf.
-  forwards Hcflog: conflict_free_last_inv Hcf.
-  forwards Hcfg: conflict_free_log_describes_conflict_free_graph Hwf' Hcflog Hplay.
+  forwards Hrflog: race_free_last_inv Hrf.
+  forwards Hcfg: race_free_log_describes_conflict_free_graph Hwf' Hrflog Hplay.
   (* [is_latest_value] ensures there is an x-write; take the last one. *)
   forwards (lw & tL & vL & Hfilter): is_latest_value_log_write Hplay Hval.
   (* the forward direction: [t] sees the last write's value [vL] *)
-  forwards Hlv: (>> last_global_write_latest_value Hnvol Hcf Hwf Hplay Hndom Hfilter).
+  forwards Hlv: (>> last_global_write_latest_value Hnvol Hrf Hwf Hplay Hndom Hfilter).
   rewrite HTC in Hlv.
   (* and [is_latest_value] is functional, so [vL = v] *)
   forwards ->: is_latest_value_inj Hcfg Hlv Hval.
@@ -3151,11 +3151,11 @@ Qed.
    [t]-readable log, the value [t] sees for [x] in the commit graph
    ([is_latest_value]) is exactly the value of the last write to [x] in the log.
    This simply packages the two directions -- [last_global_write_latest_value] and
-   its converse [conflict_free_last_global_write]. *)
+   its converse [race_free_last_global_write]. *)
 Theorem is_latest_value_iff_last_write :
   forall log D TC G LC VC CH t x v,
     x \notin Volatiles ->
-    conflict_free (log & event_read t x v) ->
+    race_free (log & event_read t x v) ->
     wf_log (log & event_read t x v) ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     x \notindom (D[t]) ->
@@ -3163,30 +3163,30 @@ Theorem is_latest_value_iff_last_write :
     (is_latest_value G (TC[t]) x v
      <-> exists t' log', LibList.filter (fun e => writes_variable x e) log = log' & event_write t' x v).
 Proof.
-  introv Hnvol Hcf Hwf Hplay Hndom Hdom. split.
+  introv Hnvol Hrf Hwf Hplay Hndom Hdom. split.
   - introv Hval.
-    applys (>> conflict_free_last_global_write Hnvol Hcf Hwf Hplay Hndom Hdom); [ reflexivity | exact Hval ].
+    applys (>> race_free_last_global_write Hnvol Hrf Hwf Hplay Hndom Hdom); [ reflexivity | exact Hval ].
   - introv (t' & log' & Hfilter).
-    applys (>> last_global_write_latest_value Hnvol Hcf Hwf Hplay Hndom Hfilter).
+    applys (>> last_global_write_latest_value Hnvol Hrf Hwf Hplay Hndom Hfilter).
 Qed.
 
 (* A graph commit [c] that writes a variable [j] still uncommitted by a thread [t]
    must be an ancestor of [t]'s commit [TC[t]].  Otherwise [t]'s pending write to
    [j] and [c]'s committed write to [j] would be two writes to the same variable
-   that are not happens-before related -- a data race, which [conflict_free]
+   that are not happens-before related -- a data race, which [race_free]
    forbids.  (Structurally this mirrors [write_hb_flush_ancestor], but the [t]
    side of the race is a pending delta write rather than a flushed one.) *)
 Lemma delta_writer_ancestor :
   forall log D TC G LC VC CH t j vt c vc,
     wf_log log ->
-    conflict_free log ->
+    race_free log ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     t \indom D ->
     binds (D[t]) j vt ->
     graph_writes G c j vc ->
     ancestor G c (TC[t]).
 Proof.
-  introv Hwf Hcf Hplay Htdom Hbd Hgw.
+  introv Hwf Hrf Hplay Htdom Hbd Hgw.
   (* [t]'s uncommitted [j]-write at [kt], with no [t]-commit at or after [kt]. *)
   forwards (kt & HNkt & Hns): delta_is_uncommitted_write Hplay Htdom Hbd.
   asserts Hgtt: (get_thread (event_write t j vt) = t). reflexivity.
@@ -3202,7 +3202,7 @@ Proof.
   destruct (classic (tc = t)) as [Hteq | Htne].
   - (* [c] is [t]'s own commit, hence below [TC[t]]. *)
     rewrite Hteq in Hgtc. applys CH_ancestor_TC Hwf Hplay HNfclog Hgtc HNfcCH.
-  - (* [tc <> t]: use conflict-freedom to order the two [j]-writes. *)
+  - (* [tc <> t]: use race-freedom to order the two [j]-writes. *)
     asserts Hkne: (kt <> kc).
     { intros Heq. subst kc. forwards Heqw: Nth_functional HNkt HNkc.
       inverts Heqw. apply Htne. reflexivity. }
@@ -3210,7 +3210,7 @@ Proof.
     + (* [kt < kc]: the cross-thread [hb] forces a [t]-commit at or after [kt]. *)
       exfalso.
       asserts Hacc: (accesses_variable j (event_write tc j vc)). reflexivity.
-      forwards Hhb: (>> Hcf HNkt HNkc Hacc Hlt).
+      forwards Hhb: (>> Hrf HNkt HNkc Hacc Hlt).
       asserts Hgtcne: (get_thread (event_write tc j vc) <> t). { simpl. exact Htne. }
       forwards (f'' & ef'' & Hktf'' & HNf'' & Hgf'' & Hcef'' & Hhbf''):
         hb_cross_thread_flush Hhb HNkt Hgtt HNkc Hgtcne.
@@ -3218,7 +3218,7 @@ Proof.
     + (* [kc < kt]: [tc]'s flush is below [TC[t]], so is its earlier commit [c]. *)
       asserts Hltba: (kc < kt). nat_math.
       asserts Hacc: (accesses_variable j (event_write t j vt)). reflexivity.
-      forwards Hhb: (>> Hcf HNkc HNkt Hacc Hltba).
+      forwards Hhb: (>> Hrf HNkc HNkt Hacc Hltba).
       asserts Hgtc2: (get_thread (event_write tc j vc) = tc). reflexivity.
       asserts Hgtne: (get_thread (event_write t j vt) <> tc).
       { simpl. intros HH. apply Htne. symmetry. exact HH. }
@@ -3240,7 +3240,7 @@ Qed.
    commit [TC[t]] already descends from [x]'s currently-stored commit
    [vc_read VC x] -- i.e. pulling [vc_read VC x] into [t]'s own diff (now
    including [x]) cannot conflict on [x] itself. Any change-set witness [c]
-   for [x] must be a writer of [x] (from [x \indom C[c]]); [conflict_free]
+   for [x] must be a writer of [x] (from [x \indom C[c]]); [race_free]
    (applied at [c]'s own flush/write position, which -- since [x] is
    volatile -- IS the write itself, [Hncl] ruling out any strictly earlier
    flush) gives [hb] from that position to [t]'s write; the LAST hop of that
@@ -3250,16 +3250,16 @@ Qed.
    [Nth_functional] if the witness collapses to [c]'s own position) turns
    that into graph ancestry, and [CH_ancestor_TC] finishes by relating [q]'s
    own recorded commit to [TC[t]]. *)
-Lemma vc_read_change_set_empty_conflict_free :
+Lemma vc_read_change_set_empty_race_free :
   forall log D TC G LC VC CH t x v,
     wf_log log ->
-    conflict_free (log & event_write t x v) ->
+    race_free (log & event_write t x v) ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     x \in Volatiles ->
     t \indom TC ->
     x \notin change_set G (TC[t]) (vc_read VC x).
 Proof.
-  introv Hwf0 Hcf Hplay Hxvol Httc.
+  introv Hwf0 Hrf Hplay Hxvol Httc.
   forwards Hpgwf: play_log_graph_wf Hplay.
   destruct Hpgwf as (Hedge & _).
   forwards Hvcdom: (>> vc_read_graph_indom x Hplay).
@@ -3286,7 +3286,7 @@ Proof.
   asserts HNenapp: (LibList.Nth (length log) (log & event_write t x v) (event_write t x v)).
   { applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ]. }
   asserts Hacc: (accesses_variable x (event_write t x v)). { reflexivity. }
-  forwards Hhb: (>> Hcf HNkwapp HNenapp Hacc Hflt).
+  forwards Hhb: (>> Hrf HNkwapp HNenapp Hacc Hflt).
   forwards (q & eq & Hqlt & HNqapp & Hgq & Hdisj): hb_last_write_same_thread_witness Hhb HNenapp.
   forwards [HNqlog | (mm & Heqm & _)]: Nth_app_inv HNqapp.
   2:{ nat_math. }
@@ -3327,21 +3327,21 @@ Qed.
 (* The merge obligation discharged: when a running thread [t] (pending delta
    [D[t]], commit [TC[t]]) merges with another commit [hc], the merge is
    conflict-free.  The [change_set]/[change_set] half is the keystone
-   ([conflict_free_log_describes_conflict_free_graph]); the [dom (D[t])] half is
+   ([race_free_log_describes_conflict_free_graph]); the [dom (D[t])] half is
    [delta_writer_ancestor] (no pending write of [t] can sit in the change set
    merged in from [hc]). *)
 Theorem conflict_free_merge_holds :
   forall log D TC G LC VC CH t hc,
     wf_log log ->
-    conflict_free log ->
+    race_free log ->
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
     t \indom D ->
     t \indom TC ->
     graph_indom G hc ->
     conflict_free_merge (D[t]) (TC[t]) hc G.
 Proof.
-  introv Hwf Hcf Hplay Htd Htc Hhc.
-  forwards Hcfg: conflict_free_log_describes_conflict_free_graph Hwf Hcf Hplay.
+  introv Hwf Hrf Hplay Htd Htc Hhc.
+  forwards Hcfg: race_free_log_describes_conflict_free_graph Hwf Hrf Hplay.
   forwards Hpgwf: play_log_graph_wf Hplay.
   destruct G as (C & P). destruct Hpgwf as (Hedge & HTCdom & _).
   asserts Htcdom: (graph_indom (C, P) (TC[t])). { applys HTCdom Htc. }
@@ -3357,7 +3357,7 @@ Proof.
       - applys binds_of_indom_read Hjc; (reflexivity || typeclass). }
     asserts Hbdj: (binds (D[t]) j (D[t][j])).
     { applys binds_of_indom_read Hjd; (reflexivity || typeclass). }
-    applys Hnanc. applys (>> delta_writer_ancestor Hwf Hcf Hplay Htd Hbdj Hgwc).
+    applys Hnanc. applys (>> delta_writer_ancestor Hwf Hrf Hplay Htd Hbdj Hgwc).
   - (* [j] lies in both change sets: contradicts conflict-freedom of the graph. *)
     forwards Hcfm: Hcfg Htcdom Hhc.
     unfold conflict_free_merge in Hcfm. rew_set in Hcfm.
@@ -3373,7 +3373,7 @@ Qed.
    thread, or to acquire a free lock, and the corresponding merge check fails --
    so the step is blocked, and not by a deadlock, since the joinee has terminated
    / the lock is free -- then the log already exhibits a data race
-   ([~ conflict_free log], i.e. some write and a later access to the same variable
+   ([~ race_free log], i.e. some write and a later access to the same variable
    are not ordered by happens-before).
    =========================================================================== *)
 
@@ -3385,9 +3385,9 @@ Theorem branching_join_conflict_sound :
     step_ul e K (eff_join t') ->
     binds T t' (state_terminated, te_ret r, empty, c') ->
     ~ conflict_free_merge d c c' G ->
-    ~ conflict_free log.
+    ~ race_free log.
 Proof.
-  introv Hwf Hdesc Hbt Hul Hbt' Hncf Hcflog.
+  introv Hwf Hdesc Hbt Hul Hbt' Hncf Hrflog.
   forwards (HwfG & _ & Hcommits & Hlockcommits & _): describes_wf_cfg Hdesc.
   forwards Hcdom: Hcommits Hbt'.
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
@@ -3398,10 +3398,10 @@ Proof.
   forwards (ts0 & e0 & Hbd): Hdelta Htin.
   forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
   apply Hncf.
-  applys (>> conflict_free_merge_holds Hwf Hcflog Hplay HtD HtTC Hcdom).
+  applys (>> conflict_free_merge_holds Hwf Hrflog Hplay HtD HtTC Hcdom).
 Qed.
 
-Theorem branching_lock_conflict_sound :
+Theorem branching_lock_race_sound :
   forall log T G L V t e d c K l c',
     wf_log log ->
     describes log (T, G, L, V) ->
@@ -3409,9 +3409,9 @@ Theorem branching_lock_conflict_sound :
     step_ul e K (eff_lock l) ->
     binds L l (ls_free, c') ->
     ~ conflict_free_merge d c c' G ->
-    ~ conflict_free log.
+    ~ race_free log.
 Proof.
-  introv Hwf Hdesc Hbt Hul Hbl Hncf Hcflog.
+  introv Hwf Hdesc Hbt Hul Hbl Hncf Hrflog.
   forwards (HwfG & _ & Hcommits & Hlockcommits & _): describes_wf_cfg Hdesc.
   forwards Hcdom: Hlockcommits Hbl.
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
@@ -3422,7 +3422,7 @@ Proof.
   forwards (ts0 & e0 & Hbd): Hdelta Htin.
   forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
   apply Hncf.
-  applys (>> conflict_free_merge_holds Hwf Hcflog Hplay HtD HtTC Hcdom).
+  applys (>> conflict_free_merge_holds Hwf Hrflog Hplay HtD HtTC Hcdom).
 Qed.
 
 (* Reading a volatile [x] is a pull against [vc_read V x], graph-indom by
@@ -3438,9 +3438,9 @@ Theorem branching_volatile_read_conflict_sound :
     step_ul e K (eff_read x) ->
     x \in Volatiles ->
     ~ conflict_free_merge d c (vc_read V x) G ->
-    ~ conflict_free log.
+    ~ race_free log.
 Proof.
-  introv Hwf Hdesc Hbt Hul Hxvol Hncf Hcflog.
+  introv Hwf Hdesc Hbt Hul Hxvol Hncf Hrflog.
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
     (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
   subst V.
@@ -3451,21 +3451,21 @@ Proof.
   forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
   forwards Hcdom: (>> vc_read_graph_indom x Hplay).
   apply Hncf.
-  applys (>> conflict_free_merge_holds Hwf Hcflog Hplay HtD HtTC Hcdom).
+  applys (>> conflict_free_merge_holds Hwf Hrflog Hplay HtD HtTC Hcdom).
 Qed.
 
 (* Writing a volatile [x] additionally folds [x] itself into the checked
    diff ([d[x := v]], per the write-write race fix), so -- unlike the other
    four synchronisations -- this is NOT a direct corollary of
    [conflict_free_merge_holds] alone: [x]'s own membership in the OTHER
-   party's change set is exactly the fact [vc_read_change_set_empty_conflict_free]
+   party's change set is exactly the fact [vc_read_change_set_empty_race_free]
    supplies, but only relative to the log EXTENDED with this very write ([HbVolatile]
    being write-then-read-only, unlike locks/joins/reads there is no rule making
-   [t]'s not-yet-logged pull of [x] unconditionally consistent with [conflict_free
+   [t]'s not-yet-logged pull of [x] unconditionally consistent with [race_free
    log] alone -- see the discussion on [ancestor_pos_hb] in BranchingOOTA.v).
    Concretely: if the check fails, appending this very write would ALREADY
-   break conflict-freedom -- matching exactly the guard [branching_complete]
-   relies on ([BranchingEquiv.v]) to admit a real [conflict_free (log &
+   break race-freedom -- matching exactly the guard [branching_complete]
+   relies on ([BranchingEquiv.v]) to admit a real [race_free (log &
    event_write t x v)] step. *)
 Theorem branching_volatile_write_conflict_sound :
   forall log T G L V t e d c K x v,
@@ -3475,9 +3475,9 @@ Theorem branching_volatile_write_conflict_sound :
     step_ul e K (eff_write x v) ->
     x \in Volatiles ->
     ~ conflict_free_merge d[x := v] c (vc_read V x) G ->
-    ~ conflict_free (log & event_write t x v).
+    ~ race_free (log & event_write t x v).
 Proof.
-  introv Hwf Hdesc Hbt Hul Hxvol Hncf Hcflog.
+  introv Hwf Hdesc Hbt Hul Hxvol Hncf Hrflog.
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
     (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
   subst V.
@@ -3487,9 +3487,9 @@ Proof.
   forwards (ts0 & e0 & Hbd): Hdelta Htin.
   forwards* Heq: binds_inj Hbt Hbd. inverts Heq.
   forwards Hcdom: (>> vc_read_graph_indom x Hplay).
-  forwards Hcflog0: conflict_free_last_inv Hcflog.
+  forwards Hrflog0: race_free_last_inv Hrflog.
   apply Hncf.
   applys conflict_free_merge_add_var.
-  - applys (>> conflict_free_merge_holds Hwf Hcflog0 Hplay HtD HtTC Hcdom).
-  - applys (>> vc_read_change_set_empty_conflict_free Hwf Hcflog Hplay Hxvol HtTC).
+  - applys (>> conflict_free_merge_holds Hwf Hrflog0 Hplay HtD HtTC Hcdom).
+  - applys (>> vc_read_change_set_empty_race_free Hwf Hrflog Hplay Hxvol HtTC).
 Qed.
