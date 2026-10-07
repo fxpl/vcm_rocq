@@ -224,37 +224,35 @@ Proof.
       forwards~ Heq: binds_update_same_inv Hbinds.
       inverts* Heq.
     + forwards*: binds_update_neq_inv Hbinds.
-  - unfolds pull_volatile, do_merge.
-    replace (T[t]) with (state_running, te_exp e, d, c) in H11 by forwards*: read_of_binds T t.
+  - unfolds push_volatile, do_commit.
+    rewrite read_update_same in H11.
     inverts H11.
-    unfolds push_volatile, do_commit.
-    rewrite~ read_update_same in H14.
     asserts Hvcindom: (graph_indom G (vc_read V x)).
     { unfold vc_read, read_default. case_if as Hcase.
       - applys HdomVC. applys* binds_of_indom_read.
       - auto_star. }
-    inverts H14.
+    asserts Hwf1: (wf_graph (graph_commit G c c' d[x:=v])).
+    { apply* graph_commit_wf. }
     splits.
-    + apply* graph_commit_wf.
-      apply* graph_merge_wf.
-    + apply* graph_commit_indom.
-    + introv Hbinds.
+    { applys graph_merge_wf Hwf1 H10.
+      { apply graph_commit_indom. exact Hvcindom. }
+      { apply graph_commit_indom_same. } }
+    { apply graph_merge_indom. apply graph_commit_indom. exact HrootIndom. }
+    { introv Hbinds.
       destruct (classic (t = t0)).
-      * subst.
-        forwards~ Heq: binds_update_same_inv Hbinds.
-        inverts* Heq.
-      * forwards~ Hbinds1: binds_update_neq_inv Hbinds.
+      { subst. forwards~ Heq: binds_update_same_inv Hbinds. inverts Heq.
+        apply graph_merge_indom. apply graph_commit_indom_same. }
+      { forwards~ Hbinds1: binds_update_neq_inv Hbinds.
         forwards~ Hbinds2: binds_update_neq_inv Hbinds1.
         forwards~ Hbinds3: binds_update_neq_inv Hbinds2.
-        forwards* Hbinds4: binds_update_neq_inv Hbinds3.
-    + introv Hbinds. apply* graph_commit_indom.
-    + intros y cy Hbinds.
+        apply graph_merge_indom. apply graph_commit_indom. applys HdomT Hbinds3. } }
+    { introv Hbinds. apply graph_merge_indom. apply graph_commit_indom. applys HdomL Hbinds. }
+    { intros y cy Hbinds.
       destruct (classic (y = x)).
-      * subst.
-        forwards~ Heq: binds_update_same_inv Hbinds.
-        inverts* Heq.
-      * forwards~ Hbinds': binds_update_neq_inv Hbinds.
-        apply* graph_commit_indom.
+      { subst. forwards~ Heq: binds_update_same_inv Hbinds. inverts Heq.
+        apply graph_merge_indom_same. }
+      { forwards~ Hbinds': binds_update_neq_inv Hbinds.
+        apply graph_merge_indom. apply graph_commit_indom. applys HdomVC Hbinds'. } }
   - unfolds push_thread, do_commit.
     asserts* Hneq: (t <> t').
     rewrite~ read_update_neq in H10.
@@ -973,14 +971,11 @@ Proof.
       * introv Hmem.
         rew_dom.
         rew_set in Hmem. branches; auto_star.
-  - (* StepWriteVolatile: log' = log & event_write t x v, T' = T[t := running K(void)] via pull+push *)
+  - (* StepWriteVolatile: log' = log & event_write t x v, T' = T[t := running K(void)] via commit then merge *)
     lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
-    unfolds pull_volatile, do_merge.
-    replace (T[t]) with (state_running, te_exp e, d, c) in H8 by forwards*: read_of_binds T t.
-    inverts H8.
     unfolds push_volatile, do_commit.
-    rewrite~ read_update_same in H11.
-    inverts H11.
+    rewrite~ read_update_same in H8.
+    inverts H8.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts* HtinX: (t \indom T).
@@ -998,19 +993,16 @@ Proof.
       forwards* Heq: binds_inj Hbinds_delta.
       asserts Hd: (D[t] = d). { congruence. }
       asserts Htc: (TC[t] = c). { congruence. }
-      asserts Hvceq: (vc_read V x = vc_read VC x).
-      { rewrite Hveq. reflexivity. }
-      rewrite Hvceq in H10.
-      exists (D[t := empty]) (TC[t := c'']) LC (VC[x := c'']). eexists. splits*.
+      subst VC.
+      exists (D[t := empty]) (TC[t := c']) LC (V[x := c'']). eexists. splits*.
       * applys PlaySnoc Hplay.
-        rewrite Hvceq.
         apply (PlayWriteVolatile _ _ _ _ _ t x v d c c' c''); auto.
         -- apply HdomD in Htin. erewrite* binds_eq_indom_read.
         -- apply HdomTC in Htin. erewrite* binds_eq_indom_read.
       * intros t0 Hin.
         destruct (classic (t0 = t)) as [->|Hneq].
         -- asserts Hd_new: ((D[t := empty])[t] = empty). { rew_map*. }
-           asserts Htc_new: ((TC[t := c''])[t] = c''). { rew_map*. }
+           asserts Htc_new: ((TC[t := c'])[t] = c'). { rew_map*. }
            rewrite Hd_new, Htc_new.
            exists state_running (K void). apply binds_update_same.
         -- forwards~ Hin1: indom_update_inv Hin.
@@ -1019,15 +1011,11 @@ Proof.
            destruct Hin2 as [->|Hin2]. { congruence. }
            forwards~ Hin3: indom_update_inv Hin2.
            destruct Hin3 as [->|Hin3]. { congruence. }
-           forwards~ Hin4: indom_update_inv Hin3.
-           destruct Hin4 as [->|Hin4]. { congruence. }
-           forwards (ts' & e'' & Hbinds'): Hdelta t0 Hin4.
+           forwards (ts' & e'' & Hbinds'): Hdelta t0 Hin3.
            asserts Hd0: ((D[t := empty])[t0] = D[t0]). { rew_map*. }
-           asserts Htc0: ((TC[t := c''])[t0] = TC[t0]). { rew_map*. }
+           asserts Htc0: ((TC[t := c'])[t0] = TC[t0]). { rew_map*. }
            rewrite Hd0, Htc0.
-           exists ts' e''.
-           apply~ binds_update_neq. apply~ binds_update_neq.
-           apply~ binds_update_neq. apply~ binds_update_neq.
+           exists ts' e''. apply~ binds_update_neq. apply~ binds_update_neq. apply~ binds_update_neq.
       * introv Hmem.
         asserts*: (t \indom D).
         rew_dom.

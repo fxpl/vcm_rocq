@@ -48,19 +48,20 @@ Inductive play_event : event -> (deltas * commits * graph * lcommits * volatiles
     binds D t d ->
     play_event (event_write t x v) (D, TC, G, LC, VC) (D[t := d[x := v]], TC, G, LC, VC)
 | PlayWriteVolatile :
-  (* a volatile write is a pull then push, matching
-     [Branching.StepWriteVolatile]: merge [x]'s stored commit in, then
-     immediately commit the whole diff (with the new write folded in) and
-     record the fresh commit as [x]'s new stored commit. *)
+  (* a volatile write pushes without pulling, matching
+     [Branching.StepWriteVolatile]: commit the whole diff (with the new write
+     folded in) onto the thread's own commit [c], leaving the thread at [c'],
+     then advance [x]'s stored commit to an empty merge [c''] of its previous
+     value and [c']. *)
   forall D TC G LC VC t x v d c c' c'',
     x \in Volatiles ->
     binds D t d ->
     binds TC t c ->
     commit_fresh G c' ->
-    commit_fresh (graph_merge G (vc_read VC x) c c') c'' ->
+    commit_fresh (graph_commit G c c' (d[x := v])) c'' ->
     play_event (event_write t x v) (D, TC, G, LC, VC)
-      (D[t := empty], TC[t := c''],
-       graph_commit (graph_merge G (vc_read VC x) c c') c' c'' (d[x := v]),
+      (D[t := empty], TC[t := c'],
+       graph_merge (graph_commit G c c' (d[x := v])) (vc_read VC x) c' c'',
        LC, VC[x := c''])
 | PlayStart :
   forall D TC G LC VC t,
@@ -188,17 +189,14 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
     step_ul e K (eff_write x v) ->
     x \notin Volatiles ->
     step ((T, G, L, V), log) ((T[t := (state_running, K void, d[x := v], c)], G, L, V), log & event_write t x v)
-| StepWriteVolatile : forall T T' T'' G G' G'' L V V' t e d c c' c'' K x v log,
+| StepWriteVolatile : forall T T' G G' L V V' t e d c c' c'' K x v log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_write x v) ->
     x \in Volatiles ->
-    conflict_free_merge d[x := v] c (vc_read V x) G ->
     commit_fresh G c' ->
-    pull_volatile t x c' T G V = (T', G') ->
-    binds T' t (state_running, te_exp e, d, c') ->
-    commit_fresh G' c'' ->
-    push_volatile t x c'' (T'[t := (state_running, te_exp e, d[x := v], c')]) G' V = (T'', G'', V') ->
-    step ((T, G, L, V), log) ((T''[t := (state_running, K void, empty, c'')], G'', L, V'), log & event_write t x v)
+    commit_fresh (graph_commit G c c' d[x := v]) c'' ->
+    push_volatile t x c' c'' (T[t := (state_running, te_exp e, d[x := v], c)]) G V = (T', G', V') ->
+    step ((T, G, L, V), log) ((T'[t := (state_running, K void, empty, c')], G', L, V'), log & event_write t x v)
 | StepSpawn : forall T T' G G' L V t (t' : tid) e d c c' K e' log,
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_spawn e') ->

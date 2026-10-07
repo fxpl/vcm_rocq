@@ -13,18 +13,24 @@ From Vcm Require Import Graph.
 (*   - a thread stages its writes locally (in a diff) until it next         *)
 (*     synchronises, and reads either its own staged value or the latest    *)
 (*     value visible at its own commit;                                     *)
-(*   - synchronising with a thread, lock or a volatile variable is a PULL,  *)
-(*     PUSH, or for a volatile write both:                                  *)
+(*   - synchronising with a thread, lock or a volatile variable is a PULL  *)
+(*     or a PUSH:                                                           *)
 (*       * pull merges the other party's branch into the thread's own       *)
 (*         (a fresh commit with both as parents), so the thread now sees    *)
 (*         everything the thread/lock/volatile has seen;                    *)
 (*       * push commits the thread's staged diff (a fresh commit with the   *)
 (*         thread's branch as parent) and hands that fresh commit to the    *)
 (*         thread/lock/volatile as its new branch;                          *)
-(*   - a commit may only be created when doing so is CONFLICT-FREE: no      *)
-(*     variable it touches may have changed on a branch the thread has not  *)
-(*     yet observed. This only needs checking on pulling; a push does not   *)
-(*     affect another thread until it pulls.                                *)
+(*     a volatile read is a pull; a volatile write is a push that leaves    *)
+(*     the volatile variable ahead of the writing thread: the thread        *)
+(*     pushes its diff (with the write folded in) and merges that commit    *)
+(*     with the old commit of the volatile, so it keeps every earlier       *)
+(*     write as an ancestor.                                                *)
+(*   - with the exception of volatile writes, a commit may only be created  *)
+(*     when doing so is CONFLICT-FREE: no variable it touches may have      *)
+(*     changed on a branch the thread has not yet observed. This only       *)
+(*     needs checking on pulling; a push does not affect another thread     *)
+(*     until it pulls.                                                      *)
 (*                                                                          *)
 (* Linear.v specialises this to a single shared branch instead of one per   *)
 (* thread/lock/volatile.                                                    *)
@@ -114,14 +120,17 @@ Definition pull_volatile (t : tid) (x : var) (h_new : commit)
   let h := vc_read V x in
   do_merge t h h_new T G.
 
-(* Writing a volatile *pushes*: commit the thread's diff (folding in the new
-   write) and record the fresh commit as [x]'s new stored commit, exactly
-   like [push_lock]. *)
-Definition push_volatile (t : tid) (x : var) (h_new : commit)
+(* Writing a volatile *pushes*: the thread's diff (folding in the
+   new write) is committed as [h_new], a child of the thread's OWN
+   commit, and the thread's commit stays at [h_new]. [x]'s stored
+   commit then advances to [h_merge], an empty merge of [x]'s
+   previous stored commit and [h_new], so it keeps every earlier
+   write of [x] as an ancestor. *)
+Definition push_volatile (t : tid) (x : var) (h_new h_merge : commit)
     (T : threads) (G : graph) (V : volatiles)
     : threads * graph * volatiles :=
   let '(T', G') := do_commit t h_new T G in
-  (T', G', V[x := h_new]).
+  (T', graph_merge G' (vc_read V x) h_new h_merge, V[x := h_merge]).
 
 Inductive step : cfg -> cfg -> Prop :=
 | StepStart : forall T G L V t e d h,
@@ -161,17 +170,14 @@ Inductive step : cfg -> cfg -> Prop :=
     step_ul e K (eff_write x v) ->
     x \notin Volatiles ->
     step (T, G, L, V) (T[t := (state_running, K void, d[x := v], h)], G, L, V)
-| StepWriteVolatile : forall T T' T'' G G' G'' L V V' t e d h h' h'' K x v,
+| StepWriteVolatile : forall T T' G G' L V V' t e d h h' h'' K x v,
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_write x v) ->
     x \in Volatiles ->
-    conflict_free_merge d[x := v] h (vc_read V x) G ->
     commit_fresh G h' ->
-    pull_volatile t x h' T G V = (T', G') ->
-    binds T' t (state_running, te_exp e, d, h') ->
-    commit_fresh G' h'' ->
-    push_volatile t x h'' (T'[t := (state_running, te_exp e, d[x := v], h')]) G' V = (T'', G'', V') ->
-    step (T, G, L, V) (T''[t := (state_running, K void, empty, h'')], G'', L, V')
+    commit_fresh (graph_commit G h h' d[x := v]) h'' ->
+    push_volatile t x h' h'' (T[t := (state_running, te_exp e, d[x := v], h)]) G V = (T', G', V') ->
+    step (T, G, L, V) (T'[t := (state_running, K void, empty, h')], G', L, V')
  | StepSpawn : forall T T' G G' L V t (t' : tid) e d h h' K e',
     binds T t (state_running, te_exp e, d, h) ->
     step_ul e K (eff_spawn e') ->

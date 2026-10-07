@@ -404,44 +404,27 @@ Proof.
     forwards* Heqdt: binds_inj Hbinds Hbd. inverts Heqdt.
     forwards Hrflog: race_free_last_inv Hrf.
     destruct (classic (x \in Volatiles)) as [Hxvol | Hnv].
-    * (* volatile write: pull-then-push, mirroring the volatile-read pull, then
-         a commit fold-in of the new value -- no [is_latest_value] obligation
-         on this side, unlike the read case. *)
-      asserts Hdt: (t \indom D). { applys HdomD Htin. }
+    * (* volatile write: commit the diff (with the new value folded in), then
+         merge the commit into [x]'s stored commit -- no conflict check and no
+         [is_latest_value] obligation on this side, unlike the read case. *)
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
-      forwards Hcdom: (>> vc_read_graph_indom x Hplay).
-      asserts Hmerge: (conflict_free_merge (D[t][x := v]) (TC[t]) (vc_read V x) G).
-      { applys conflict_free_merge_add_var.
-        - subst. applys (>> conflict_free_merge_holds Hwf Hrflog Hplay Hdt HtTC Hcdom).
-        - subst. applys (>> vc_read_change_set_empty_race_free Hwf Hrf Hplay Hxvol HtTC). }
-      forwards (c' & Hfresh1): exists_commit_fresh HwfG.
-      asserts Hpull: (pull_volatile t x c' T G V = (T[t := (state_running, te_exp e, D[t], c')],
-                                                       graph_merge G (vc_read V x) (TC[t]) c')).
-      { unfolds pull_volatile, do_merge.
-        forwards Hread: read_of_binds Hbinds.
-        replace T[t] with (state_running, te_exp e, D[t], TC[t]).
-        reflexivity. }
-      asserts Hbinds': (binds (T[t := (state_running, te_exp e, D[t], c')]) t
-                            (state_running, te_exp e, D[t], c')).
-      { apply binds_update_same. }
       forwards Hpgwf: play_log_graph_wf Hplay.
       destruct Hpgwf as (_ & HTCindomAll & _ & _ & _).
       asserts HTCindom: (graph_indom G (TC[t])). { applys HTCindomAll HtTC. }
-      asserts* HVCindomG: (graph_indom G (vc_read V x)).
-      asserts HwfG': (wf_graph (graph_merge G (vc_read V x) (TC[t]) c')).
-      { applys graph_merge_wf HwfG Hfresh1 HVCindomG HTCindom. }
-      forwards (c'' & Hfresh2): exists_commit_fresh HwfG'.
+      forwards (c' & Hfresh1): exists_commit_fresh HwfG.
+      asserts HwfG1: (wf_graph (graph_commit G (TC[t]) c' (D[t][x := v]))).
+      { applys graph_commit_wf HwfG Hfresh1 HTCindom. }
+      forwards (c'' & Hfresh2): exists_commit_fresh HwfG1.
       asserts Hpush:
-        (push_volatile t x c''
-           (T[t := (state_running, te_exp e, D[t], c')][t := (state_running, te_exp e, D[t][x := v], c')])
-           (graph_merge G (vc_read V x) (TC[t]) c') V
-         = (T[t := (state_running, te_exp e, D[t], c')][t := (state_running, te_exp e, D[t][x := v], c')]
-              [t := (state_running, te_exp e, empty, c'')],
-            graph_commit (graph_merge G (vc_read V x) (TC[t]) c') c' c'' (D[t][x := v]),
+        (push_volatile t x c' c''
+           (T[t := (state_running, te_exp e, D[t][x := v], TC[t])]) G V
+         = (T[t := (state_running, te_exp e, D[t][x := v], TC[t])]
+             [t := (state_running, te_exp e, empty, c')],
+            graph_merge (graph_commit G (TC[t]) c' (D[t][x := v])) (vc_read V x) c' c'',
             V[x := c''])).
       { unfold push_volatile, do_commit. rewrite read_update_same. reflexivity. }
       exists. splits;
-        [ applys (>> LoggingBranching.StepWriteVolatile Hbinds H5 Hxvol Hmerge Hfresh1 Hpull Hbinds' Hfresh2 Hpush)
+        [ applys (>> LoggingBranching.StepWriteVolatile Hbinds H5 Hxvol Hfresh1 Hfresh2 Hpush)
         | repeat rewrite update_update; simpls*].
     * (* non-volatile write: unconditional, as before *)
       exists. splits; [ applys LoggingBranching.StepWrite Hbinds; [ eassumption | exact Hnv ] | simpls* ].
@@ -696,11 +679,7 @@ Proof.
   + (* StepWriteVolatile: symmetric to [StepReadVolatile] above, but simpler --
        a [SharedMemory.StepWrite] always matches, with no [is_latest_value]
        obligation on this side. *)
-    match goal with Hb0 : binds T t (state_running, te_exp e, d, c) |- _ => rename Hb0 into Hbd0 end.
-    match goal with Hp0 : pull_volatile t x c' T G V = (T', G') |- _ => rename Hp0 into Hpull end.
-    match goal with Hp0 : push_volatile t x c'' ?TT G' V = (T'', G'', V') |- _ => rename Hp0 into Hpush end.
-    unfold pull_volatile, do_merge in Hpull.
-    rewrite (read_of_binds Hbd0) in Hpull. cbn in Hpull. inverts Hpull.
+    match goal with Hp0 : push_volatile t x c' c'' ?TT G V = (T', G', V') |- _ => rename Hp0 into Hpush end.
     unfold push_volatile, do_commit in Hpush.
     rewrite read_update_same in Hpush. cbn in Hpush. inverts Hpush.
     clears HdescSh HdescB.

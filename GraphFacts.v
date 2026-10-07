@@ -1011,3 +1011,48 @@ Proof.
       { forwards (Ha & _): Hedge HeP. applys commit_fresh_not_indom Hfresh Ha. } }
     exact Heqcc. }
 Qed.
+
+(* The freshly committed commit is a sink in the new graph. *)
+Lemma graph_commit_new_sink :
+  forall G c cf d,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G cf ->
+    graph_indom G c ->
+    forall z, ancestor (graph_commit G c cf d) cf z -> z = cf.
+Proof.
+  introv Hedge Hfresh Hcdom Hanc.
+  applys ancestor_no_out_edge Hanc.
+  intros y Hey. destruct G as (C & P). unfolds graph_edge, graph_commit.
+  rew_set in Hey.
+  destruct Hey as [Heq | HeP].
+  { inverts Heq. applys commit_fresh_not_indom Hfresh Hcdom. }
+  { forwards (Ha & _): Hedge HeP. applys commit_fresh_not_indom Hfresh Ha. }
+Qed.
+
+(* Merging a fresh commit [h] between any [p1] and a SINK writer [c] of [i] makes
+   [c] the latest [i]-value at [h]: nothing can sit strictly between [c] and [h]
+   (an [i]-writer there would be a proper descendant of the sink [c]). [p1] may
+   hold any number of incomparable earlier [i]-writers; this is the push-only
+   volatile write, where racing writes are not ordered. *)
+Lemma is_latest_value_graph_merge_fresh_writer :
+  forall G p1 c h i v,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G h ->
+    graph_indom G c ->
+    graph_writes G c i v ->
+    (forall z, ancestor G c z -> z = c) ->
+    is_latest_value (graph_merge G p1 c h) h i v.
+Proof.
+  introv Hedge Hfresh Hcdom Hw Hsinkc.
+  exists c. splits.
+  { applys graph_writes_graph_merge; [ | exact Hw ].
+    intro Heq. subst c. applys commit_fresh_not_indom Hfresh Hcdom. }
+  { apply ancestor_graph_merge_edge_l. }
+  { intros y v' Hw' Hanc1 Hanc2.
+    asserts Hsinkh: (forall z, ancestor G h z -> z = h).
+    { applys commit_fresh_sink Hedge Hfresh. }
+    destruct (classic (y = h)) as [-> | Hyh].
+    { false. applys graph_writes_graph_merge_same_false Hw'. }
+    forwards Hanc1': ancestor_graph_merge_inv Hsinkh Hyh Hanc1.
+    applys Hsinkc Hanc1'. }
+Qed.

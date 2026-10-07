@@ -395,6 +395,10 @@ Proof.
         asserts Hbxv: (binds (d[wj := ww]) x (d[x])).
         { applys~ binds_update_neq Hbxd. }
         eexists. rewrite <- Hcxeq. rewrite read_update_same.
+        apply graph_writes_graph_merge.
+        { intro Heq. subst.
+          match goal with Hf : commit_fresh (graph_commit _ _ _ _) _ |- _ =>
+            applys commit_fresh_not_indom Hf; apply graph_commit_indom_same end. }
         applys graph_writes_graph_commit_new Hbxv.
       * (* PlayUnlock ut ul, [t = ut] *)
         subst t.
@@ -454,14 +458,14 @@ Proof.
             [ intro Heq; subst cw; applys commit_fresh_not_indom Hfr Hin | ] end;
           first [ applys graph_writes_graph_commit_inv Hne Hgw
                 | applys graph_writes_graph_merge_inv Hne Hgw
-                | (* PlayWriteVolatile: two fresh layers (merge then commit) *)
+                | (* PlayWriteVolatile: two fresh layers (commit then merge) *)
                   match goal with
-                  | Hfr2 : commit_fresh (graph_merge G' _ _ _) ?cc'' |- _ =>
+                  | Hfr2 : commit_fresh (graph_commit G' _ _ _) ?cc'' |- _ =>
                     asserts Hne2: (cw <> cc'');
                     [ intro Heq2; subst cw; applys commit_fresh_not_indom Hfr2;
-                      applys~ graph_merge_indom Hin
-                    | forwards Hgw1: graph_writes_graph_commit_inv Hne2 Hgw;
-                      applys graph_writes_graph_merge_inv Hne Hgw1 ]
+                      applys~ graph_commit_indom Hin
+                    | forwards Hgw1: graph_writes_graph_merge_inv Hne2 Hgw;
+                      applys graph_writes_graph_commit_inv Hne Hgw1 ]
                   end ].
       }
       forwards* (kL & HkLlt & HNkL & Hnc & Hnw): (>> IHHplay Hwf0 HNfch0 HNf0 Hgf Hcf Hgw0).
@@ -509,7 +513,17 @@ Proof.
            ([x0 <> wj], same as the Spawn/Unlock/End cases). *)
         subst tw.
         rewrite <- Hcxeq in Hgw. rewrite read_update_same in Hgw.
-        forwards Hbdd: graph_writes_graph_commit_same Hgw.
+        match type of Hgw with
+        | graph_writes (graph_merge _ _ _ ?hh) ?cc _ _ =>
+          asserts Hnec: (cc <> hh);
+          [ intro Heq;
+            match goal with Hf : commit_fresh (graph_commit _ _ _ _) hh |- _ =>
+              rewrite <- Heq in Hf;
+              applys commit_fresh_not_indom Hf; apply graph_commit_indom_same end
+          | ]
+        end.
+        forwards Hgw1: graph_writes_graph_merge_inv Hnec Hgw.
+        forwards Hbdd: graph_writes_graph_commit_same Hgw1.
         destruct (classic (x0 = wj)) as [Heqx | Hneqx].
         -- subst x0. forwards Heqv0: binds_update_same_inv Hbdd. subst v0.
            exists (length log). splits.
