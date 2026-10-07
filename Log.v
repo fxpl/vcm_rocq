@@ -174,8 +174,8 @@ Definition race_free (log : log) : Prop :=
    cross-thread happens-before edge -- which is why a write to a *volatile*
    variable counts too: [HbVolatile] makes it the source of a cross-thread
    edge to every later read of it, so [hb_preserves_thread] needs it
-   classified here, matching the operational "pull, then push" semantics of a
-   volatile write (see [Linear]/[Branching]). A write to a non-volatile
+   classified here, matching the operational semantics of a volatile write,
+   which commits the thread's diff (see [Linear]/[Branching]). A write to a non-volatile
    variable stays purely local (no [hb] edge reaches out of the thread), so
    it is not a commit event. *)
 Definition is_commit_event (e : event) : Prop :=

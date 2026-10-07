@@ -369,13 +369,12 @@ Proof.
     + subst t. rewrite read_update_same.
       forwards Hrd: read_of_binds Hf. rewrite <- Hrd. apply ancestor_graph_merge_edge_l.
     + rewrite read_update_neq by congruence. apply ancestor_refl.
-  - (* write t0 x v, volatile: a pull then push (merge then commit) *)
+  - (* write t0 x v, volatile: a commit onto the thread's own prior commit,
+       followed by the merge advancing [x]'s stored commit *)
     destruct (classic (t = t0)) as [Heqt | Hne].
     + subst t. rewrite read_update_same.
       forwards Hrd: read_of_binds Hbd. rewrite <- Hrd.
-      applys ancestor_trans.
-      * apply ancestor_graph_commit. apply ancestor_graph_merge_edge_l.
-      * apply ancestor_graph_commit_edge.
+      apply ancestor_graph_merge. apply ancestor_graph_commit_edge.
     + rewrite read_update_neq by congruence. apply ancestor_refl.
   - (* lock t0 ll *)
     destruct (classic (t = t0)) as [Heqt | Hne].
@@ -720,8 +719,10 @@ Qed.
 
 (* The volatile chain, simpler than the lock chain above since there is no
    "currently held" state to dominate through: every write-of-[x] commit is an
-   ancestor of the current [vc_read VC x], by chaining directly through each
-   subsequent write's own pull (merge) of the previous [vc_read VC x]. *)
+   ancestor of the current [vc_read VC x], because each write advances
+   [vc_read VC x] to an empty merge of its previous value and the write's own
+   commit, so no earlier write is ever shadowed. This holds even when writes of
+   [x] race and are mutually incomparable. *)
 Lemma write_ancestor_VC :
   forall log s0 D TC G LC VC CH m t1 x v cm,
     wf_log log ->
@@ -754,10 +755,8 @@ Proof.
            { unfold vc_read. apply read_default_update_same. }
            rewrite HVeq.
            apply ancestor_trans with (c' := vc_read VC' x).
-           ++ apply ancestor_graph_commit. apply ancestor_graph_merge. exact Hanc.
-           ++ apply ancestor_trans with (c' := c').
-              ** apply ancestor_graph_commit. apply ancestor_graph_merge_edge_r.
-              ** apply ancestor_graph_commit_edge.
+           ++ apply ancestor_graph_merge. apply ancestor_graph_commit. exact Hanc.
+           ++ apply ancestor_graph_merge_edge_r.
       * (* different event: [vc_read VC x] preserved, graph only grows *)
         asserts HVeq: (vc_read VC x = vc_read VC' x).
         { applys play_event_VC_preserved H.
@@ -775,7 +774,7 @@ Proof.
          asserts HVeq: (vc_read VC'[x:=c''] x = c'').
          { unfold vc_read. apply read_default_update_same. }
          rewrite HVeq.
-         apply ancestor_refl.
+         apply ancestor_graph_merge_edge_l.
 Qed.
 
 (* The three synchronisation edges: each mirrors the graph_merge / graph_commit
@@ -906,7 +905,7 @@ Qed.
 (* Volatile synchronisation: a write of a volatile [x] is an ancestor of every
    later read of [x], mirroring [hb_lock_pointer_ancestor] but through
    [write_ancestor_VC] (there is no "currently held" state, so every prior
-   write chains directly through [vc_read VC x], not just the last one). *)
+   write is an ancestor of [vc_read VC x], not just the last one). *)
 Lemma hb_volatile_pointer_ancestor :
   forall log s0 D TC G LC VC CH m n t1 t2 x v v' cm cn,
     wf_log log ->
@@ -1024,16 +1023,23 @@ Proof.
           forwards* (tw & m0 & HN): IHHplay;
           exists tw m0; rew_list; applys Nth_app_l HN ]
       end.
-    + (* PlayWriteVolatile: graph_commit, but the committed diff is
-         [d[x0:=v0]] (the just-written value folded in) rather than simply
-         the pre-existing delta [d], so [x = x0] needs its own case: the
-         just-appended event is directly the witness. *)
+    + (* PlayWriteVolatile: graph_merge wrapping graph_commit; the merge
+         commit carries no data, and the committed diff is [d[x0:=v0]] (the
+         just-written value folded in) rather than simply the pre-existing
+         delta [d], so [x = x0] needs its own case: the just-appended event is
+         directly the witness. *)
       match type of Hgw with
+      | graph_writes (graph_merge _ _ _ ?hh) _ _ _ =>
+        destruct (classic (cx = hh)) as [Hc0 | Hc0]
+      end.
+      { subst cx. false. applys graph_writes_graph_merge_same_false Hgw. }
+      forwards Hgw0: graph_writes_graph_merge_inv Hc0 Hgw.
+      match type of Hgw0 with
       | graph_writes (graph_commit _ _ ?ccp ?dd) _ _ _ =>
         destruct (classic (cx = ccp)) as [Hc | Hc]
       end.
       { subst cx.
-        forwards Hbdd: graph_writes_graph_commit_same Hgw.
+        forwards Hbdd: graph_writes_graph_commit_same Hgw0.
         destruct (classic (x = x0)) as [Hxeq | Hxneq].
         - subst x0.
           forwards ->: binds_update_same_inv Hbdd.
@@ -1047,14 +1053,9 @@ Proof.
             forwards (m' & HNm' & Hns'): delta_is_uncommitted_write Hp HtD Hbdd';
             exists tt m'; rew_list; applys Nth_app_l HNm'
           end. }
-      { forwards Hgw': graph_writes_graph_commit_inv Hc Hgw.
-        (* [Hgw'] is at the intermediate merge graph -- peel that too, since
-           its own fresh commit [c'] carries no data either. *)
-        destruct (classic (cx = c')) as [Hc2 | Hc2].
-        - subst cx. false. applys graph_writes_graph_merge_same_false Hgw'.
-        - forwards Hgw'': graph_writes_graph_merge_inv Hc2 Hgw'.
-          forwards* (tw & m0 & HN): IHHplay.
-          exists tw m0. rew_list. applys Nth_app_l HN. }
+      { forwards Hgw': graph_writes_graph_commit_inv Hc Hgw0.
+        forwards* (tw & m0 & HN): IHHplay.
+        exists tw m0. rew_list. applys Nth_app_l HN. }
     + (* PlayEnd: graph_commit *)
       match type of Hgw with
       | graph_writes (graph_commit _ _ ?ccp ?dd) _ _ _ =>
@@ -1145,14 +1146,14 @@ Proof.
     intro Heq; subst cs.
     match goal with Hf : commit_fresh _ _ |- _ => applys commit_fresh_not_indom Hf Hin end.
   - exact Hgw. (* PlayWrite *)
-  - (* PlayWriteVolatile: commit wrapping merge -- two layers to lift through *)
-    apply graph_writes_graph_commit.
+  - (* PlayWriteVolatile: merge wrapping commit -- two layers to lift through *)
+    apply graph_writes_graph_merge.
     + intro Heq; subst cs.
-      match goal with Hf : commit_fresh (graph_merge _ _ _ _) _ |- _ =>
-        applys commit_fresh_not_indom Hf; apply* graph_merge_indom end.
-    + apply graph_writes_graph_merge; [ | exact Hgw ].
+      match goal with Hf : commit_fresh (graph_commit _ _ _ _) _ |- _ =>
+        applys commit_fresh_not_indom Hf; apply* graph_commit_indom end.
+    + apply graph_writes_graph_commit; [ | exact Hgw ].
       intro Heq; subst cs.
-      match goal with Hf : commit_fresh _ _ |- _ => applys commit_fresh_not_indom Hf Hin end.
+      match goal with Hf : commit_fresh G' _ |- _ => applys commit_fresh_not_indom Hf Hin end.
   - exact Hgw. (* PlayStart *)
   - (* PlayEnd *)
     apply graph_writes_graph_commit; [ | exact Hgw ].
@@ -1311,6 +1312,10 @@ Proof.
               ** simpl; assumption.
               ** applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ].
               ** cbn [get_thread]. rewrite read_update_same.
+                 apply graph_writes_graph_merge.
+                 { intro Heq. subst.
+                   match goal with Hf : commit_fresh (graph_commit _ _ _ _) _ |- _ =>
+                     applys commit_fresh_not_indom Hf; apply graph_commit_indom_same end. }
                  applys graph_writes_graph_commit_new.
                  apply binds_update_neq; [ congruence | ].
                  match goal with Hbd : binds _ tm ?dstg |- binds ?dstg _ _ =>
@@ -1398,6 +1403,10 @@ Proof.
         -- simpl; assumption.
         -- applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ].
         -- cbn [get_thread]. rewrite read_update_same.
+           apply graph_writes_graph_merge.
+           { intro Heq. subst.
+             match goal with Hf : commit_fresh (graph_commit _ _ _ _) _ |- _ =>
+               applys commit_fresh_not_indom Hf; apply graph_commit_indom_same end. }
            applys graph_writes_graph_commit_new. apply binds_update_same.
         -- introv Hg Hgflt HNg Hgg.
            forwards [HNg0 | (HgN & _)]: Nth_last_inv HNg.
@@ -1525,19 +1534,23 @@ Proof.
       * introv Hl. apply indom_update_of_indom; (typeclass || applys HLC Hl).
       * introv Hx. apply indom_update_of_indom; (typeclass || applys HVC Hx).
       * unfolds graph_indom. rew_dom. rew_set. auto.
-    + (* PlayWriteVolatile t0 x: two layers -- graph_merge (C,P) (vc_read VC' x) c c'
-         then graph_commit _ c' c'' d[x:=v0]; TC[t0:=c''], VC'[x:=c''] *)
+    + (* PlayWriteVolatile t0 x: two layers -- graph_commit (C,P) c c' d[x:=v0]
+         then graph_merge _ (vc_read VC' x) c' c''; TC[t0:=c'], VC'[x:=c''] *)
       asserts HVCxindom: (graph_indom (C, P) (vc_read VC' x)).
       { unfold vc_read. destruct (classic (x \indom VC')) as [Hindom|Hnotin].
         - rewrite (read_default_indom Hindom). applys* HVC.
         - rewrite (read_default_notindom Hnotin). exact Hroot. }
       splits.
       * introv He. simpls. rew_set in He. destruct He as [He | [He | [He | He]]].
-        -- (* (c', c'') : the outer commit's own new edge *)
+        -- (* (c', c'') : the merge's edge from the committed write *)
            inverts He. split.
            ++ apply indom_update_of_indom; (typeclass || apply indom_update_same; typeclass).
            ++ apply indom_update_same; typeclass.
-        -- (* (c, c') : the inner merge's "own" edge *)
+        -- (* (vc_read VC' x, c'') : the merge's edge from [x]'s old commit *)
+           inverts He. split.
+           ++ apply indom_update_of_indom; (typeclass || (apply indom_update_of_indom; (typeclass || exact HVCxindom))).
+           ++ apply indom_update_same; typeclass.
+        -- (* (c, c') : the commit's own edge *)
            inverts He. split.
            ++ apply indom_update_of_indom;
                 (typeclass ||
@@ -1546,16 +1559,13 @@ Proof.
                    match goal with Hb : binds _ _ ?cc |- ?cc \indom _ =>
                      applys binds_graph_indom Hb HTC end))).
            ++ apply indom_update_of_indom; (typeclass || apply indom_update_same; typeclass).
-        -- (* (vc_read VC' x, c') : the inner merge's "other" edge *)
-           inverts He. split.
-           ++ apply indom_update_of_indom; (typeclass || (apply indom_update_of_indom; (typeclass || exact HVCxindom))).
-           ++ apply indom_update_of_indom; (typeclass || apply indom_update_same; typeclass).
         -- (* old edge *)
            forwards (Ha & Hb): Hedge He.
            split; (apply indom_update_of_indom; (typeclass || (apply indom_update_of_indom; (typeclass || assumption)))).
       * intros j Hj. forwards Hcase: indom_update_cases Hj.
         destruct (classic (j = t)) as [-> | Hne].
-        -- rewrite read_update_same. apply indom_update_same; typeclass.
+        -- rewrite read_update_same.
+           apply indom_update_of_indom; (typeclass || (apply indom_update_same; typeclass)).
         -- rewrite read_update_neq; [ | congruence ].
            apply indom_update_of_indom;
              (typeclass ||
@@ -1724,14 +1734,13 @@ Proof.
       * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
       * applys* IHHplay.
     + (* PlayWrite: [G] unchanged *) applys* IHHplay.
-    + (* PlayWriteVolatile: two layers (merge then commit) *)
-      asserts Hrootin1: (graph_indom (graph_merge G' (vc_read VC' x) c c') root_commit).
-      { destruct G' as (C0 & P0). unfolds graph_merge, graph_indom.
-        apply indom_update_of_indom; (exact Hrootin || typeclass). }
+    + (* PlayWriteVolatile: two layers (commit then merge) *)
+      asserts Hrootin1: (graph_indom (graph_commit G' c c' d[x:=v]) root_commit).
+      { apply graph_commit_indom. exact Hrootin. }
       destruct G' as (C0 & P0). unfolds graph_merge, graph_commit, graph_edge. simpl in He. rew_set in He.
       destruct He as [Heq | [Heq | [Heq | HeP]]].
       * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin1].
-      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
+      * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin1].
       * inverts Heq. false. applys commit_fresh_not_indom; [eassumption | exact Hrootin].
       * applys* IHHplay.
     + (* PlayStart: [G] unchanged *) applys* IHHplay.
@@ -1823,18 +1832,18 @@ Proof.
         [ assumption
         | exact HVCxindom
         | applys binds_graph_indom; [ eassumption | exact HTC ] ].
-    + (* PlayWriteVolatile: graph_commit wrapping graph_merge *)
+    + (* PlayWriteVolatile: graph_merge wrapping graph_commit *)
       asserts HVCxindom: (graph_indom (C, P) (vc_read VC' x)).
       { unfold vc_read. destruct (classic (x \indom VC')) as [Hindom|Hnotin].
         - rewrite (read_default_indom Hindom). applys* HVC.
         - rewrite (read_default_notindom Hnotin). exact Hroot. }
-      asserts Hmwf: (wf_graph (graph_merge (C, P) (vc_read VC' x) c c')).
-      { applys graph_merge_wf Hwf';
-          [ assumption
-          | exact HVCxindom
-          | applys binds_graph_indom; [ eassumption | exact HTC ] ]. }
-      applys graph_commit_wf Hmwf;
-        [ assumption | apply* graph_merge_indom_same ].
+      asserts Hcwf: (wf_graph (graph_commit (C, P) c c' d[x:=v])).
+      { applys graph_commit_wf Hwf';
+          [ assumption | applys binds_graph_indom; [ eassumption | exact HTC ] ]. }
+      applys graph_merge_wf Hcwf;
+        [ assumption
+        | apply graph_commit_indom; exact HVCxindom
+        | apply graph_commit_indom_same ].
     + (* PlayEnd: graph_commit *)
       applys graph_commit_wf Hwf';
         [ assumption | applys binds_graph_indom; [ eassumption | exact HTC ] ].
@@ -1961,15 +1970,21 @@ Proof.
         | applys Hlift; forwards Hgw': graph_writes_graph_merge_inv Hc Hgw;
           forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R ]
       end.
-    + (* PlayWriteVolatile: two layers -- graph_commit wrapping graph_merge, and
+    + (* PlayWriteVolatile: two layers -- graph_merge wrapping graph_commit, and
          the committed diff is [d[x0:=v0]] (folding in the just-written value),
          mirroring [graph_writes_log_write]'s [PlayWriteVolatile] case. *)
       match type of Hgw with
+      | graph_writes (graph_merge _ _ _ ?hh) _ _ _ =>
+        destruct (classic (cx = hh)) as [Hc0 | Hc0]
+      end.
+      { subst cx. false. applys graph_writes_graph_merge_same_false Hgw. }
+      forwards Hgw0: graph_writes_graph_merge_inv Hc0 Hgw.
+      match type of Hgw0 with
       | graph_writes (graph_commit _ _ ?ccp ?dd) _ _ _ =>
         destruct (classic (cx = ccp)) as [Hc | Hc]
       end.
       { subst cx.
-        forwards Hbdd: graph_writes_graph_commit_same Hgw.
+        forwards Hbdd: graph_writes_graph_commit_same Hgw0.
         destruct (classic (x = x0)) as [Hxeq | Hxneq].
         - subst x0.
           forwards ->: binds_update_same_inv Hbdd.
@@ -1987,8 +2002,9 @@ Proof.
           + applys Nth_app_r'; [ applys Nth_zero | rew_list; nat_math ].
           + introv Hp Hpf HNp Hgp. forwards Hib: Nth_inbound HNp. nat_math.
         - forwards Hbdd': binds_update_neq_inv Hbdd Hxneq.
-          lets HtD: (indom_of_binds H11).
-          lets Hrd: (read_of_binds H11).
+          match goal with HbD : binds ?DD ?tt d |- _ =>
+            lets HtD: (indom_of_binds HbD);
+            lets Hrd: (read_of_binds HbD) end.
           rewrite <- Hrd in Hbdd'.
           forwards (m' & HNm' & Hns'): delta_is_uncommitted_write Hplay HtD Hbdd'.
           forwards Hlen: play_log_CH_length Hplay.
@@ -2005,11 +2021,8 @@ Proof.
               forwards [HNp1 | (HpN & _)]: Nth_last_inv HNp0;
               [ applys Hns' Hp0 HNp1 Hgp
               | forwards Hib2: Nth_inbound HNm'; nat_math ] ]. }
-      { applys Hlift; forwards Hgw': graph_writes_graph_commit_inv Hc Hgw;
-        destruct (classic (cx = c')) as [Hc2 | Hc2];
-          [ subst cx; false; applys graph_writes_graph_merge_same_false Hgw'
-          | forwards Hgw'': graph_writes_graph_merge_inv Hc2 Hgw';
-            forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R ]. }
+      { applys Hlift; forwards Hgw': graph_writes_graph_commit_inv Hc Hgw0;
+        forwards* (f' & ef' & tw' & kw' & R): IHHplay; exists f' ef' tw' kw'; exact R. }
     + (* PlayEnd: graph_commit *)
       match type of Hgw with
       | graph_writes (graph_commit _ _ ?ccp ?dd) _ _ _ =>
@@ -2130,7 +2143,7 @@ Lemma play_event_graph_indom_mono :
 Proof.
   introv Hpe Hin. inverts Hpe; try exact Hin;
     try (destruct G' as (C0 & P0); simpls; apply indom_update_of_indom; (exact Hin || typeclass)).
-  (* PlayWriteVolatile: two layers (merge then commit), so indom monotonicity
+  (* PlayWriteVolatile: two layers (commit then merge), so indom monotonicity
      applies twice. *)
   destruct G' as (C0 & P0). simpls.
   apply indom_update_of_indom;
@@ -2146,12 +2159,12 @@ Lemma play_event_commit_new :
     commit_fresh G' (TC''[get_thread E]) /\ graph_indom G'' (TC''[get_thread E]).
 Proof.
   introv Hpe Hce. inverts Hpe; cbn [is_commit_event get_thread] in *; try contradiction.
-  - (* PlayWriteVolatile: [commit_fresh] w.r.t. the pre-merge graph [G'] follows
-       contravariantly from freshness w.r.t. the (larger) merge graph. *)
+  - (* PlayWriteVolatile: the committed [c'] is fresh in [G'] by hypothesis; the
+       later merge keeps it in the domain. *)
     destruct G' as (C0 & P0). simpls.
     rewrite read_update_same. split.
-    + intro Hin. apply H14. apply* indom_update_of_indom. typeclass.
-    + apply indom_update_same; typeclass.
+    + assumption.
+    + apply indom_update_of_indom; (typeclass || (apply indom_update_same; typeclass)).
   - destruct G' as (C0 & P0).
     rewrite read_update_same. split; [ assumption | simpls; apply indom_update_same; typeclass ].
   - destruct G' as (C0 & P0).
@@ -2189,12 +2202,29 @@ Proof.
     split; applys~ indom_update_of_indom; typeclass.
 Qed.
 
+Lemma graph_commit_edge_wf :
+  forall G p c d,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    graph_indom G p ->
+    (forall a b, graph_edge (graph_commit G p c d) a b ->
+                 graph_indom (graph_commit G p c d) a /\ graph_indom (graph_commit G p c d) b).
+Proof.
+  introv Hedge_wf Hin1. destruct G as (C & P). introv He.
+  unfolds graph_commit, graph_edge, graph_indom.
+  rew_set in He. destruct He as [Heq | HeP].
+  - inverts Heq. split.
+    + applys~ indom_update_of_indom. typeclass.
+    + applys indom_update_same. typeclass.
+  - forwards (Ha & Hb): Hedge_wf HeP.
+    split; applys~ indom_update_of_indom; typeclass.
+Qed.
+
 (* Ancestry into an old (prefix-domain) commit is unaffected by the freshly
    created commit, which is a sink: invert it back to the prefix graph. The
    extra [TC'/VC'-indom] and root-indom premises are only needed for
-   [PlayWriteVolatile], to show the intermediate pull-merge's own parents are
-   already in [G'] (so its edge-wf can be established, to invert *its* fresh
-   commit as a second sink). *)
+   [PlayWriteVolatile], to show the commit's parent and the later merge's other
+   parent are already in [G'] (so the intermediate commit graph's edge-wf can
+   be established, to invert the merge's fresh commit as a second sink). *)
 Lemma play_event_ancestor_inv :
   forall E D' TC' G' LC' VC' D'' TC'' G'' LC'' VC'' a b,
     play_event E (D', TC', G', LC', VC') (D'', TC'', G'', LC'', VC'') ->
@@ -2215,8 +2245,8 @@ Proof.
     end.
     applys ancestor_graph_merge_inv Hsink Hbne Hanc.
   - (* PlayWrite: G unchanged *) exact Hanc.
-  - (* PlayWriteVolatile: two layers -- invert the outer commit (a sink into
-       the merge graph) then the inner merge (a sink into G') *)
+  - (* PlayWriteVolatile: two layers -- invert the outer merge (a sink into
+       the commit graph) then the inner commit (a sink into G') *)
     asserts Hp1indom: (graph_indom G' (vc_read VC' x)).
     { unfold vc_read. destruct (classic (x \indom VC')) as [Hindom|Hnotin].
       - rewrite (read_default_indom Hindom). applys* HVCin.
@@ -2224,22 +2254,22 @@ Proof.
     match goal with H : binds TC' t c |- _ => rename H into Hbc end.
     asserts Hp2indom: (graph_indom G' c).
     { rewrite <- (read_of_binds Hbc). exact (HTCin t (indom_of_binds Hbc)). }
-    asserts Hmedge: (forall p q, graph_edge (graph_merge G' (vc_read VC' x) c c') p q ->
-                                  graph_indom (graph_merge G' (vc_read VC' x) c c') p /\
-                                  graph_indom (graph_merge G' (vc_read VC' x) c c') q).
-    { applys* graph_merge_edge_wf. }
-    asserts Hbdom': (graph_indom (graph_merge G' (vc_read VC' x) c c') b).
-    { applys* graph_merge_indom. }
-    asserts Hsink2: (forall z, ancestor (graph_merge G' (vc_read VC' x) c c') c'' z -> z = c'').
-    { applys* commit_fresh_sink Hmedge. }
+    asserts Hcedge: (forall p q, graph_edge (graph_commit G' c c' d[x:=v]) p q ->
+                                  graph_indom (graph_commit G' c c' d[x:=v]) p /\
+                                  graph_indom (graph_commit G' c c' d[x:=v]) q).
+    { applys* graph_commit_edge_wf. }
+    asserts Hbdom': (graph_indom (graph_commit G' c c' d[x:=v]) b).
+    { applys* graph_commit_indom. }
+    asserts Hsink2: (forall z, ancestor (graph_commit G' c c' d[x:=v]) c'' z -> z = c'').
+    { applys* commit_fresh_sink Hcedge. }
     asserts Hbne2: (b <> c'').
     { intro Heq. subst b. applys* commit_fresh_not_indom Hbdom'. }
-    forwards Hanc': ancestor_graph_commit_inv Hsink2 Hbne2 Hanc.
+    forwards Hanc': ancestor_graph_merge_inv Hsink2 Hbne2 Hanc.
     asserts Hsink1: (forall z, ancestor G' c' z -> z = c').
     { applys* commit_fresh_sink Hedge. }
     asserts Hbne1: (b <> c').
     { intro Heq. subst b. applys* commit_fresh_not_indom Hbdom. }
-    applys ancestor_graph_merge_inv Hsink1 Hbne1 Hanc'.
+    applys ancestor_graph_commit_inv Hsink1 Hbne1 Hanc'.
   - (* PlayStart: G unchanged *) exact Hanc.
   - (* PlayEnd *)
     match goal with Hf : commit_fresh G' ?cf |- _ =>
@@ -2558,9 +2588,11 @@ Proof.
 Qed.
 
 (* [vc_read VC x] (for a volatile [x] already touched, i.e. [x \indom VC]) is
-   always the LATEST value of [x] in the graph: every volatile access
-   immediately pulls/pushes through this single pointer, so it is exactly the
-   commit of the most recent volatile write (or [root_commit] if untouched). *)
+   always has a LATEST value of [x] in the graph: every volatile write merges
+   its fresh commit into this single pointer, so the freshly written commit is a
+   maximal writer of [x] below it (or [root_commit] if untouched). With racing
+   writes there may be several incomparable maximal writers, so the value is not
+   unique, but one always exists. *)
 Lemma vc_read_is_latest_value :
   forall log D TC G LC VC CH x,
     play_log log init_play_cfg (D, TC, G, LC, VC) CH ->
@@ -2589,25 +2621,26 @@ Proof.
     { introv Hnv Hbd. forwards* (v0 & Hlv): IHHplay Hxvol2 Hxin. }
     (* PlayWriteVolatile *)
     { introv Hxvol' Hbd Hbc Hfresh Hfresh2.
+      asserts Hc2dom: (graph_indom G' c).
+      { destruct G' as (C0&P0). applys binds_graph_indom Hbc HTC. }
+      asserts Hedge1: (forall a b, graph_edge (graph_commit G' c c' d[x0:=v]) a b ->
+                                    graph_indom (graph_commit G' c c' d[x0:=v]) a /\
+                                    graph_indom (graph_commit G' c c' d[x0:=v]) b).
+      { applys graph_commit_edge_wf Hedge Hc2dom. }
       destruct (classic (x = x0)) as [-> | Hxne].
-      - (* fresh writer: [VC[x0:=c''][x0] = c''] IS the fresh commit itself *)
+      - (* the fresh write [c'] is a sink writer of [x0], merged into [c''] *)
         exists v.
         asserts HVeq: (vc_read VC'[x0:=c''] x0 = c'').
         { unfold vc_read. apply read_default_update_same. }
         rewrite HVeq.
-        asserts Hc'dom: (graph_indom (graph_merge G' (vc_read VC' x0) c c') c').
-        { unfold graph_indom, graph_merge. destruct G' as (C&P). apply indom_update_same; typeclass. }
-        asserts Hedge2: (forall a b, graph_edge (graph_merge G' (vc_read VC' x0) c c') a b ->
-                                      graph_indom (graph_merge G' (vc_read VC' x0) c c') a /\
-                                      graph_indom (graph_merge G' (vc_read VC' x0) c c') b).
-        { applys graph_merge_edge_wf Hedge.
-          { applys vc_read_graph_indom Hplay. }
-          { destruct G' as (C0&P0). applys binds_graph_indom Hbc HTC. } }
-        applys~ is_latest_value_graph_commit_fresh_writer Hedge2 Hfresh2 Hc'dom.
-        apply binds_update_same.
-      - (* [x0 <> x]: [VC] unchanged at [x]; graph gets merge then commit, neither
-           of which writes [x] (merge writes nothing; commit's diff [d[x0:=v]]
-           writes [x0], not [x], since [x] never entered [d] -- [volatile_notin_delta]). *)
+        applys is_latest_value_graph_merge_fresh_writer Hedge1 Hfresh2.
+        + apply graph_commit_indom_same.
+        + applys graph_writes_graph_commit_new. apply binds_update_same.
+        + applys graph_commit_new_sink Hedge Hfresh Hc2dom.
+      - (* [x0 <> x]: [VC] unchanged at [x]; graph gets a commit then a merge,
+           neither of which writes [x] (merge writes nothing; commit's diff
+           [d[x0:=v]] writes [x0], not [x], since [x] never entered [d] --
+           [volatile_notin_delta]). *)
         asserts Hxin': (x \indom VC').
         { lets [Hc | Hc]: (indom_update_inv Hxin). congruence. exact Hc. }
         forwards* (v0 & Hlv): IHHplay Hxvol2 Hxin'.
@@ -2619,27 +2652,20 @@ Proof.
         { intro Heq.
           forwards Hdom: (>> vc_read_graph_indom x Hplay).
           rewrite Heq in Hdom. applys commit_fresh_not_indom Hfresh Hdom. }
-        asserts Hedge2: (forall a b, graph_edge (graph_merge G' (vc_read VC' x0) c c') a b ->
-                                      graph_indom (graph_merge G' (vc_read VC' x0) c c') a /\
-                                      graph_indom (graph_merge G' (vc_read VC' x0) c c') b).
-        { applys graph_merge_edge_wf Hedge.
-          { applys vc_read_graph_indom Hplay. }
-          { destruct G' as (C0&P0). applys binds_graph_indom Hbc HTC. } }
-        asserts Hlv2: (is_latest_value (graph_merge G' (vc_read VC' x0) c c') (vc_read VC' x) x v0).
-        { applys~ is_latest_value_graph_merge_mono Hedge Hfresh Hcneq. }
-        asserts Hcneq2: (vc_read VC' x <> c'').
-        { intro Heq.
-          asserts Hdom2: (graph_indom (graph_merge G' (vc_read VC' x0) c c') (vc_read VC' x)).
-          { forwards Hd: (>> vc_read_graph_indom x Hplay).
-            unfold graph_indom, graph_merge in *. destruct G' as (C0&P0). simpl in Hd.
-            apply indom_update_of_indom; (typeclass || exact Hd). }
-          rewrite Heq in Hdom2. applys commit_fresh_not_indom Hfresh2 Hdom2. }
         asserts Hnw: (forall v', ~ binds d[x0:=v] x v').
         { intros v' Hbdd. forwards Hbdd': binds_update_neq_inv Hbdd Hxne.
           asserts Hbdd'': (binds D'[t] x v').
           { rewrite (read_of_binds Hbd). exact Hbdd'. }
           applys volatile_notin_delta Hplay Hxvol2 (indom_of_binds Hbd) Hbdd''. }
-        applys~ is_latest_value_graph_commit_mono Hedge2 Hfresh2 Hcneq2 Hnw Hlv2. }
+        asserts Hlv1: (is_latest_value (graph_commit G' c c' d[x0:=v]) (vc_read VC' x) x v0).
+        { applys~ is_latest_value_graph_commit_mono Hedge Hfresh Hcneq Hnw Hlv. }
+        asserts Hcneq2: (vc_read VC' x <> c'').
+        { intro Heq.
+          asserts Hdom2: (graph_indom (graph_commit G' c c' d[x0:=v]) (vc_read VC' x)).
+          { forwards Hd: (>> vc_read_graph_indom x Hplay).
+            apply graph_commit_indom. exact Hd. }
+          rewrite Heq in Hdom2. applys commit_fresh_not_indom Hfresh2 Hdom2. }
+        applys~ is_latest_value_graph_merge_mono Hedge1 Hfresh2 Hcneq2 Hlv1. }
     (* PlayStart *)
     { forwards* (v0 & Hlv): IHHplay Hxvol2 Hxin. }
     (* PlayEnd *)
@@ -2884,6 +2910,10 @@ Proof.
       * forwards [HN0ch | (HmNch & Hcmeq)]: Nth_last_inv HNch.
         { forwards Hib: Nth_inbound HN0ch. rewrite <- Hlen in HmN. nat_math. }
         cbn [get_thread] in Hcmeq. rewrite read_update_same in Hcmeq. subst cm.
+        apply graph_writes_graph_merge.
+        { intro Heq. subst.
+          match goal with Hf : commit_fresh (graph_commit _ _ _ _) _ |- _ =>
+            applys commit_fresh_not_indom Hf; apply graph_commit_indom_same end. }
         applys graph_writes_graph_commit_new. apply binds_update_same.
 Qed.
 
@@ -2899,8 +2929,8 @@ Qed.
    not at the merge's own new node). [is_latest_value_graph_merge_fresh]
    (GraphFacts.v) supplies exactly this, GIVEN [is_latest_value G (vc_read VC x)
    x v] and that every [x]-writer is already an ancestor of [vc_read VC x]
-   ([write_ancestor_VC]: every volatile write chains directly through the
-   single [VC] pointer, unconditionally). *)
+   ([write_ancestor_VC]: every volatile write is merged into the single [VC]
+   pointer, unconditionally). *)
 Lemma is_latest_value_after_volatile_pull :
   forall log D TC G LC VC CH t x v c'',
     wf_log log ->
