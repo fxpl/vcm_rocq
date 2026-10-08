@@ -88,11 +88,14 @@ Definition is_global_head (G : graph) (g : commit) : Prop :=
 Definition graph_writes (G : graph) (c : commit) (x : var) (v : val) : Prop :=
   exists d, graph_binds G c d /\ binds d x v.
 
-(* Which changes can be seen from c2 but not c1 *)
+(* Which changes can be seen from c2 but not c1. Volatile variables are
+   ignored: they synchronise through their own stored commit (see Branching.v),
+   so independent writes to them are never a conflict. *)
 Definition change_set (G : graph) (c1 c2 : commit) : set var :=
   fun x =>
   match G with
   | (C, _) =>
+      x \notin Volatiles /\
       exists c,
         x \indom C[c] /\
         ancestor G c c2 /\ ~ancestor G c c1
