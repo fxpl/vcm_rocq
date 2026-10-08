@@ -127,7 +127,7 @@ Proof.
   intros. apply is_empty_prove.
   introv Hmem. unfolds change_set.
   destruct G as (C & P).
-  destruct* Hmem as (c' & Hdom & Hanc & Hnanc).
+  destruct* Hmem as (_ & c' & Hdom & Hanc & Hnanc).
 Qed.
 
 Example id_parent_merge :
@@ -164,51 +164,18 @@ Qed.
 
 Hint Resolve is_latest_value_writer_indom : vcm.
 
-Lemma is_latest_value_inj :
+(* Core of the uniqueness of the latest value: if any two writers of [i] that
+   could be latest are comparable, maximality collapses them to one commit. *)
+Lemma is_latest_value_inj_comparable :
   forall G i v1 v2 c,
-    conflict_free_graph G ->
+    (forall c1 c2, graph_writes G c1 i v1 -> graph_writes G c2 i v2 ->
+                   ancestor G c1 c2 \/ ancestor G c2 c1) ->
     is_latest_value G c i v1 ->
     is_latest_value G c i v2 ->
     v1 = v2.
 Proof.
-  introv Hcf (c1 & Hw1 & Hanc1 & Hmax1) (c2 & Hw2 & Hanc2 & Hmax2).
-  (* Both [c1] and [c2] write [i] and are ancestors of [c]; show they are
-     comparable, then maximality collapses them to a single writer. *)
-  asserts Hcmp: (ancestor G c1 c2 \/ ancestor G c2 c1).
-  { (* Otherwise [i] would lie in both [change_set G c1 c2] and
-       [change_set G c2 c1], contradicting conflict-freedom. *)
-    destruct (classic (ancestor G c1 c2)) as [|Hn12]; auto.
-    destruct (classic (ancestor G c2 c1)) as [|Hn21]; auto.
-    false.
-    destruct Hw1 as (d1 & Hb1 & Hbd1).
-    destruct Hw2 as (d2 & Hb2 & Hbd2).
-    asserts Hdom1: (graph_indom G c1). { eauto with vcm. }
-    asserts Hdom2: (graph_indom G c2). { eauto with vcm. }
-    forwards~ Hcfm: Hcf Hdom1 Hdom2.
-    unfold conflict_free_merge in Hcfm. rew_set in Hcfm.
-    (* [i] is in [change_set G c2 c1]: witness [c1], which writes [i], is an
-       ancestor of [c1] but (by [Hn12]) not of [c2]. *)
-    asserts Hin_c2c1: (i \in change_set G c2 c1).
-    { destruct G as (C & P). unfold change_set. exists c1.
-      forwards Hr: read_of_binds Hb1.
-      unfold commit_data, diff in *.
-      splits.
-      - rewrite Hr. applys indom_of_binds Hbd1. typeclass.
-      - apply ancestor_refl.
-      - auto. }
-    (* ... and in [change_set G c1 c2]: witness [c2], not an ancestor of [c1]
-       by [Hn21]. *)
-    asserts Hin_c1c2: (i \in change_set G c1 c2).
-    { destruct G as (C & P). unfold change_set. exists c2.
-      forwards Hr: read_of_binds Hb2.
-      unfold commit_data, diff in *.
-      splits.
-      - rewrite Hr. applys indom_of_binds Hbd2. typeclass.
-      - apply ancestor_refl.
-      - auto. }
-    applys Hcfm i; rew_set; auto_star. }
-  (* Comparable + maximal ==> same writer ==> same value. *)
-  destruct Hcmp as [H12 | H21].
+  introv Hcmp (c1 & Hw1 & Hanc1 & Hmax1) (c2 & Hw2 & Hanc2 & Hmax2).
+  destruct (Hcmp c1 c2 Hw1 Hw2) as [H12 | H21].
   - forwards ->: Hmax1 Hw2 H12 Hanc2.
     destruct Hw1 as (d1 & Hb1 & Hbd1).
     destruct Hw2 as (d2 & Hb2 & Hbd2).
@@ -219,6 +186,65 @@ Proof.
     destruct Hw2 as (d2 & Hb2 & Hbd2).
     forwards ->: graph_binds_inj Hb1 Hb2.
     applys binds_inj Hbd1 Hbd2. typeclass.
+Qed.
+
+(* In a conflict-free graph the latest value of a NON-volatile variable is
+   unique (volatiles are ignored by conflict checking, so this does not cover
+   them). *)
+Lemma is_latest_value_inj :
+  forall G i v1 v2 c,
+    i \notin Volatiles ->
+    conflict_free_graph G ->
+    is_latest_value G c i v1 ->
+    is_latest_value G c i v2 ->
+    v1 = v2.
+Proof.
+  introv Hnv Hcf Hl1 Hl2.
+  applys is_latest_value_inj_comparable Hl1 Hl2.
+  introv Hw1 Hw2.
+  (* Otherwise [i] would lie in both [change_set G c1 c2] and
+     [change_set G c2 c1], contradicting conflict-freedom. *)
+  destruct (classic (ancestor G c1 c2)) as [|Hn12]; auto.
+  destruct (classic (ancestor G c2 c1)) as [|Hn21]; auto.
+  false.
+  destruct Hw1 as (d1 & Hb1 & Hbd1).
+  destruct Hw2 as (d2 & Hb2 & Hbd2).
+  asserts Hdom1: (graph_indom G c1). { eauto with vcm. }
+  asserts Hdom2: (graph_indom G c2). { eauto with vcm. }
+  forwards~ Hcfm: Hcf Hdom1 Hdom2.
+  unfold conflict_free_merge in Hcfm. rew_set in Hcfm.
+  asserts Hin_c2c1: (i \in change_set G c2 c1).
+  { destruct G as (C & P). unfold change_set. split; [exact Hnv | ]. exists c1.
+    forwards Hr: read_of_binds Hb1.
+    unfold commit_data, diff in *.
+    splits.
+    - rewrite Hr. applys indom_of_binds Hbd1. typeclass.
+    - apply ancestor_refl.
+    - auto. }
+  asserts Hin_c1c2: (i \in change_set G c1 c2).
+  { destruct G as (C & P). unfold change_set. split; [exact Hnv | ]. exists c2.
+    forwards Hr: read_of_binds Hb2.
+    unfold commit_data, diff in *.
+    splits.
+    - rewrite Hr. applys indom_of_binds Hbd2. typeclass.
+    - apply ancestor_refl.
+    - auto. }
+  applys Hcfm i; rew_set; auto_star.
+Qed.
+
+(* In a totally ordered graph (the Linear model) the latest value of ANY
+   variable is unique, since any two writers are comparable. *)
+Lemma is_latest_value_inj_total :
+  forall G i v1 v2 c,
+    total_order G ->
+    is_latest_value G c i v1 ->
+    is_latest_value G c i v2 ->
+    v1 = v2.
+Proof.
+  introv Htot Hl1 Hl2.
+  applys is_latest_value_inj_comparable Hl1 Hl2.
+  introv Hw1 Hw2.
+  applys Htot; eauto with vcm.
 Qed.
 
 (* Ancestry ignores the data component and only grows when edges are added, so

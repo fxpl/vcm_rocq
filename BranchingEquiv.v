@@ -411,9 +411,8 @@ Proof.
       asserts HtTC: (t \indom TC). { applys HdomTC Htin. }
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
       asserts Hmerge: (conflict_free_merge (D[t][x := v]) (TC[t]) (vc_read V x) G).
-      { applys conflict_free_merge_add_var.
-        - subst. applys (>> conflict_free_merge_holds Hwf Hrflog Hplay Hdt HtTC Hcdom).
-        - subst. applys (>> vc_read_change_set_empty_race_free Hwf Hrf Hplay Hxvol HtTC). }
+      { applys conflict_free_merge_add_volatile Hxvol.
+        subst. applys (>> conflict_free_merge_holds Hwf Hrflog Hplay Hdt HtTC Hcdom). }
       forwards (c' & Hfresh1): exists_commit_fresh HwfG.
       asserts Hpull: (pull_volatile t x c' T G V = (T[t := (state_running, te_exp e, D[t], c')],
                                                        graph_merge G (vc_read V x) (TC[t]) c')).
