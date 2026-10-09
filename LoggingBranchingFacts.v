@@ -199,8 +199,8 @@ Proof.
       inverts* Heq.
     + forwards*: binds_update_neq_inv Hbinds.
   - unfolds pull_volatile, do_merge.
-    replace (T[t]) with (state_running, te_exp e, d, c) in H11 by forwards*: read_of_binds T t.
-    inverts H11.
+    replace (T[t]) with (state_running, te_exp e, d, c) in H12 by forwards*: read_of_binds T t.
+    inverts H12.
     asserts Hvcindom: (graph_indom G (vc_read V x)).
     { unfold vc_read, read_default. case_if as Hcase.
       - applys HdomVC. applys* binds_of_indom_read.
@@ -884,8 +884,8 @@ Proof.
   - (* StepReadVolatile: log' = log & event_read t x v, T' = T[t := running K(v)] with pulled commit *)
     lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     unfolds pull_volatile, do_merge.
-    replace (T[t]) with (state_running, te_exp e, d, c) in H8 by forwards*: read_of_binds T t.
-    inverts H8.
+    replace (T[t]) with (state_running, te_exp e, d, c) in H9 by forwards*: read_of_binds T t.
+    inverts H9.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts* HtinX: (t \indom T).

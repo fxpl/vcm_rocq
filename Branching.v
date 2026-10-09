@@ -159,6 +159,10 @@ Inductive step : cfg -> cfg -> Prop :=
     step_ul e K (eff_read x) ->
     x \in Volatiles ->
     conflict_free_merge d h (vc_read V x) G ->
+    (* the volatile's stored commit merges the commits of earlier writes
+       unchecked (a write does not pull), so the read checks that this history
+       has no conflicting fork *)
+    view_conflict_free G (vc_read V x) ->
     commit_fresh G h'' ->
     pull_volatile t x h'' T G V = (T', G') ->
     binds T' t (state_running, te_exp e, d, h'') ->

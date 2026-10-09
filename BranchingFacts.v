@@ -130,7 +130,8 @@ Definition conflict_detected (cfg : cfg) : Prop :=
          (exists x,
              step_ul e K (eff_read x) /\
              x \in Volatiles /\
-             ~conflict_free_merge d h (vc_read V x) G))
+             ~ (conflict_free_merge d h (vc_read V x) G /\
+                view_conflict_free G (vc_read V x))))
   end.
 
 (* A thread has terminated. *)
@@ -993,8 +994,11 @@ Proof.
                      left. exists t r1 empty_diff c0. splits*.
               ** (* read: volatile or normal *)
                  destruct (classic (x \in Volatiles)) as [Hvol | Hnvol].
-                 --- (* volatile read: split on whether the merge is conflict-free *)
-                     destruct (classic (conflict_free_merge d h (vc_read V x) G)) as [Hcfm | Hncfm].
+                 --- (* volatile read: split on whether the merge with the reader is
+                        conflict-free and the volatile's stored view has no
+                        conflicting fork *)
+                     destruct (classic (conflict_free_merge d h (vc_read V x) G /\
+                                        view_conflict_free G (vc_read V x))) as [(Hcfm & Hview) | Hncfm].
                      +++ forwards (c'' & Hfresh): exists_commit_fresh Hwf.
                          asserts (T' & G' & Hpull & Hbinds''):
                            (exists T' G', pull_volatile a x c'' T G V = (T', G') /\

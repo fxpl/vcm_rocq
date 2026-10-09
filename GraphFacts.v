@@ -164,51 +164,21 @@ Qed.
 
 Hint Resolve is_latest_value_writer_indom : vcm.
 
-Lemma is_latest_value_inj :
+(* Core of the uniqueness of the latest value: if any two writers of [i] below
+   [c] that could be latest are comparable, maximality collapses them to one
+   commit. *)
+Lemma is_latest_value_inj_comparable :
   forall G i v1 v2 c,
-    conflict_free_graph G ->
+    (forall c1 c2,
+       graph_writes G c1 i v1 -> graph_writes G c2 i v2 ->
+       ancestor G c1 c -> ancestor G c2 c ->
+       ancestor G c1 c2 \/ ancestor G c2 c1) ->
     is_latest_value G c i v1 ->
     is_latest_value G c i v2 ->
     v1 = v2.
 Proof.
-  introv Hcf (c1 & Hw1 & Hanc1 & Hmax1) (c2 & Hw2 & Hanc2 & Hmax2).
-  (* Both [c1] and [c2] write [i] and are ancestors of [c]; show they are
-     comparable, then maximality collapses them to a single writer. *)
-  asserts Hcmp: (ancestor G c1 c2 \/ ancestor G c2 c1).
-  { (* Otherwise [i] would lie in both [change_set G c1 c2] and
-       [change_set G c2 c1], contradicting conflict-freedom. *)
-    destruct (classic (ancestor G c1 c2)) as [|Hn12]; auto.
-    destruct (classic (ancestor G c2 c1)) as [|Hn21]; auto.
-    false.
-    destruct Hw1 as (d1 & Hb1 & Hbd1).
-    destruct Hw2 as (d2 & Hb2 & Hbd2).
-    asserts Hdom1: (graph_indom G c1). { eauto with vcm. }
-    asserts Hdom2: (graph_indom G c2). { eauto with vcm. }
-    forwards~ Hcfm: Hcf Hdom1 Hdom2.
-    unfold conflict_free_merge in Hcfm. rew_set in Hcfm.
-    (* [i] is in [change_set G c2 c1]: witness [c1], which writes [i], is an
-       ancestor of [c1] but (by [Hn12]) not of [c2]. *)
-    asserts Hin_c2c1: (i \in change_set G c2 c1).
-    { destruct G as (C & P). unfold change_set. exists c1.
-      forwards Hr: read_of_binds Hb1.
-      unfold commit_data, diff in *.
-      splits.
-      - rewrite Hr. applys indom_of_binds Hbd1. typeclass.
-      - apply ancestor_refl.
-      - auto. }
-    (* ... and in [change_set G c1 c2]: witness [c2], not an ancestor of [c1]
-       by [Hn21]. *)
-    asserts Hin_c1c2: (i \in change_set G c1 c2).
-    { destruct G as (C & P). unfold change_set. exists c2.
-      forwards Hr: read_of_binds Hb2.
-      unfold commit_data, diff in *.
-      splits.
-      - rewrite Hr. applys indom_of_binds Hbd2. typeclass.
-      - apply ancestor_refl.
-      - auto. }
-    applys Hcfm i; rew_set; auto_star. }
-  (* Comparable + maximal ==> same writer ==> same value. *)
-  destruct Hcmp as [H12 | H21].
+  introv Hcmp (c1 & Hw1 & Hanc1 & Hmax1) (c2 & Hw2 & Hanc2 & Hmax2).
+  destruct (Hcmp c1 c2 Hw1 Hw2 Hanc1 Hanc2) as [H12 | H21].
   - forwards ->: Hmax1 Hw2 H12 Hanc2.
     destruct Hw1 as (d1 & Hb1 & Hbd1).
     destruct Hw2 as (d2 & Hb2 & Hbd2).
@@ -219,6 +189,80 @@ Proof.
     destruct Hw2 as (d2 & Hb2 & Hbd2).
     forwards ->: graph_binds_inj Hb1 Hb2.
     applys binds_inj Hbd1 Hbd2. typeclass.
+Qed.
+
+(* Two writers of the same variable that merge conflict-free are comparable:
+   otherwise the variable would lie in both [change_set G c1 c2] and
+   [change_set G c2 c1], contradicting conflict-freedom. *)
+Lemma conflict_free_merge_writers_comparable :
+  forall G i v1 v2 c1 c2,
+    graph_writes G c1 i v1 ->
+    graph_writes G c2 i v2 ->
+    conflict_free_merge empty c1 c2 G ->
+    ancestor G c1 c2 \/ ancestor G c2 c1.
+Proof.
+  introv Hw1 Hw2 Hcfm.
+  destruct (classic (ancestor G c1 c2)) as [|Hn12]; auto.
+  destruct (classic (ancestor G c2 c1)) as [|Hn21]; auto.
+  false.
+  destruct Hw1 as (d1 & Hb1 & Hbd1).
+  destruct Hw2 as (d2 & Hb2 & Hbd2).
+  unfold conflict_free_merge in Hcfm. rew_set in Hcfm.
+  (* [i] is in [change_set G c2 c1]: witness [c1], which writes [i], is an
+     ancestor of [c1] but (by [Hn12]) not of [c2]. *)
+  asserts Hin_c2c1: (i \in change_set G c2 c1).
+  { destruct G as (C & P). unfold change_set. exists c1.
+    forwards Hr: read_of_binds Hb1.
+    unfold commit_data, diff in *.
+    splits.
+    - rewrite Hr. applys indom_of_binds Hbd1. typeclass.
+    - apply ancestor_refl.
+    - auto. }
+  (* ... and in [change_set G c1 c2]: witness [c2], not an ancestor of [c1]
+     by [Hn21]. *)
+  asserts Hin_c1c2: (i \in change_set G c1 c2).
+  { destruct G as (C & P). unfold change_set. exists c2.
+    forwards Hr: read_of_binds Hb2.
+    unfold commit_data, diff in *.
+    splits.
+    - rewrite Hr. applys indom_of_binds Hbd2. typeclass.
+    - apply ancestor_refl.
+    - auto. }
+  applys Hcfm i; rew_set; auto_star.
+Qed.
+
+Lemma is_latest_value_inj :
+  forall G i v1 v2 c,
+    conflict_free_graph G ->
+    is_latest_value G c i v1 ->
+    is_latest_value G c i v2 ->
+    v1 = v2.
+Proof.
+  introv Hcf Hl1 Hl2.
+  applys is_latest_value_inj_comparable Hl1 Hl2.
+  introv Hw1 Hw2 _ _.
+  asserts Hdom1: (graph_indom G c1). { eauto with vcm. }
+  asserts Hdom2: (graph_indom G c2). { eauto with vcm. }
+  applys conflict_free_merge_writers_comparable Hw1 Hw2.
+  applys Hcf Hdom1 Hdom2.
+Qed.
+
+(* The latest value of [i] at [c] is unique when the history reachable from [c]
+   has no conflicting fork. This is the per-view analogue of
+   [is_latest_value_inj], and is what a read of a volatile's stored commit
+   needs: it does not require the whole graph to be conflict-free. *)
+Lemma is_latest_value_inj_view :
+  forall G i v1 v2 c,
+    view_conflict_free G c ->
+    is_latest_value G c i v1 ->
+    is_latest_value G c i v2 ->
+    v1 = v2.
+Proof.
+  introv Hview Hl1 Hl2.
+  applys is_latest_value_inj_comparable Hl1 Hl2.
+  introv Hw1 Hw2 Hanc1 Hanc2.
+  applys conflict_free_merge_writers_comparable Hw1 Hw2.
+  applys Hview Hanc1 Hanc2.
 Qed.
 
 (* Ancestry ignores the data component and only grows when edges are added, so
@@ -1055,4 +1099,22 @@ Proof.
     { false. applys graph_writes_graph_merge_same_false Hw'. }
     forwards Hanc1': ancestor_graph_merge_inv Hsinkh Hyh Hanc1.
     applys Hsinkc Hanc1'. }
+Qed.
+
+(* A conflict-free graph has conflict-free views: every commit reachable from
+   [c] lies in the graph, so [view_conflict_free] is just [conflict_free_graph]
+   restricted to the ancestors of [c]. *)
+Lemma conflict_free_graph_view :
+  forall G c,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    graph_indom G c ->
+    conflict_free_graph G ->
+    view_conflict_free G c.
+Proof.
+  introv Hedge Hc Hcf. introv Ha Hb.
+  asserts Hina: (graph_indom G a).
+  { forwards [Hin | Heq]: ancestor_src_indom Hedge Ha; [ exact Hin | subst a; exact Hc ]. }
+  asserts Hinb: (graph_indom G b).
+  { forwards [Hin | Heq]: ancestor_src_indom Hedge Hb; [ exact Hin | subst b; exact Hc ]. }
+  applys Hcf Hina Hinb.
 Qed.

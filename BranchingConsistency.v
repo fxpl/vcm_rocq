@@ -818,8 +818,9 @@ Proof.
     asserts HbTCc: (binds TC t (TC[t])).
     { applys binds_of_indom_read (HdomTC t HtinT); (reflexivity || typeclass). }
     asserts HG'eq: (G' = graph_merge G (vc_read VC x) (TC[t]) c'').
-    { unfold Branching.pull_volatile, Branching.do_merge in H8.
-      rewrite (read_of_binds HbT0) in H8. cbn in H8. inverts* H8.
+    { match goal with Hp0 : Branching.pull_volatile _ _ _ _ _ _ = (_, _) |- _ => rename Hp0 into Hpv end.
+      unfold Branching.pull_volatile, Branching.do_merge in Hpv.
+      rewrite (read_of_binds HbT0) in Hpv. cbn in Hpv. inverts* Hpv.
     }
     asserts HplayR:
       (play_log (log & event_read t x v) init_play_cfg (D, TC[t := c''], G', LC, VC) (CH & c'')).

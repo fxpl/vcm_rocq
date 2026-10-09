@@ -355,6 +355,11 @@ Proof.
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
       asserts Hmerge: (conflict_free_merge (D[t]) (TC[t]) (vc_read V x) G).
       { subst. applys (>> conflict_free_merge_holds Hwf Hrflog Hplay Hdt HtTC Hcdom). }
+      asserts Hview: (view_conflict_free G (vc_read V x)).
+      { forwards Hcfg: race_free_log_describes_conflict_free_graph Hwf Hrflog Hplay.
+        forwards Hpgwf: play_log_graph_wf Hplay.
+        destruct G as (C & P). destruct Hpgwf as (Hedge & _).
+        subst V. applys conflict_free_graph_view Hedge Hcdom Hcfg. }
       forwards (c'' & Hfresh): exists_commit_fresh HwfG.
       asserts Hpull: (pull_volatile t x c'' T G V = (T[t := (state_running, te_exp e, D[t], c'')],
                                                        graph_merge G (vc_read V x) (TC[t]) c'')).
@@ -379,7 +384,7 @@ Proof.
         Hfresh Hcneq0 Hxvol Hexfilter).
       asserts* Hlv: (is_latest_value (graph_merge G (vc_read V x) (TC[t]) c'') c'' x v).
       exists. split;
-        [ applys (>> LoggingBranching.StepReadVolatile Hbinds H5 Hxvol Hmerge Hfresh Hpull Hbinds'' Hlv)
+        [ applys (>> LoggingBranching.StepReadVolatile Hbinds H5 Hxvol Hmerge Hview Hfresh Hpull Hbinds'' Hlv)
         | rewrite update_update; simpls* ].
     * (* non-volatile read: local (in [D[t]]) or global ([is_latest_value]) *)
       destruct (classic (x \indom (D[t]))) as [Hin | Hnin].
