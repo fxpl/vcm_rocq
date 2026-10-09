@@ -395,7 +395,7 @@ Proof.
         asserts Hbxv: (binds (d[wj := ww]) x (d[x])).
         { applys~ binds_update_neq Hbxd. }
         eexists. rewrite <- Hcxeq. rewrite read_update_same.
-        apply graph_writes_graph_merge.
+        apply graph_writes_graph_merge_with.
         { intro Heq. subst.
           match goal with Hf : commit_fresh (graph_commit _ _ _ _) _ |- _ =>
             applys commit_fresh_not_indom Hf; apply graph_commit_indom_same end. }
@@ -464,7 +464,7 @@ Proof.
                     asserts Hne2: (cw <> cc'');
                     [ intro Heq2; subst cw; applys commit_fresh_not_indom Hfr2;
                       applys~ graph_commit_indom Hin
-                    | forwards Hgw1: graph_writes_graph_merge_inv Hne2 Hgw;
+                    | forwards Hgw1: graph_writes_graph_merge_with_inv Hne2 Hgw;
                       applys graph_writes_graph_commit_inv Hne Hgw1 ]
                   end ].
       }
@@ -514,7 +514,7 @@ Proof.
         subst tw.
         rewrite <- Hcxeq in Hgw. rewrite read_update_same in Hgw.
         match type of Hgw with
-        | graph_writes (graph_merge _ _ _ ?hh) ?cc _ _ =>
+        | graph_writes (graph_merge_with _ _ _ ?hh _) ?cc _ _ =>
           asserts Hnec: (cc <> hh);
           [ intro Heq;
             match goal with Hf : commit_fresh (graph_commit _ _ _ _) hh |- _ =>
@@ -522,7 +522,7 @@ Proof.
               applys commit_fresh_not_indom Hf; apply graph_commit_indom_same end
           | ]
         end.
-        forwards Hgw1: graph_writes_graph_merge_inv Hnec Hgw.
+        forwards Hgw1: graph_writes_graph_merge_with_inv Hnec Hgw.
         forwards Hbdd: graph_writes_graph_commit_same Hgw1.
         destruct (classic (x0 = wj)) as [Heqx | Hneqx].
         -- subst x0. forwards Heqv0: binds_update_same_inv Hbdd. subst v0.
@@ -657,16 +657,16 @@ Proof.
     forwards (st' & e'' & Hbd'): Hdelta HtinT.
     forwards~ Heqt: binds_inj HbT Hbd'. inverts Heqt.
     destruct Hlv as (cw & Hgw & Hanc & Hmax).
+    match goal with Hxv : ?xx \notin Volatiles |- _ => rename Hxv into Hxnvol end.
     (* The source is the write [kw] that actually *feeds* [cw] (flushed at
        [fw], with [CH[fw] = cw]). *)
     forwards (fw & ef & tw & kw & HNfw & HNef & Hgtef & Hcef & Hkwlt & HNkw & Hncl):
-      graph_writes_flush Hplay Hgw.
+      graph_writes_flush Hplay Hxnvol Hgw.
     intros n t0 x0 v0 Hnth.
     forwards [Hnth' | (Hp & Heq)]: Nth_last_inv Hnth.
     + forwards Hlt: Nth_inbound Hnth'.
       forwards Hsr: sourced_read_snoc Hlt (Hhbc n). applys Hsr Hnth.
     + inverts Heq. subst n.
-      match goal with Hxv : x0 \notin Volatiles |- _ => rename Hxv into Hxnvol end.
       (* The source is the LAST [tw]-write of [x0] before the flush [fw]: [cw]'s
          stored value is [x0]'s delta value at flush, pinned to the last x0-write. *)
       forwards (kL & HkLlt & HNkL & HnclL & HnwL):
@@ -789,115 +789,31 @@ Proof.
              rewrite Heqe in Hgf2. cbn [get_thread] in Hgf2. applys Htwne. congruence. }
            forwards Heqcf: (>> Hmax cf vf Hgwf Hanccwcf HancfTC).
            applys Hcfne Heqcf.
-  - (* StepVolatileRead: pulling a volatile read merges [x]'s stored commit
-       into a fresh commit [c'']; sourcing is proved directly against the
-       post-pull graph [G'] and log [log & event_read t0 x0 v0] (built via
-       [PlayReadVolatile]), since (unlike [StepReadGlobal]) the read itself
-       changes the graph. Every write of a volatile variable is itself a
-       commit event (self-flushing), so an intervening writer's own position
-       already is its flush commit ([write_volatile_graph_writes]), with no
-       need to search for a later flush. *)
-    match goal with
-    | Hb : binds _ _ (state_running, te_exp _, _, ?cc), Hl : is_latest_value _ ?cc _ _ |- _ =>
-        rename Hb into HbT; rename Hl into Hlv
-    end.
-    match goal with
-    | Hb0 : binds T t (state_running, te_exp _, _, ?cc0) |- _ => rename Hb0 into HbT0
-    end.
+  - (* StepReadVolatile: the pulled value [v] is carried by [V[x]]
+       ([graph_writes G (vc_read V x) x v]), which by [vc_read_last_write_inv]
+       is the log's LAST write of [x]. That write is not hb-after the read (it
+       is earlier in the log), and no other x-write can sit hb-strictly between
+       it and the read, since every other x-write is at an earlier position. *)
     match goal with Hxvol0 : x \in Volatiles |- _ => rename Hxvol0 into HxVol end.
-    match goal with Hfr0 : commit_fresh G c'' |- _ => rename Hfr0 into Hfresh end.
-    destruct Hdesc as (_ & _ & _ & Hrun & _ & _ &
+    match goal with Hgw0 : graph_writes G (vc_read V x) x v |- _ => rename Hgw0 into Hgw end.
+    destruct Hdesc as (_ & _ & _ & _ & _ & _ &
       (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & Hveq & HdomD & HdomTC & HdomLC)).
-    lets HtinT: (indom_of_binds HbT0).
-    forwards (st' & e'' & Hbd'): Hdelta HtinT.
-    forwards~ Heqt: binds_inj HbT0 Hbd'. inverts Heqt.
-    destruct Hlv as (cw & Hgw & Hanc & Hmax).
-    forwards (HstartT & HnoendT): (proj2 (Hrun t)).
-    { exists (te_exp e) D[t] TC[t]. exact HbT0. }
-    forwards HwfR: wf_log_read_last HstartT HnoendT Hwf.
-    asserts HbTCc: (binds TC t (TC[t])).
-    { applys binds_of_indom_read (HdomTC t HtinT); (reflexivity || typeclass). }
-    asserts HG'eq: (G' = graph_merge G (vc_read VC x) (TC[t]) c'').
-    { unfold Branching.pull_volatile, Branching.do_merge in H8.
-      rewrite (read_of_binds HbT0) in H8. cbn in H8. inverts* H8.
-    }
-    asserts HplayR:
-      (play_log (log & event_read t x v) init_play_cfg (D, TC[t := c''], G', LC, VC) (CH & c'')).
-    { rewrite HG'eq.
-      forwards Hpe: PlayReadVolatile HxVol HbTCc Hfresh.
-      forwards Hp2: PlaySnoc Hplay Hpe.
-      rewrite read_update_same in Hp2. exact Hp2. }
-    forwards HlenCH0: play_log_CH_length Hplay.
-    forwards (fw & ef & tw & kw & HNfw & HNef & Hgtef & Hcef & Hkwlt & HNkw & Hncl):
-      graph_writes_flush HplayR Hgw.
-    asserts Hfwlt: (fw < length log).
-    { forwards [Hfwlt' | (HfwN & HfwE)]: Nth_last_inv HNef.
-      - applys Nth_inbound Hfwlt'.
-      - subst ef. cbn [is_commit_event] in Hcef. contradiction. }
+    asserts Hgw': (graph_writes G (vc_read VC x) x v).
+    { first [ rewrite Hveq | rewrite <- Hveq ]; exact Hgw. }
+    forwards (tw & lw & Hfilter): vc_read_last_write_inv Hplay HxVol Hgw'.
+    forwards (m & HNm & Hlast): last_write_position Hfilter.
     intros n t0 x0 v0 Hnth.
     forwards [Hnth' | (Hp & Heq)]: Nth_last_inv Hnth.
     + forwards Hlt: Nth_inbound Hnth'.
       forwards Hsr: sourced_read_snoc Hlt (Hhbc n). applys Hsr Hnth.
     + inverts Heq. subst n.
-      forwards (kL & HkLlt & HNkL & HnclL & HnwL):
-        (>> flush_last_write HwfR HplayR HNfw HNef Hgtef Hcef Hgw).
-      forwards HkLib: Nth_inbound HNkL.
-      asserts HNcc'': (LibList.Nth (length log) (CH & c'') c'').
-      { apply Nth_app_r' with (m := 0); [ apply Nth_zero | rew_list; nat_math ]. }
-      exists kL tw. splits.
-      * exact HNkL.
-      * intros Hhb0. forwards Hlt: hb_lt Hhb0. nat_math.
-      * (* Maximality *)
-        introv (m' & t'' & v' & Hneq & Hmth' & Hhb & Hhb').
-        asserts Hcm'commit: (is_commit_event (event_write t'' x0 v')). { simpl. exact HxVol. }
-        forwards Hm'lt: Nth_inbound Hmth'.
-        asserts Hm'lenCH: (m' < length (CH & c'')).
-        { forwards Hlen: play_log_CH_length HplayR. rewrite Hlen. nat_math. }
-        forwards (cf & HNcf): Nth_inbound_inv Hm'lenCH.
-        forwards Hgwf: (>> write_volatile_graph_writes HplayR HxVol Hmth' HNcf).
-        forwards HancfTC: (>> hb_pointer_ancestor HwfR HplayR Hhb' HNcf HNcc'').
-        destruct (classic (tw = t'')) as [Htweq | Htwne].
-        -- rewrite <- Htweq in Hmth'.
-           asserts HkLeqfw: (kL = fw).
-           { destruct (classic (kL < fw)) as [Hlt | Hge]; [ | nat_math ].
-             exfalso. applys (HnclL kL (event_write tw x0 v0) (le_refl kL) Hlt HNkL (eq_refl tw)).
-             simpl. exact HxVol. }
-           forwards HmL: hb_lt Hhb.
-           asserts Hm'fw: (fw <= m').
-           { destruct (classic (m' < fw)) as [Hlt | Hge]; [ | nat_math ].
-             exfalso. applys HnwL m' v'; [ nat_math | nat_math | exact Hmth' ]. }
-           asserts Hfwltm': (fw < m').
-           { asserts Hm'nekL: (m' <> kL). { exact Hneq. } nat_math. }
-           asserts Hgm'tw: (get_thread (event_write tw x0 v') = tw). { reflexivity. }
-           asserts Hanccwcf: (ancestor G' cw cf).
-           { applys~ (>> CH_thread_monotone HwfR HplayR HNef Hgtef Hmth' Hgm'tw HNfw HNcf). }
-           asserts Hcfne: (cf <> cw).
-           { intro Heqc. subst cf.
-             forwards Heqpos: (>> CH_commit_event_inj HplayR HNcf Hmth' Hcm'commit HNfw HNef Hcef).
-             nat_math. }
-           forwards Heqcf: (>> Hmax cf v' Hgwf Hanccwcf HancfTC).
-           applys Hcfne Heqcf.
-        -- asserts HA: (LibList.Nth kL (log & event_read t0 x0 v0) (event_write tw x0 v0) /\
-                        LibList.Nth fw (CH & c'') cw /\
-                        LibList.Nth fw (log & event_read t0 x0 v0) ef /\
-                        get_thread ef = tw /\ is_commit_event ef /\ kL <= fw /\
-                        (forall p ep, kL <= p -> p < fw -> LibList.Nth p (log & event_read t0 x0 v0) ep ->
-                                      get_thread ep = tw -> ~ is_commit_event ep)).
-           { splits*. }
-           asserts HB: (LibList.Nth m' (log & event_read t0 x0 v0) (event_write t'' x0 v') /\
-                        LibList.Nth m' (CH & c'') cf /\
-                        LibList.Nth m' (log & event_read t0 x0 v0) (event_write t'' x0 v') /\
-                        get_thread (event_write t'' x0 v') = t'' /\
-                        is_commit_event (event_write t'' x0 v') /\ m' <= m').
-           { splits*. }
-           asserts Hanccwcf: (ancestor G' cw cf).
-           { applys (>> write_hb_flush_ancestor HwfR HplayR HA HB Htwne Hhb). }
-           asserts Hcfne: (cf <> cw).
-           { intro Heqc. subst cf.
-             forwards Heqpos: (>> CH_commit_event_inj HplayR HNcf Hmth' Hcm'commit HNfw HNef Hcef).
-             subst m'. forwards Heqe: Nth_functional HNef Hmth'.
-             rewrite Heqe in Hgtef. cbn [get_thread] in Hgtef.
-             applys Htwne. symmetry. exact Hgtef. }
-           forwards Heqcf: (>> Hmax cf v' Hgwf Hanccwcf HancfTC).
-           applys Hcfne Heqcf.
+      exists m tw. splits.
+      * applys Nth_app_l HNm.
+      * intros Hhb. forwards Hlt: hb_lt Hhb. forwards Hm: Nth_inbound HNm. nat_math.
+      * introv (m' & t'' & v' & Hneq & Hmth' & Hhb & Hhb').
+        forwards Hm'lt: hb_lt Hhb'.
+        forwards [Hmth'' | (Hpe' & Hee')]: Nth_last_inv Hmth'; [| inverts Hee'].
+        forwards Hle: Hlast Hmth''.
+        forwards Hmm': hb_lt Hhb.
+        nat_math.
 Qed.

@@ -164,18 +164,21 @@ Qed.
 
 Hint Resolve is_latest_value_writer_indom : vcm.
 
-(* Core of the uniqueness of the latest value: if any two writers of [i] that
-   could be latest are comparable, maximality collapses them to one commit. *)
+(* Core of the uniqueness of the latest value: if any two writers of [i] below
+   [c] that could be latest are comparable, maximality collapses them to one
+   commit. *)
 Lemma is_latest_value_inj_comparable :
   forall G i v1 v2 c,
-    (forall c1 c2, graph_writes G c1 i v1 -> graph_writes G c2 i v2 ->
-                   ancestor G c1 c2 \/ ancestor G c2 c1) ->
+    (forall c1 c2,
+       graph_writes G c1 i v1 -> graph_writes G c2 i v2 ->
+       ancestor G c1 c -> ancestor G c2 c ->
+       ancestor G c1 c2 \/ ancestor G c2 c1) ->
     is_latest_value G c i v1 ->
     is_latest_value G c i v2 ->
     v1 = v2.
 Proof.
   introv Hcmp (c1 & Hw1 & Hanc1 & Hmax1) (c2 & Hw2 & Hanc2 & Hmax2).
-  destruct (Hcmp c1 c2 Hw1 Hw2) as [H12 | H21].
+  destruct (Hcmp c1 c2 Hw1 Hw2 Hanc1 Hanc2) as [H12 | H21].
   - forwards ->: Hmax1 Hw2 H12 Hanc2.
     destruct Hw1 as (d1 & Hb1 & Hbd1).
     destruct Hw2 as (d2 & Hb2 & Hbd2).
@@ -188,30 +191,24 @@ Proof.
     applys binds_inj Hbd1 Hbd2. typeclass.
 Qed.
 
-(* In a conflict-free graph the latest value of a NON-volatile variable is
-   unique (volatiles are ignored by conflict checking, so this does not cover
-   them). *)
-Lemma is_latest_value_inj :
-  forall G i v1 v2 c,
+(* Two writers of the same non-volatile variable that merge conflict-free are
+   comparable: otherwise the variable would lie in both [change_set G c1 c2] and
+   [change_set G c2 c1], contradicting conflict-freedom. (Volatiles are ignored
+   by conflict checking, so this does not cover them.) *)
+Lemma conflict_free_merge_writers_comparable :
+  forall G i v1 v2 c1 c2,
     i \notin Volatiles ->
-    conflict_free_graph G ->
-    is_latest_value G c i v1 ->
-    is_latest_value G c i v2 ->
-    v1 = v2.
+    graph_writes G c1 i v1 ->
+    graph_writes G c2 i v2 ->
+    conflict_free_merge empty c1 c2 G ->
+    ancestor G c1 c2 \/ ancestor G c2 c1.
 Proof.
-  introv Hnv Hcf Hl1 Hl2.
-  applys is_latest_value_inj_comparable Hl1 Hl2.
-  introv Hw1 Hw2.
-  (* Otherwise [i] would lie in both [change_set G c1 c2] and
-     [change_set G c2 c1], contradicting conflict-freedom. *)
+  introv Hnv Hw1 Hw2 Hcfm.
   destruct (classic (ancestor G c1 c2)) as [|Hn12]; auto.
   destruct (classic (ancestor G c2 c1)) as [|Hn21]; auto.
   false.
   destruct Hw1 as (d1 & Hb1 & Hbd1).
   destruct Hw2 as (d2 & Hb2 & Hbd2).
-  asserts Hdom1: (graph_indom G c1). { eauto with vcm. }
-  asserts Hdom2: (graph_indom G c2). { eauto with vcm. }
-  forwards~ Hcfm: Hcf Hdom1 Hdom2.
   unfold conflict_free_merge in Hcfm. rew_set in Hcfm.
   asserts Hin_c2c1: (i \in change_set G c2 c1).
   { destruct G as (C & P). unfold change_set. split; [exact Hnv | ]. exists c1.
@@ -232,6 +229,45 @@ Proof.
   applys Hcfm i; rew_set; auto_star.
 Qed.
 
+(* In a conflict-free graph the latest value of a NON-volatile variable is
+   unique (volatiles are ignored by conflict checking, so this does not cover
+   them). *)
+Lemma is_latest_value_inj :
+  forall G i v1 v2 c,
+    i \notin Volatiles ->
+    conflict_free_graph G ->
+    is_latest_value G c i v1 ->
+    is_latest_value G c i v2 ->
+    v1 = v2.
+Proof.
+  introv Hnv Hcf Hl1 Hl2.
+  applys is_latest_value_inj_comparable Hl1 Hl2.
+  introv Hw1 Hw2 _ _.
+  asserts Hdom1: (graph_indom G c1). { eauto with vcm. }
+  asserts Hdom2: (graph_indom G c2). { eauto with vcm. }
+  applys conflict_free_merge_writers_comparable Hnv Hw1 Hw2.
+  applys Hcf Hdom1 Hdom2.
+Qed.
+
+(* The latest value of a non-volatile [i] at [c] is unique when the history
+   reachable from [c] has no conflicting fork. This is the per-view analogue of
+   [is_latest_value_inj]: it does not require the whole graph to be
+   conflict-free. *)
+Lemma is_latest_value_inj_view :
+  forall G i v1 v2 c,
+    i \notin Volatiles ->
+    view_conflict_free G c ->
+    is_latest_value G c i v1 ->
+    is_latest_value G c i v2 ->
+    v1 = v2.
+Proof.
+  introv Hnv Hview Hl1 Hl2.
+  applys is_latest_value_inj_comparable Hl1 Hl2.
+  introv Hw1 Hw2 Hanc1 Hanc2.
+  applys conflict_free_merge_writers_comparable Hnv Hw1 Hw2.
+  applys Hview Hanc1 Hanc2.
+Qed.
+
 (* In a totally ordered graph (the Linear model) the latest value of ANY
    variable is unique, since any two writers are comparable. *)
 Lemma is_latest_value_inj_total :
@@ -243,7 +279,7 @@ Lemma is_latest_value_inj_total :
 Proof.
   introv Htot Hl1 Hl2.
   applys is_latest_value_inj_comparable Hl1 Hl2.
-  introv Hw1 Hw2.
+  introv Hw1 Hw2 _ _.
   applys Htot; eauto with vcm.
 Qed.
 
@@ -1081,4 +1117,179 @@ Proof.
     { false. applys graph_writes_graph_merge_same_false Hw'. }
     forwards Hanc1': ancestor_graph_merge_inv Hsinkh Hyh Hanc1.
     applys Hsinkc Hanc1'. }
+Qed.
+
+(* A conflict-free graph has conflict-free views: every commit reachable from
+   [c] lies in the graph, so [view_conflict_free] is just [conflict_free_graph]
+   restricted to the ancestors of [c]. *)
+Lemma conflict_free_graph_view :
+  forall G c,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    graph_indom G c ->
+    conflict_free_graph G ->
+    view_conflict_free G c.
+Proof.
+  introv Hedge Hc Hcf. introv Ha Hb.
+  asserts Hina: (graph_indom G a).
+  { forwards [Hin | Heq]: ancestor_src_indom Hedge Ha; [ exact Hin | subst a; exact Hc ]. }
+  asserts Hinb: (graph_indom G b).
+  { forwards [Hin | Heq]: ancestor_src_indom Hedge Hb; [ exact Hin | subst b; exact Hc ]. }
+  applys Hcf Hina Hinb.
+Qed.
+
+(* ---------------------------------------------------------------------- *)
+(* [graph_merge_with]: a merge whose fresh commit carries a diff.          *)
+(* It has exactly the edges (hence the ancestry) of [graph_merge]; only    *)
+(* the data of the fresh commit differs.                                   *)
+(* ---------------------------------------------------------------------- *)
+
+Lemma ancestor_data_irrel :
+  forall (C1 C2 : commit_data) P a b,
+    ancestor (C1, P) a b -> ancestor (C2, P) a b.
+Proof.
+  introv H. induction H.
+  - apply AncestorRefl.
+  - applys AncestorTrans IHancestor. assumption.
+Qed.
+
+Lemma ancestor_graph_merge_with_iff :
+  forall G c1 c2 c d a b,
+    ancestor (graph_merge_with G c1 c2 c d) a b <->
+    ancestor (graph_merge G c1 c2 c) a b.
+Proof.
+  intros. destruct G as (C & P). unfold graph_merge_with, graph_merge.
+  split; apply ancestor_data_irrel.
+Qed.
+
+Lemma ancestor_graph_merge_with :
+  forall G p1 p2 h d x y,
+    ancestor G x y ->
+    ancestor (graph_merge_with G p1 p2 h d) x y.
+Proof.
+  introv Hanc. apply ancestor_graph_merge_with_iff. applys ancestor_graph_merge Hanc.
+Qed.
+
+Lemma ancestor_graph_merge_with_inv :
+  forall G p1 p2 h d x y,
+    (forall z, ancestor G h z -> z = h) ->
+    y <> h ->
+    ancestor (graph_merge_with G p1 p2 h d) x y ->
+    ancestor G x y.
+Proof.
+  introv Hsink Hneq Hanc. apply ancestor_graph_merge_with_iff in Hanc.
+  applys ancestor_graph_merge_inv Hsink Hneq Hanc.
+Qed.
+
+Lemma ancestor_graph_merge_with_edge_l :
+  forall G c1 c2 c' d, ancestor (graph_merge_with G c1 c2 c' d) c2 c'.
+Proof.
+  intros. apply ancestor_graph_merge_with_iff. apply ancestor_graph_merge_edge_l.
+Qed.
+
+Lemma ancestor_graph_merge_with_edge_r :
+  forall G c1 c2 c' d, ancestor (graph_merge_with G c1 c2 c' d) c1 c'.
+Proof.
+  intros. apply ancestor_graph_merge_with_iff. apply ancestor_graph_merge_edge_r.
+Qed.
+
+Lemma ancestor_graph_merge_with_into_fresh_inv :
+  forall G p1 p2 h d x,
+    (forall a b, graph_edge G a b -> graph_indom G a /\ graph_indom G b) ->
+    commit_fresh G h ->
+    graph_indom G p1 ->
+    graph_indom G p2 ->
+    ancestor (graph_merge_with G p1 p2 h d) x h ->
+    x = h \/ ancestor G x p1 \/ ancestor G x p2.
+Proof.
+  introv Hedge Hfresh Hp1 Hp2 Hanc. apply ancestor_graph_merge_with_iff in Hanc.
+  applys ancestor_graph_merge_into_fresh_inv Hedge Hfresh Hp1 Hp2 Hanc.
+Qed.
+
+Lemma graph_merge_with_indom :
+  forall G c c' c'' m d,
+    graph_indom G c ->
+    graph_indom (graph_merge_with G c' c'' m d) c.
+Proof.
+  introv Hdom. unfolds graph_indom, graph_merge_with.
+  destruct G as (C & P). rew_dom. rew_set. auto.
+Qed.
+
+Lemma graph_merge_with_indom_same :
+  forall G c c' m d,
+    graph_indom (graph_merge_with G c c' m d) m.
+Proof.
+  introv. unfolds graph_indom, graph_merge_with.
+  destruct G as (C & P). rew_dom. rew_set. auto.
+Qed.
+
+Lemma graph_merge_with_wf :
+  forall G p1 p2 h d,
+    wf_graph G ->
+    commit_fresh G h ->
+    graph_indom G p1 ->
+    graph_indom G p2 ->
+    wf_graph (graph_merge_with G p1 p2 h d).
+Proof.
+  introv Hwf Hfresh Hin1 Hin2.
+  forwards Hwfm: graph_merge_wf Hwf Hfresh Hin1 Hin2.
+  destruct Hwfm as (_ & Hanti & _).
+  lets (Hfin & _ & Hedge_wf): Hwf.
+  destruct G as (C & P). unfolds graph_indom, graph_merge, graph_merge_with.
+  splits.
+  - simpl. unfolds finite. rew_dom. applys~ LibSet.finite_union.
+    applys LibSet.finite_single.
+  - introv Hab Hba. applys Hanti.
+    + applys ancestor_data_irrel Hab.
+    + applys ancestor_data_irrel Hba.
+  - introv He. unfolds graph_edge, graph_indom.
+    rew_set in He. destruct He as [Heq | [Heq | HeP]].
+    + inverts Heq. split.
+      * applys~ indom_update_of_indom. typeclass.
+      * applys indom_update_same. typeclass.
+    + inverts Heq. split.
+      * applys~ indom_update_of_indom. typeclass.
+      * applys indom_update_same. typeclass.
+    + forwards (Ha & Hb): Hedge_wf HeP.
+      split; applys~ indom_update_of_indom; typeclass.
+Qed.
+
+Lemma graph_writes_graph_merge_with :
+  forall G p1 p2 h d x i v,
+    x <> h ->
+    graph_writes G x i v ->
+    graph_writes (graph_merge_with G p1 p2 h d) x i v.
+Proof.
+  introv Hneq (dd & Hb & Hbd). destruct G as (C & P).
+  unfolds graph_binds, graph_writes, graph_merge_with.
+  exists dd. split~. applys~ binds_update_neq.
+Qed.
+
+Lemma graph_writes_graph_merge_with_inv :
+  forall G p1 p2 h d x i v,
+    x <> h ->
+    graph_writes (graph_merge_with G p1 p2 h d) x i v ->
+    graph_writes G x i v.
+Proof.
+  introv Hneq (dd & Hb & Hbd). destruct G as (C & P).
+  unfolds graph_binds, graph_writes, graph_merge_with.
+  exists dd. split~. applys~ binds_update_neq_inv Hb.
+Qed.
+
+(* The merge commit carries exactly the diff it was given. *)
+Lemma graph_writes_graph_merge_with_same :
+  forall G p1 p2 h d i v,
+    graph_writes (graph_merge_with G p1 p2 h d) h i v -> binds d i v.
+Proof.
+  introv (dd & Hgb & Hbd). destruct G as (C & P).
+  unfolds graph_merge_with, graph_binds.
+  asserts Hdd: (dd = d). { applys binds_inj Hgb; (apply binds_update_same || typeclass). }
+  subst dd. exact Hbd.
+Qed.
+
+Lemma graph_writes_graph_merge_with_new :
+  forall G p1 p2 h d i v,
+    binds d i v -> graph_writes (graph_merge_with G p1 p2 h d) h i v.
+Proof.
+  introv Hbd. exists d. split; [ | exact Hbd ].
+  destruct G as (C & P). unfold graph_merge_with, graph_binds. apply binds_update_same.
 Qed.

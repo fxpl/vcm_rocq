@@ -110,6 +110,16 @@ Definition conflict_free_graph (G : graph) :=
     graph_indom G c2 ->
     conflict_free_merge empty c1 c2 G.
 
+(* The history reachable from [c] contains no conflicting fork: no two of its
+   commits changed the same variable independently. Merging into a volatile's
+   stored commit is not checked when a volatile is written without pulling, so a
+   read of the volatile checks it instead. *)
+Definition view_conflict_free (G : graph) (c : commit) : Prop :=
+  forall a b,
+    ancestor G a c ->
+    ancestor G b c ->
+    conflict_free_merge empty a b G.
+
 (* Introduce an origin commit [c] with empty data and no incoming/outgoing edges.
    Used to bootstrap the root thread's commit when it is initialised. *)
 Definition graph_root (c : commit) : graph :=
@@ -125,6 +135,15 @@ Definition graph_commit (G : graph) (c1 c2 : commit) (d : diff) :=
 Definition graph_merge (G : graph) (c1 c2 c : commit) :=
   match G with
   | (C, P) => (C[c := empty], \{(c2, c)} \u \{(c1, c)} \u P)
+  end
+.
+
+(* A merge whose fresh commit carries the diff [d] instead of being empty: the
+   edges are exactly those of [graph_merge]. Used when a volatile write merges
+   into the volatile's stored commit and records its value there. *)
+Definition graph_merge_with (G : graph) (c1 c2 c : commit) (d : diff) :=
+  match G with
+  | (C, P) => (C[c := d], \{(c2, c)} \u \{(c1, c)} \u P)
   end
 .
 

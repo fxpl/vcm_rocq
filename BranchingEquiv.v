@@ -355,6 +355,11 @@ Proof.
       forwards Hcdom: (>> vc_read_graph_indom x Hplay).
       asserts Hmerge: (conflict_free_merge (D[t]) (TC[t]) (vc_read V x) G).
       { subst. applys (>> conflict_free_merge_holds Hwf Hrflog Hplay Hdt HtTC Hcdom). }
+      asserts Hview: (view_conflict_free G (vc_read V x)).
+      { forwards Hcfg: race_free_log_describes_conflict_free_graph Hwf Hrflog Hplay.
+        forwards Hpgwf: play_log_graph_wf Hplay.
+        destruct G as (C & P). destruct Hpgwf as (Hedge & _).
+        subst V. applys conflict_free_graph_view Hedge Hcdom Hcfg. }
       forwards (c'' & Hfresh): exists_commit_fresh HwfG.
       asserts Hpull: (pull_volatile t x c'' T G V = (T[t := (state_running, te_exp e, D[t], c'')],
                                                        graph_merge G (vc_read V x) (TC[t]) c'')).
@@ -365,21 +370,12 @@ Proof.
       asserts Hbinds'': (binds (T[t := (state_running, te_exp e, D[t], c'')]) t
                             (state_running, te_exp e, D[t], c'')).
       { apply binds_update_same. }
-      asserts Hcneq0: (vc_read VC x <> c'').
-      { intro Heq. rewrite Heq in Hcdom. applys commit_fresh_not_indom Hfresh Hcdom. }
-      (* The merge's own fresh commit [c''] must satisfy [is_latest_value] for
-         the SharedMemory value [v] (from [Hwrite]/[Hfilter]); this does not
-         follow from forward-preservation at an old, unrelated commit, since
-         [c''] is itself new. [is_latest_value_after_volatile_pull] supplies it
-         by inheriting the value from whichever of the merge's two parents --
-         [vc_read V x] or [TC[t]] -- is the maximal writer. *)
-      asserts Hexfilter: (exists tw log', LibList.filter (fun e => writes_variable x e) log = log' & event_write tw x v).
-      { exists t' log'0. exact Hfilter. }
-      forwards Hlv0: (>> is_latest_value_after_volatile_pull Hwf Hrflog Hplay Hdt HtTC
-        Hfresh Hcneq0 Hxvol Hexfilter).
-      asserts* Hlv: (is_latest_value (graph_merge G (vc_read V x) (TC[t]) c'') c'' x v).
+      (* [vc_read V x] is the commit carrying the last write of [x]; its value
+         is the SharedMemory value [v] (from [Hwrite]/[Hfilter]). *)
+      forwards Hgw0: (>> vc_read_last_write Hplay Hxvol Hfilter).
+      asserts* Hgw: (graph_writes G (vc_read V x) x v).
       exists. split;
-        [ applys (>> LoggingBranching.StepReadVolatile Hbinds H5 Hxvol Hmerge Hfresh Hpull Hbinds'' Hlv)
+        [ applys (>> LoggingBranching.StepReadVolatile Hbinds H5 Hxvol Hmerge Hview Hfresh Hpull Hbinds'' Hgw)
         | rewrite update_update; simpls* ].
     * (* non-volatile read: local (in [D[t]]) or global ([is_latest_value]) *)
       destruct (classic (x \indom (D[t]))) as [Hin | Hnin].
@@ -416,11 +412,12 @@ Proof.
       { applys graph_commit_wf HwfG Hfresh1 HTCindom. }
       forwards (c'' & Hfresh2): exists_commit_fresh HwfG1.
       asserts Hpush:
-        (push_volatile t x c' c''
+        (push_volatile t x v c' c''
            (T[t := (state_running, te_exp e, D[t][x := v], TC[t])]) G V
          = (T[t := (state_running, te_exp e, D[t][x := v], TC[t])]
              [t := (state_running, te_exp e, empty, c')],
-            graph_merge (graph_commit G (TC[t]) c' (D[t][x := v])) (vc_read V x) c' c'',
+            graph_merge_with (graph_commit G (TC[t]) c' (D[t][x := v])) (vc_read V x) c' c''
+              ((empty : diff)[x := v]),
             V[x := c''])).
       { unfold push_volatile, do_commit. rewrite read_update_same. reflexivity. }
       exists. splits;
@@ -646,7 +643,7 @@ Proof.
     simpls*.
   + (* StepReadVolatile: the SharedMemory side has no volatile distinction, so
        a [Branching.StepReadVolatile] step is matched by a plain
-       [SharedMemory.StepRead]; [is_latest_value_after_volatile_pull_inv]
+       [SharedMemory.StepRead]; [vc_read_last_write_inv]
        identifies the pulled value with the log's actual last write of [x],
        which is exactly what [Hwrite] needs. *)
     destruct HdescSh as (_ & _ & _ & _ & _ & _ & Hwrite).
@@ -658,18 +655,11 @@ Proof.
     inverts Heq.
     asserts* ->: (c = TC[t]).
     match goal with Hxvol0 : x \in Volatiles |- _ => rename Hxvol0 into Hxvol end.
-    match goal with Hfr0 : commit_fresh G c'' |- _ => rename Hfr0 into Hfresh end.
-    match goal with Hlv0 : is_latest_value G' c'' x v |- _ => rename Hlv0 into Hlv end.
+    match goal with Hgw0 : graph_writes G (vc_read V x) x v |- _ => rename Hgw0 into Hgw end.
     match goal with Hp0 : pull_volatile t x c'' T G V = (T', G') |- _ => rename Hp0 into Hpull end.
     unfold pull_volatile, do_merge in Hpull.
     rewrite (read_of_binds Hbinds') in Hpull. cbn in Hpull. inverts Hpull.
-    asserts* Hdt: (t \indom D).
-    asserts* HtTC: (t \indom TC).
-    asserts Hcdom: (graph_indom G (vc_read VC x)). { applys vc_read_graph_indom Hplay. }
-    asserts Hcneq: (vc_read VC x <> c'').
-    { intro Heqc. rewrite Heqc in Hcdom. applys commit_fresh_not_indom Hfresh Hcdom. }
-    forwards Hrf': race_free_last_inv Hrf.
-    subst. forwards* Hex: (>> is_latest_value_after_volatile_pull_inv Hwf Hrf' Hplay Hdt HtTC Hfresh Hcneq Hxvol Hlv).
+    subst. forwards* Hex: (>> vc_read_last_write_inv Hplay Hxvol Hgw).
     exists. split.
     { constructors*. apply Hwrite. exact Hex. }
     repeat rewrite update_update; simpls*.
@@ -679,7 +669,7 @@ Proof.
   + (* StepWriteVolatile: symmetric to [StepReadVolatile] above, but simpler --
        a [SharedMemory.StepWrite] always matches, with no [is_latest_value]
        obligation on this side. *)
-    match goal with Hp0 : push_volatile t x c' c'' ?TT G V = (T', G', V') |- _ => rename Hp0 into Hpush end.
+    match goal with Hp0 : push_volatile t x v c' c'' ?TT G V = (T', G', V') |- _ => rename Hp0 into Hpush end.
     unfold push_volatile, do_commit in Hpush.
     rewrite read_update_same in Hpush. cbn in Hpush. inverts Hpush.
     clears HdescSh HdescB.

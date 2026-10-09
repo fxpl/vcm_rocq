@@ -123,14 +123,17 @@ Definition pull_volatile (t : tid) (x : var) (h_new : commit)
 (* Writing a volatile *pushes*: the thread's diff (folding in the
    new write) is committed as [h_new], a child of the thread's OWN
    commit, and the thread's commit stays at [h_new]. [x]'s stored
-   commit then advances to [h_merge], an empty merge of [x]'s
-   previous stored commit and [h_new], so it keeps every earlier
-   write of [x] as an ancestor. *)
-Definition push_volatile (t : tid) (x : var) (h_new h_merge : commit)
+   commit then advances to [h_merge], a merge of [x]'s previous
+   stored commit and [h_new] that itself carries the write [x := v].
+   It keeps every earlier write of [x] as an ancestor, and being a
+   writer of [x] below which all earlier writes sit, it records the
+   most recent value of [x]. *)
+Definition push_volatile (t : tid) (x : var) (v : val) (h_new h_merge : commit)
     (T : threads) (G : graph) (V : volatiles)
     : threads * graph * volatiles :=
   let '(T', G') := do_commit t h_new T G in
-  (T', graph_merge G' (vc_read V x) h_new h_merge, V[x := h_merge]).
+  (T', graph_merge_with G' (vc_read V x) h_new h_merge ((empty : diff)[x := v]),
+   V[x := h_merge]).
 
 Inductive step : cfg -> cfg -> Prop :=
 | StepStart : forall T G L V t e d h,
@@ -159,11 +162,15 @@ Inductive step : cfg -> cfg -> Prop :=
     step_ul e K (eff_read x) ->
     x \in Volatiles ->
     conflict_free_merge d h (vc_read V x) G ->
+    (* the volatile's stored commit merges the commits of earlier writes
+       unchecked (a write does not pull), so the read checks that this history
+       has no conflicting fork *)
+    view_conflict_free G (vc_read V x) ->
     commit_fresh G h'' ->
     pull_volatile t x h'' T G V = (T', G') ->
     binds T' t (state_running, te_exp e, d, h'') ->
-    (* the value visible after pulling in [x]'s stored commit *)
-    is_latest_value G' h'' x v ->
+    (* the value is the one recorded in [x]'s stored commit: the last write *)
+    graph_writes G (vc_read V x) x v ->
     step (T, G, L, V) (T'[t := (state_running, K (ret_val v), d, h'')], G', L, V)
 | StepWrite : forall T G L V t e d h K x v,
     binds T t (state_running, te_exp e, d, h) ->
@@ -176,7 +183,7 @@ Inductive step : cfg -> cfg -> Prop :=
     x \in Volatiles ->
     commit_fresh G h' ->
     commit_fresh (graph_commit G h h' d[x := v]) h'' ->
-    push_volatile t x h' h'' (T[t := (state_running, te_exp e, d[x := v], h)]) G V = (T', G', V') ->
+    push_volatile t x v h' h'' (T[t := (state_running, te_exp e, d[x := v], h)]) G V = (T', G', V') ->
     step (T, G, L, V) (T'[t := (state_running, K void, empty, h')], G', L, V')
  | StepSpawn : forall T T' G G' L V t (t' : tid) e d h h' K e',
     binds T t (state_running, te_exp e, d, h) ->

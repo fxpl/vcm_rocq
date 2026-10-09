@@ -199,8 +199,8 @@ Proof.
       inverts* Heq.
     + forwards*: binds_update_neq_inv Hbinds.
   - unfolds pull_volatile, do_merge.
-    replace (T[t]) with (state_running, te_exp e, d, c) in H11 by forwards*: read_of_binds T t.
-    inverts H11.
+    replace (T[t]) with (state_running, te_exp e, d, c) in H12 by forwards*: read_of_binds T t.
+    inverts H12.
     asserts Hvcindom: (graph_indom G (vc_read V x)).
     { unfold vc_read, read_default. case_if as Hcase.
       - applys HdomVC. applys* binds_of_indom_read.
@@ -234,25 +234,25 @@ Proof.
     asserts Hwf1: (wf_graph (graph_commit G c c' d[x:=v])).
     { apply* graph_commit_wf. }
     splits.
-    { applys graph_merge_wf Hwf1 H10.
+    { applys graph_merge_with_wf Hwf1 H10.
       { apply graph_commit_indom. exact Hvcindom. }
       { apply graph_commit_indom_same. } }
-    { apply graph_merge_indom. apply graph_commit_indom. exact HrootIndom. }
+    { apply graph_merge_with_indom. apply graph_commit_indom. exact HrootIndom. }
     { introv Hbinds.
       destruct (classic (t = t0)).
       { subst. forwards~ Heq: binds_update_same_inv Hbinds. inverts Heq.
-        apply graph_merge_indom. apply graph_commit_indom_same. }
+        apply graph_merge_with_indom. apply graph_commit_indom_same. }
       { forwards~ Hbinds1: binds_update_neq_inv Hbinds.
         forwards~ Hbinds2: binds_update_neq_inv Hbinds1.
         forwards~ Hbinds3: binds_update_neq_inv Hbinds2.
-        apply graph_merge_indom. apply graph_commit_indom. applys HdomT Hbinds3. } }
-    { introv Hbinds. apply graph_merge_indom. apply graph_commit_indom. applys HdomL Hbinds. }
+        apply graph_merge_with_indom. apply graph_commit_indom. applys HdomT Hbinds3. } }
+    { introv Hbinds. apply graph_merge_with_indom. apply graph_commit_indom. applys HdomL Hbinds. }
     { intros y cy Hbinds.
       destruct (classic (y = x)).
       { subst. forwards~ Heq: binds_update_same_inv Hbinds. inverts Heq.
-        apply graph_merge_indom_same. }
+        apply graph_merge_with_indom_same. }
       { forwards~ Hbinds': binds_update_neq_inv Hbinds.
-        apply graph_merge_indom. apply graph_commit_indom. applys HdomVC Hbinds'. } }
+        apply graph_merge_with_indom. apply graph_commit_indom. applys HdomVC Hbinds'. } }
   - unfolds push_thread, do_commit.
     asserts* Hneq: (t <> t').
     rewrite~ read_update_neq in H10.
@@ -884,8 +884,8 @@ Proof.
   - (* StepReadVolatile: log' = log & event_read t x v, T' = T[t := running K(v)] with pulled commit *)
     lets (Hdspawned & Hdnew & Hdend & Hdrunning & Hdlock & Hdunlock & Hdplay): Hdesc.
     unfolds pull_volatile, do_merge.
-    replace (T[t]) with (state_running, te_exp e, d, c) in H8 by forwards*: read_of_binds T t.
-    inverts H8.
+    replace (T[t]) with (state_running, te_exp e, d, c) in H9 by forwards*: read_of_binds T t.
+    inverts H9.
     asserts (Hsmem & Hrnmem): (mem (event_start t) log /\ ~mem (event_end t) log).
     { apply (Hdrunning t). do 3 eexists. eassumption. }
     asserts* HtinX: (t \indom T).
