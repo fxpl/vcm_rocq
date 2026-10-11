@@ -26,3 +26,4 @@ LoggingBranchingFacts.v
 BranchingEquivLemmas.v
 BranchingEquiv.v
 BranchingConsistency.v
+VolatileExample.v
