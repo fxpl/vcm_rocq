@@ -1,10 +1,12 @@
 From Vcm Require Import Common.
 From Vcm Require Import Graph.
+From Vcm Require Import GraphFacts.
 From Vcm Require Import Branching.
 
 (* ------------------------------------------------------------------------ *)
-(* The volatile example of volatile.tex, on the Branching model of [main]   *)
-(* (a volatile write pulls, and writes to volatiles conflict).              *)
+(* The volatile example of volatile.tex, on the Branching model of          *)
+(* [non-conflicting-volatiles] (a volatile write pulls, and volatiles are   *)
+(* ignored by conflict checking).                                           *)
 (*                                                                          *)
 (*   volatile x, non-volatile y                                             *)
 (*                                                                          *)
@@ -35,7 +37,7 @@ Lemma conflict_free_merge_self :
 Proof.
   introv. unfold conflict_free_merge. rew_set. intros j Hj1 Hj2.
   destruct G as (C & P). unfold change_set in Hj2.
-  destruct Hj2 as (c0 & _ & Hanc & Hnanc). applys Hnanc Hanc.
+  destruct Hj2 as (_ & c0 & _ & Hanc & Hnanc). applys Hnanc Hanc.
 Qed.
 
 Lemma vc_read_empty : forall x, vc_read empty x = root_commit.
@@ -61,13 +63,16 @@ Hypothesis P2 : only_step p2 k2 (eff_write x v1).
 Hypothesis P2k : k2 void = te_ret r1.
 
 (* t2:  x = 2; print(y); print(x) *)
-Variables (q1 q2 q3 : exp) (j1 j2 j3 : cont) (r2 : ret).
+(* The value read by each print is remembered by the rest of the program, and
+   the thread's final result [res a b] records the two printed values. *)
+Variables (q1 q2 : exp) (q3 : val -> exp) (j1 j2 : cont) (j3 : val -> cont)
+          (res : val -> val -> ret).
 Hypothesis Q1 : only_step q1 j1 (eff_write x v2).
 Hypothesis Q1k : j1 void = te_exp q2.
 Hypothesis Q2 : only_step q2 j2 (eff_read y).
-Hypothesis Q2k : forall v, j2 (ret_val v) = te_exp q3.
-Hypothesis Q3 : only_step q3 j3 (eff_read x).
-Hypothesis Q3k : forall v, j3 (ret_val v) = te_ret r2.
+Hypothesis Q2k : forall a, j2 (ret_val a) = te_exp (q3 a).
+Hypothesis Q3 : forall a, only_step (q3 a) (j3 a) (eff_read x).
+Hypothesis Q3k : forall a b, j3 a (ret_val b) = te_ret (res a b).
 
 (* Both threads start at the root commit, with empty staging areas. *)
 Definition init_cfg : cfg :=
@@ -147,94 +152,220 @@ Proof.
             | (left; assumption) | (right; assumption) ].
 Qed.
 
-(* t2's write to the volatile [x] conflicts with t1's: the stored commit of
-   [x] (commit 2) holds t1's write of [x] (and of [y]), which t2's commit
-   (the root) has not seen. *)
-Lemma t2_write_conflicts :
-  ~ conflict_free_merge ((empty : diff)[x := v2]) root_commit (vc_read V_end x) G_end.
+(* ---- Facts about the commit graphs along t2's run ----------------------- *)
+
+Lemma x_neq_y : x <> y.
+Proof. intro H. subst. applys Hynvol Hxvol. Qed.
+
+Lemma vc_read_V_end : vc_read V_end x = 2.
+Proof. unfold V_end, vc_read. apply read_default_update_same. Qed.
+
+Lemma vc_read_V_c : vc_read (V_end[x := 5]) x = 5.
+Proof. unfold vc_read. apply read_default_update_same. Qed.
+
+(* t2's volatile write pulls [x]'s stored commit (2) into a merge commit 4,
+   then pushes commit 5 holding [x = 2]; t2's volatile read of [x] pulls the
+   stored commit (now 5) into merge commit 6; and t2 ends with commit 7. *)
+Definition G_b : graph := graph_merge G_end (vc_read V_end x) root_commit 4.
+Definition G_c : graph := graph_commit G_b 4 5 ((empty : diff)[x := v2]).
+Definition G_d : graph :=
+  graph_merge G_c (vc_read (V_end[x := 5]) x) 5 6.
+
+Ltac solve_fresh2 := unfold G_end, G_b, G_c, G_d; solve_fresh.
+
+(* Every edge goes from a smaller to a larger commit id, so ancestors are
+   smaller. *)
+Lemma anc_le :
+  forall G,
+    (forall a b : nat, graph_edge G a b -> a < b) ->
+    forall a b : nat, ancestor G a b -> a <= b.
 Proof.
-  intro Hcf.
-  asserts Hvc: (vc_read V_end x = 2).
-  { unfold V_end, vc_read. apply read_default_update_same. }
-  rewrite Hvc in Hcf.
-  unfold conflict_free_merge in Hcf. rew_set in Hcf.
-  applys Hcf x.
-  - rew_set. left. rew_dom. rew_set. right. reflexivity.
-  - unfold change_set, G_end. exists 2. splits.
-    + cbn. rewrite read_update_neq; [ | discriminate ]. rewrite read_update_same.
-      rew_dom. rew_set. right. reflexivity.
-    + apply AncestorRefl.
-    + intro Hanc. inversion Hanc; subst.
-      rename H0 into Hedge. cbn in Hedge. rew_set in Hedge.
-      repeat (match goal with H : _ \/ _ |- _ => destruct H end);
-        try (unfold root_commit in *; congruence).
+  introv Hedge Hanc. induction Hanc as [c | c1 c2 c3 Hanc IH Hp].
+  - nat_math.
+  - asserts He: (graph_edge G c2 c3). { destruct G. exact Hp. }
+    forwards: Hedge He. nat_math.
 Qed.
 
-(* In the final configuration only t1 (terminated) and t2 (running [q1]) exist. *)
-Lemma final_binds :
-  forall (T : threads) (t : tid) (s : thread),
-    binds T t1 (state_terminated, te_ret r1, empty, 3) ->
-    binds T t2 (state_running, te_exp q1, empty, root_commit) ->
-    (forall t, t \indom T -> t = t1 \/ t = t2) ->
-    binds T t s ->
-    (t = t1 /\ s = (state_terminated, te_ret r1, empty, 3)) \/
-    (t = t2 /\ s = (state_running, te_exp q1, empty, root_commit)).
+Ltac edges_incr :=
+  intros ? ? Hedge; cbn in Hedge; rew_set in Hedge;
+  repeat (match goal with H : _ \/ _ |- _ => destruct H end);
+  first [ contradiction
+        | (match goal with H : (_, _) = (_, _) |- _ => inversion H; subst; try unfold root_commit; nat_math end) ].
+
+Lemma edges_G_end : forall a b : nat, graph_edge G_end a b -> a < b.
+Proof. unfold G_end, graph_merge, graph_commit, graph_root. edges_incr. Qed.
+
+Lemma edges_G_d : forall a b : nat, graph_edge G_d a b -> a < b.
 Proof.
-  introv Hb1 Hb2 Hdom Hb.
-  forwards [-> | ->]: Hdom (indom_of_binds Hb).
-  - left. split; [ reflexivity | applys binds_inj Hb Hb1; typeclass ].
-  - right. split; [ reflexivity | applys binds_inj Hb Hb2; typeclass ].
+  unfold G_d, G_c, G_b, G_end, graph_merge, graph_commit, graph_root.
+  rewrite vc_read_V_end, vc_read_V_c. edges_incr.
 Qed.
 
-(* No step is possible once t1 has finished and t2 is about to write [x]. *)
-Lemma t2_stuck :
+Lemma change_set_nvol :
+  forall G c1 c2 j, j \in change_set G c1 c2 -> j \notin Volatiles.
+Proof. introv H. destruct G as (C & P). destruct H as (Hnv & _). exact Hnv. Qed.
+
+Ltac edge_in := cbn; rew_set; repeat first [ left; reflexivity | right ].
+
+(* t2's volatile write does not conflict: of t1's changes only [y] is visible
+   to t2, [x] being ignored, and t2 has nothing in the other direction. *)
+Lemma t2_write_no_conflict :
+  conflict_free_merge ((empty : diff)[x := v2]) root_commit 2 G_end.
+Proof.
+  unfold conflict_free_merge. rew_set. intros j Hj1 Hj2.
+  forwards Hnv: change_set_nvol Hj2.
+  rew_set in Hj1. destruct Hj1 as [Hd | Hcs].
+  - rew_dom. rew_set in Hd. destruct Hd as [Hd | Hd].
+    + applys indom_empty_inv Hd.
+    + subst j. applys Hnv Hxvol.
+  - unfold change_set in Hcs. destruct Hcs as (_ & c & _ & Hanc & Hnanc).
+    forwards Hle: anc_le edges_G_end Hanc.
+    asserts Hc0: ((c : nat) = 0). { unfold root_commit in Hle. nat_math. }
+    subst c. applys Hnanc.
+    eapply AncestorTrans; [ eapply AncestorTrans; [ apply AncestorRefl | ] | ];
+      unfold G_end, graph_root; edge_in.
+Qed.
+
+Ltac peel H :=
+  let H' := fresh "Hp" in
+  forwards H': binds_update_inv H; clear H; case_if in H'.
+
+(* the only writers in [G_c]: commit 2 (t1's push) and commit 5 (t2's push) *)
+Lemma writers_G_c :
+  forall c z w,
+    graph_writes G_c c z w ->
+    (c = 2 /\ ((z = y /\ w = v1) \/ (z = x /\ w = v1))) \/
+    (c = 5 /\ z = x /\ w = v2).
+Proof.
+  introv (d & Hb & Hbd).
+  clear Q1 Q1k Q2 Q2k Q3 Q3k P1 P1k P2 P2k.
+  unfold graph_binds, G_c, G_b, G_end, graph_root in Hb. cbn in Hb.
+  repeat (match goal with H : binds (_[_:=_]) _ _ |- _ => peel H end).
+  all: subst.
+  all: repeat (match goal with H : binds (_[_:=_]) _ _ |- _ => peel H end).
+  all: try (exfalso; match goal with H : binds _ _ _ |- _ =>
+              first [ (applys binds_empty_false H; typeclass) | (applys binds_empty_false H) ] end).
+  all: subst.
+  all: first [ (left; split; [ reflexivity | first [ (left; split; reflexivity) | (right; split; reflexivity) ] ])
+             | (right; split; [ reflexivity | split; reflexivity ]) ].
+Qed.
+
+Lemma writers_G_d :
+  forall c z w,
+    graph_writes G_d c z w ->
+    (c = 2 /\ ((z = y /\ w = v1) \/ (z = x /\ w = v1))) \/
+    (c = 5 /\ z = x /\ w = v2).
+Proof.
+  introv Hgw. unfold G_d in Hgw.
+  destruct (classic (c = 6)) as [-> | Hne].
+  - exfalso. applys graph_writes_graph_merge_same_false Hgw.
+  - applys writers_G_c w. applys graph_writes_graph_merge_inv Hne Hgw.
+Qed.
+
+(* print(y) after t2's volatile write: t2 sees t1's write [y = 1] *)
+Lemma t2_reads_y : is_latest_value G_c 5 y v1.
+Proof.
+  exists 2. splits.
+  - exists ((empty : diff)[y := v1][x := v1]). split.
+    + unfold graph_binds, G_c, G_b, G_end, graph_root. cbn. solve_binds.
+    + apply binds_update_neq; [ exact (fun H => x_neq_y (eq_sym H)) | apply binds_update_same ].
+  - unfold G_c, G_b, G_end, graph_root. rewrite vc_read_V_end.
+    apply AncestorTrans with (c2 := 4);
+      [ apply AncestorTrans with (c2 := 2); [ apply AncestorRefl | edge_in ] | edge_in ].
+  - introv Hw Ha1 Ha2. forwards [(Hc & _) | (_ & Hz & _)]: writers_G_c Hw.
+    + exact Hc.
+    + exfalso. applys x_neq_y. symmetry. exact Hz.
+Qed.
+
+(* print(x) after t2's volatile read pull: t2 sees its own write [x = 2] *)
+Lemma t2_reads_x : is_latest_value G_d 6 x v2.
+Proof.
+  exists 5. splits.
+  - unfold G_d. apply graph_writes_graph_merge; [ discriminate | ].
+    exists ((empty : diff)[x := v2]). split.
+    + unfold graph_binds, G_c, G_b, G_end, graph_root. cbn. solve_binds.
+    + apply binds_update_same.
+  - unfold G_d, G_c, G_b, G_end, graph_root. rewrite vc_read_V_c.
+    apply AncestorTrans with (c2 := 5); [ apply AncestorRefl | edge_in ].
+  - introv Hw Ha1 Ha2. forwards [(Hc & _) | (Hc & _)]: writers_G_d Hw.
+    + exfalso. forwards Hle: anc_le edges_G_d Ha1. nat_math.
+    + exact Hc.
+Qed.
+
+(* t2 runs to completion after t1: every step is enabled, and [print(y)] and
+   [print(x)] return [v1] and [v2] (recorded in t2's final result). *)
+Lemma t2_completes :
   forall (T : threads),
-    binds T t1 (state_terminated, te_ret r1, empty, 3) ->
     binds T t2 (state_running, te_exp q1, empty, root_commit) ->
-    (forall t, t \indom T -> t = t1 \/ t = t2) ->
-    forall cfg', ~ step (T, G_end, empty, V_end) cfg'.
+    exists T' G' L' V' c,
+      steps (T, G_end, empty, V_end) (T', G', L', V') /\
+      binds T' t2 (state_terminated, te_ret (res v1 v2), empty, c) /\
+      (forall s, binds T t1 s -> binds T' t1 s).
 Proof.
-  introv Hb1 Hb2 Hdom Hstep.
-  inverts Hstep;
-    match goal with
-    | H : binds T ?t ?s |- _ =>
-        forwards [(-> & Hs) | (-> & Hs)]: final_binds Hb1 Hb2 Hdom H;
-        inverts Hs
-    end.
-  (* rules with a second thread (join): also pin down the acting thread *)
-  all: try (match goal with
-        | H : binds _ ?t (state_running, te_exp ?e, ?d, ?h) |- _ =>
-            is_var e;
-            forwards [(-> & Hs) | (-> & Hs)]: final_binds Hb1 Hb2 Hdom H;
-            inverts Hs
-        end).
-  all: try (match goal with
-        | Hul : step_ul q1 _ _ |- _ =>
-            destruct ((proj2 Q1) _ _ Hul) as [_ Hc]; inversion Hc; subst
-        end).
-  all: first [ contradiction | (eapply t2_write_conflicts; eassumption) ].
+  introv Hb2.
+  eexists _, _, _, _, _. splits.
+  - (* x = 2: volatile write *)
+    eapply steps_step.
+    { eapply StepWriteVolatile with (t := t2) (x := x) (v := v2) (h' := 4) (h'' := 5).
+      - exact Hb2.
+      - apply (proj1 Q1).
+      - assumption.
+      - rewrite vc_read_V_end. apply t2_write_no_conflict.
+      - solve_fresh2.
+      - unfold pull_volatile, do_merge. rewrite (read_of_binds Hb2). reflexivity.
+      - apply binds_update_same.
+      - solve_fresh2.
+      - unfold push_volatile, do_commit. rewrite read_update_same. reflexivity. }
+    (* print(y): a global read *)
+    eapply steps_step.
+    { eapply StepReadGlobal with (t := t2) (x := y) (v := v1).
+      - rewrite Q1k. apply binds_update_same.
+      - apply (proj1 Q2).
+      - assumption.
+      - intro Hin. applys indom_empty_inv Hin.
+      - apply t2_reads_y. }
+    (* print(x): a volatile read *)
+    eapply steps_step.
+    { eapply StepReadVolatile with (t := t2) (x := x) (v := v2) (h'' := 6).
+      - rewrite Q2k. apply binds_update_same.
+      - apply (proj1 (Q3 v1)).
+      - assumption.
+      - match goal with |- conflict_free_merge _ _ ?c _ =>
+          replace c with 5 by (unfold vc_read; symmetry; apply read_default_update_same)
+        end.
+        apply conflict_free_merge_self.
+      - solve_fresh2.
+      - unfold pull_volatile, do_merge. rewrite read_update_same. reflexivity.
+      - rewrite Q2k. apply binds_update_same.
+      - apply t2_reads_x. }
+    (* t2 ends *)
+    eapply steps_step.
+    { eapply StepEnd with (t := t2) (h' := 7).
+      - rewrite Q3k. apply binds_update_same.
+      - solve_fresh2.
+      - unfold do_commit. rewrite read_update_same. reflexivity. }
+    apply steps_refl.
+  - solve_binds.
+  - introv Hs. solve_binds. exact Hs.
 Qed.
 
-(* The example on [main]: t1 runs to completion, then t2's first action, the
-   volatile write [x = 2], is a conflict with t1's [x = 1]; the configuration
-   is stuck and t2 never gets to its prints (cf. "Conflict at x = 2" in
-   volatile.tex). *)
+(* The example on [non-conflicting-volatiles]: t1 runs to completion, then t2
+   runs to completion without any conflict, printing [y = 1] and [x = 2]
+   (cf. the third execution in volatile.tex). *)
 Theorem volatile_example :
-  exists T,
-    steps init_cfg (T, G_end, empty, V_end) /\
-    binds T t2 (state_running, te_exp q1, empty, root_commit) /\
-    ~ conflict_free_merge ((empty : diff)[x := v2]) root_commit
-        (vc_read V_end x) G_end /\
-    (forall cfg', ~ step (T, G_end, empty, V_end) cfg').
+  exists T G L V c1 c2,
+    steps init_cfg (T, G, L, V) /\
+    binds T t1 (state_terminated, te_ret r1, empty, c1) /\
+    binds T t2 (state_terminated, te_ret (res v1 v2), empty, c2).
 Proof.
   forwards (T & G & Hsteps & HG & Hb1 & Hb2 & Hdom): t1_completes.
-  subst G. exists T. splits.
-  - exact Hsteps.
-  - exact Hb2.
-  - apply t2_write_conflicts.
-  - applys t2_stuck Hb1 Hb2 Hdom.
+  subst G.
+  forwards (T' & G' & L' & V' & c & Hsteps2 & Hb2' & Hb1'): t2_completes Hb2.
+  exists T' G' L' V' 3 c. splits.
+  - clear - Hsteps Hsteps2. induction Hsteps; [ exact Hsteps2 | econstructor; eauto ].
+  - apply Hb1'. exact Hb1.
+  - exact Hb2'.
 Qed.
-
 End Example.
 
 (* [Print Assumptions volatile_example] lists only the [Common.v] parameters
