@@ -366,6 +366,7 @@ Theorem linear_sound :
     | (TSh, _, LSh), (TL, _, LL) => matching_threads TSh TL /\ LSh = LL
     end ->
     race_free log' ->
+    log' <> log ->
     LoggingLinear.step (cfgL, log) (cfgL', log') ->
     exists cfgSh',
       LoggingSharedMemory.step (cfgSh, log) (cfgSh', log') /\
@@ -373,7 +374,7 @@ Theorem linear_sound :
         | (TSh', _, LSh'), (TL', _, LL') => matching_threads TSh' TL' /\ LSh' = LL'
         end.
 Proof.
-  introv Hwf HdescSh HdescL Hmatch Hrf Hstep.
+  introv Hwf HdescSh HdescL Hmatch Hrf Hne Hstep.
   destruct cfgSh as ((Tsh & Hp) & Lsh).
   inverts Hstep;
     destruct Hmatch as (Hsame & ->);
@@ -494,6 +495,17 @@ Proof.
     asserts* Hdom: (t \indom Tsh).
     clears HdescSh HdescL.
     exists. split; [ constructors* | simpls*].
+  + (* the seven conflict exceptions leave the log unchanged, and are excluded
+       by [log' <> log]: the equivalence is about steps that perform an
+       operation. (That a conflict implies a racy log is established by
+       [linear_sync_conflict_sound] and [linear_volatile_write_conflict_sound].) *)
+    exfalso. apply Hne. reflexivity.
+  + exfalso. apply Hne. reflexivity.
+  + exfalso. apply Hne. reflexivity.
+  + exfalso. apply Hne. reflexivity.
+  + exfalso. apply Hne. reflexivity.
+  + exfalso. apply Hne. reflexivity.
+  + exfalso. apply Hne. reflexivity.
 Qed.
 
 Theorem linear_equiv :
@@ -505,10 +517,11 @@ Theorem linear_equiv :
     | (TSh, _, LSh), (TL, _, LL) => matching_threads TSh TL /\ LSh = LL
     end ->
     race_free log' ->
+    log' <> log ->
       (exists cfgSh', LoggingSharedMemory.step (cfgSh, log) (cfgSh', log')) <->
       (exists cfgL', LoggingLinear.step (cfgL, log) (cfgL', log')).
 Proof.
-  introv Hwf HdescSh HdescL Hmatch Hrf.
+  introv Hwf HdescSh HdescL Hmatch Hrf Hne.
   split.
   - introv (cfgSh' & Hstep).
     forwards* (cfgL' & Hstep' & _): linear_complete.

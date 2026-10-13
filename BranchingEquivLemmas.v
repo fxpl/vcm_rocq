@@ -3401,19 +3401,29 @@ Proof.
   applys (>> conflict_free_merge_holds Hwf Hrflog Hplay HtD HtTC Hcdom).
 Qed.
 
-Theorem branching_lock_race_sound :
+(* The same for [lock_read]: a never-touched lock reads as [(ls_free, root_commit)],
+   which is also a commit of the graph. *)
+Theorem branching_lock_conflict_sound :
   forall log T G L V t e d c K l c',
     wf_log log ->
     describes log (T, G, L, V) ->
     binds T t (state_running, te_exp e, d, c) ->
     step_ul e K (eff_lock l) ->
-    binds L l (ls_free, c') ->
+    lock_read L l = (ls_free, c') ->
     ~ conflict_free_merge d c c' G ->
     ~ race_free log.
 Proof.
-  introv Hwf Hdesc Hbt Hul Hbl Hncf Hrflog.
-  forwards (HwfG & _ & Hcommits & Hlockcommits & _): describes_wf_cfg Hdesc.
-  forwards Hcdom: Hlockcommits Hbl.
+  introv Hwf Hdesc Hbt Hul Hread Hncf Hrflog.
+  forwards (HwfG & Hroot & Hcommits & Hlockcommits & _): describes_wf_cfg Hdesc.
+  asserts Hcdom: (graph_indom G c').
+  { unfold lock_read in Hread.
+    destruct (classic (l \indom L)) as [Hin | Hnin].
+    - rewrite (read_default_indom Hin) in Hread.
+      asserts Hb: (binds L l (ls_free, c')).
+      { applys binds_of_indom_read Hin. exact Hread. }
+      applys Hlockcommits Hb.
+    - rewrite (read_default_notindom Hnin) in Hread.
+      inverts Hread. exact Hroot. }
   destruct Hdesc as (_ & _ & _ & _ & _ & _ &
     (D & TC & LC & VC & CH & Hplay & Hdelta & Hlocks & _ & HdomD & HdomTC & HdomLC)).
   lets Htin: (indom_of_binds Hbt).

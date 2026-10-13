@@ -152,6 +152,8 @@ Proof.
     + exists. applys* StepWriteVolatile.
     + exists. applys* StepSpawn.
     + exists. applys* StepJoin.
+    all: try (exists; first [ applys* StepReadVolatileConflict | applys* StepWriteVolatileConflict
+                            | applys* StepJoinConflict | applys* StepLockConflict ]).
 Qed.
 
 Theorem step_preserves_wf_cfg :
@@ -337,6 +339,38 @@ Proof.
       * forwards~ Hbinds': binds_update_neq_inv Hbinds.
         forwards* Hbinds'': binds_update_neq_inv Hbinds'.
     + introv Hbinds. apply* graph_commit_indom.
+  - (* conflict exception: the thread only receives [ret_race] *)
+    splits~.
+    introv Hbinds.
+    destruct (classic (t = t0)).
+    + subst.
+      forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts* Heq.
+    + forwards*: binds_update_neq_inv Hbinds.
+  - (* conflict exception: the thread only receives [ret_race] *)
+    splits~.
+    introv Hbinds.
+    destruct (classic (t = t0)).
+    + subst.
+      forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts* Heq.
+    + forwards*: binds_update_neq_inv Hbinds.
+  - (* conflict exception: the thread only receives [ret_race] *)
+    splits~.
+    introv Hbinds.
+    destruct (classic (t = t0)).
+    + subst.
+      forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts* Heq.
+    + forwards*: binds_update_neq_inv Hbinds.
+  - (* conflict exception: the thread only receives [ret_race] *)
+    splits~.
+    introv Hbinds.
+    destruct (classic (t = t0)).
+    + subst.
+      forwards~ Heq: binds_update_same_inv Hbinds.
+      inverts* Heq.
+    + forwards*: binds_update_neq_inv Hbinds.
 Qed.
 
 Theorem step_preserves_wf_log :
@@ -436,6 +470,10 @@ Proof.
     asserts (log'' & Hlheld): (exists log'', LibList.filter (fun e => touches_lock l e) log = log'' & event_lock t l).
     { apply* Hdlock. }
     apply* wf_log_unlock_last.
+  - (* the four conflict exceptions leave the log unchanged *) exact Hwf.
+  - exact Hwf.
+  - exact Hwf.
+  - exact Hwf.
 Qed.
 
 Hint Resolve inhab_thread : vcm.
@@ -611,6 +649,76 @@ Proof.
   introv Hnt Hd. intros l. rew_listx. cases_if as Hc.
   - false (Hnt l Hc).
   - rew_list. apply Hd.
+Qed.
+
+(* Replacing the expression of a running thread (keeping its staging area and
+   commit) preserves [describes] for the same log: [describes] does not
+   constrain thread expressions. Used by the conflict-exception steps. *)
+Lemma binds_replace_exp_iff :
+  forall (T : threads) t e e' d c t2 st,
+    binds T t (state_running, e, d, c) ->
+    ((exists a b g, binds (T[t := (state_running, e', d, c)]) t2 (st, a, b, g)) <->
+     (exists a b g, binds T t2 (st, a, b, g))).
+Proof.
+  introv Hb. split.
+  - intros (a & b & g & Hb2). destruct (classic (t2 = t)) as [-> | Hne].
+    + forwards Heq: binds_update_same_inv Hb2. inverts Heq. do 3 eexists. exact Hb.
+    + do 3 eexists. applys binds_update_neq_inv Hb2 Hne.
+  - intros (a & b & g & Hb2). destruct (classic (t2 = t)) as [-> | Hne].
+    + forwards Heq: binds_inj Hb Hb2; [ typeclass | ]. inverts Heq.
+      do 3 eexists. apply binds_update_same.
+    + do 3 eexists. applys binds_update_neq Hne Hb2.
+Qed.
+
+Lemma binds_replace_exp_terminated_iff :
+  forall (T : threads) t e e' d c t2,
+    binds T t (state_running, e, d, c) ->
+    ((exists a g, binds (T[t := (state_running, e', d, c)]) t2 (state_terminated, a, empty_diff, g)) <->
+     (exists a g, binds T t2 (state_terminated, a, empty_diff, g))).
+Proof.
+  introv Hb. split.
+  - intros (a & g & Hb2). destruct (classic (t2 = t)) as [-> | Hne].
+    + forwards Heq: binds_update_same_inv Hb2. inverts Heq.
+    + do 2 eexists. applys binds_update_neq_inv Hb2 Hne.
+  - intros (a & g & Hb2). destruct (classic (t2 = t)) as [-> | Hne].
+    + forwards Heq: binds_inj Hb Hb2; [ typeclass | ]. inverts Heq.
+    + do 2 eexists. applys binds_update_neq Hne Hb2.
+Qed.
+
+Lemma describes_replace_exp :
+  forall (log : Log.log) T G L V t e e' d c,
+    describes log (T, G, L, V) ->
+    binds T t (state_running, e, d, c) ->
+    describes log (T[t := (state_running, e', d, c)], G, L, V).
+Proof.
+  introv Hdesc Hb.
+  destruct Hdesc as (H1 & H2 & H3 & H4 & H5 & H6 &
+    D & TC & LC & VC & CH & Hplay & H7a & H7b & H7c & H7d & H7e & H7f).
+  lets Hin: (indom_of_binds Hb).
+  asserts Hdom: (forall t2, t2 \indom (T[t := (state_running, e', d, c)]) <-> t2 \indom T).
+  { intros t2. rew_dom. rew_set. split.
+    - intros [H | ->]; [ exact H | exact Hin ].
+    - intros H. left. exact H. }
+  splits.
+  - intros t2. rewrite Hdom. apply H1.
+  - intros t2. rewrite binds_replace_exp_iff; [ | exact Hb ]. apply H2.
+  - intros t2. rewrite binds_replace_exp_terminated_iff; [ | exact Hb ]. apply H3.
+  - intros t2. rewrite binds_replace_exp_iff; [ | exact Hb ]. apply H4.
+  - exact H5.
+  - exact H6.
+  - exists D TC LC VC CH. splits.
+    + exact Hplay.
+    + intros t2 Ht2. rewrite Hdom in Ht2.
+      forwards (ts0 & e0 & Hb2): H7a t2 Ht2.
+      destruct (classic (t2 = t)) as [-> | Hne].
+      * forwards Heq: binds_inj Hb Hb2; [ typeclass | ]. inverts Heq.
+        do 2 eexists. apply binds_update_same.
+      * do 2 eexists. applys binds_update_neq Hne Hb2.
+    + exact H7b.
+    + exact H7c.
+    + intros t2 Ht2. rewrite Hdom in Ht2. apply H7d. exact Ht2.
+    + intros t2 Ht2. rewrite Hdom in Ht2. apply H7e. exact Ht2.
+    + exact H7f.
 Qed.
 
 Theorem step_preserves_describes :
@@ -1517,4 +1625,9 @@ Proof.
         destruct Hmem1 as [->|Hmem1].
         -- apply indom_update_same; typeclass.
         -- apply* indom_update_of_indom. apply* indom_update_of_indom.
+  - (* the four conflict exceptions only replace the thread's expression *)
+    applys describes_replace_exp Hdesc. eassumption.
+  - applys describes_replace_exp Hdesc. eassumption.
+  - applys describes_replace_exp Hdesc. eassumption.
+  - applys describes_replace_exp Hdesc. eassumption.
 Qed.

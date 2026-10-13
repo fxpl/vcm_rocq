@@ -159,6 +159,59 @@ Inductive step : cfg -> cfg -> Prop :=
     commit_fresh G g' ->
     global_commit t g g' T G = (T', G') ->
     step (T, G, L) (T'[t := (state_running, K void, empty, g')], G', L[l := ls_free])
+(* A failed conflict check does not stop the semantics: the thread receives the
+   exception [ret_race] instead of the result of the operation, and keeps its
+   staging area and commit. The commit graph and the locks do not change, and no
+   operation takes place (nothing is committed, the target is not joined, the
+   lock is neither acquired nor released, the volatile is neither read nor
+   written, no thread is spawned). A thread that fails to finish ([StepEnd]) has
+   no continuation: its result is replaced by [ret_race] and it stays running. *)
+| StepEndConflict : forall T G L t r d c g,
+    binds T t (state_running, te_ret r, d, c) ->
+    is_global_head G g ->
+    ~ lin_conflict_free d c g G ->
+    step (T, G, L) (T[t := (state_running, te_ret ret_race, d, c)], G, L)
+| StepReadVolatileConflict : forall T G L t e d c K x g,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_read x) ->
+    x \in Volatiles ->
+    is_global_head G g ->
+    ~ lin_conflict_free d c g G ->
+    step (T, G, L) (T[t := (state_running, K ret_race, d, c)], G, L)
+| StepWriteVolatileConflict : forall T G L t e d c K x v g,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_write x v) ->
+    x \in Volatiles ->
+    is_global_head G g ->
+    ~ lin_conflict_free d[x := v] c g G ->
+    step (T, G, L) (T[t := (state_running, K ret_race, d, c)], G, L)
+| StepSpawnConflict : forall T G L t e d c K e' g,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_spawn e') ->
+    is_global_head G g ->
+    ~ lin_conflict_free d c g G ->
+    step (T, G, L) (T[t := (state_running, K ret_race, d, c)], G, L)
+| StepJoinConflict : forall T G L t t' e d c c' K r g,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_join t') ->
+    binds T t' (state_terminated, te_ret r, empty, c') ->
+    is_global_head G g ->
+    ~ lin_conflict_free d c g G ->
+    step (T, G, L) (T[t := (state_running, K ret_race, d, c)], G, L)
+| StepLockConflict : forall T G L t e d c K l g,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_lock l) ->
+    lock_read L l = ls_free ->
+    is_global_head G g ->
+    ~ lin_conflict_free d c g G ->
+    step (T, G, L) (T[t := (state_running, K ret_race, d, c)], G, L)
+| StepReleaseConflict : forall T G L t e d c K l g,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_unlock l) ->
+    lock_read L l = ls_held t ->
+    is_global_head G g ->
+    ~ lin_conflict_free d c g G ->
+    step (T, G, L) (T[t := (state_running, K ret_race, d, c)], G, L)
 .
 
 Hint Constructors step Linear.step : vcm.

@@ -885,4 +885,11 @@ Proof.
              applys Htwne. symmetry. exact Hgtef. }
            forwards Heqcf: (>> Hmax cf v' Hgwf Hanccwcf HancfTC).
            applys Hcfne Heqcf.
+  - (* the conflict exceptions leave the log unchanged *) exact Hhbc.
+  - exact Hhbc.
+  - exact Hhbc.
+  - exact Hhbc.
+  - exact Hhbc.
+  - exact Hhbc.
+  - exact Hhbc.
 Qed.

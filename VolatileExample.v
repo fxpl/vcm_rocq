@@ -170,69 +170,32 @@ Proof.
         try (unfold root_commit in *; congruence).
 Qed.
 
-(* In the final configuration only t1 (terminated) and t2 (running [q1]) exist. *)
-Lemma final_binds :
-  forall (T : threads) (t : tid) (s : thread),
-    binds T t1 (state_terminated, te_ret r1, empty, 3) ->
-    binds T t2 (state_running, te_exp q1, empty, root_commit) ->
-    (forall t, t \indom T -> t = t1 \/ t = t2) ->
-    binds T t s ->
-    (t = t1 /\ s = (state_terminated, te_ret r1, empty, 3)) \/
-    (t = t2 /\ s = (state_running, te_exp q1, empty, root_commit)).
-Proof.
-  introv Hb1 Hb2 Hdom Hb.
-  forwards [-> | ->]: Hdom (indom_of_binds Hb).
-  - left. split; [ reflexivity | applys binds_inj Hb Hb1; typeclass ].
-  - right. split; [ reflexivity | applys binds_inj Hb Hb2; typeclass ].
-Qed.
-
-(* No step is possible once t1 has finished and t2 is about to write [x]. *)
-Lemma t2_stuck :
-  forall (T : threads),
-    binds T t1 (state_terminated, te_ret r1, empty, 3) ->
-    binds T t2 (state_running, te_exp q1, empty, root_commit) ->
-    (forall t, t \indom T -> t = t1 \/ t = t2) ->
-    forall cfg', ~ step (T, G_end, empty, V_end) cfg'.
-Proof.
-  introv Hb1 Hb2 Hdom Hstep.
-  inverts Hstep;
-    match goal with
-    | H : binds T ?t ?s |- _ =>
-        forwards [(-> & Hs) | (-> & Hs)]: final_binds Hb1 Hb2 Hdom H;
-        inverts Hs
-    end.
-  (* rules with a second thread (join): also pin down the acting thread *)
-  all: try (match goal with
-        | H : binds _ ?t (state_running, te_exp ?e, ?d, ?h) |- _ =>
-            is_var e;
-            forwards [(-> & Hs) | (-> & Hs)]: final_binds Hb1 Hb2 Hdom H;
-            inverts Hs
-        end).
-  all: try (match goal with
-        | Hul : step_ul q1 _ _ |- _ =>
-            destruct ((proj2 Q1) _ _ Hul) as [_ Hc]; inversion Hc; subst
-        end).
-  all: first [ contradiction | (eapply t2_write_conflicts; eassumption) ].
-Qed.
-
-(* The example on [main]: t1 runs to completion, then t2's first action, the
-   volatile write [x = 2], is a conflict with t1's [x = 1]; the configuration
-   is stuck and t2 never gets to its prints (cf. "Conflict at x = 2" in
-   volatile.tex). *)
+(* The example on [conflicts-as-exceptions]: t1 runs to completion, then t2's
+   first action, the volatile write [x = 2], is a conflict with t1's [x = 1].
+   The semantics no longer gets stuck: the failed check is a step (cf. "Conflict
+   at x = 2" in volatile.tex) in which t2 receives the exception [ret_race] in
+   place of the result of the write, and keeps its (empty) staging area and
+   its commit; the commit graph and the volatiles are unchanged. *)
 Theorem volatile_example :
-  exists T,
+  exists T T',
     steps init_cfg (T, G_end, empty, V_end) /\
     binds T t2 (state_running, te_exp q1, empty, root_commit) /\
     ~ conflict_free_merge ((empty : diff)[x := v2]) root_commit
         (vc_read V_end x) G_end /\
-    (forall cfg', ~ step (T, G_end, empty, V_end) cfg').
+    step (T, G_end, empty, V_end) (T', G_end, empty, V_end) /\
+    binds T' t2 (state_running, j1 ret_race, empty, root_commit).
 Proof.
   forwards (T & G & Hsteps & HG & Hb1 & Hb2 & Hdom): t1_completes.
-  subst G. exists T. splits.
+  subst G. exists T. eexists. splits.
   - exact Hsteps.
   - exact Hb2.
   - apply t2_write_conflicts.
-  - applys t2_stuck Hb1 Hb2 Hdom.
+  - eapply StepWriteVolatileConflict with (t := t2) (x := x) (v := v2).
+    + exact Hb2.
+    + apply (proj1 Q1).
+    + assumption.
+    + apply t2_write_conflicts.
+  - solve_binds.
 Qed.
 
 End Example.

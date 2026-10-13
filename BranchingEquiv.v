@@ -585,8 +585,11 @@ Proof.
     exists. splits; [ constructors* | simpls*].
 Qed.
 
-(* Soundness: every Branching step is matched by a SharedMemory step, with the
-   resulting configurations again matching on threads and locks. *)
+(* Soundness: every Branching step that performs an operation is matched by a
+   SharedMemory step, with the resulting configurations again matching on
+   threads and locks. The conflict-exception steps do not perform an operation
+   and leave the log unchanged ([log' <> log] excludes them); a conflict implies
+   a racy log, see [branching_join_conflict_sound] and friends. *)
 Theorem branching_sound :
   forall log log' cfgSh cfgB cfgB',
     wf_log log ->
@@ -596,6 +599,7 @@ Theorem branching_sound :
     | (TSh, _, _), (TB, _, _, _) => matching_threads TSh TB
     end ->
     race_free log' ->
+    log' <> log ->
     LoggingBranching.step (cfgB, log) (cfgB', log') ->
     exists cfgSh',
       LoggingSharedMemory.step (cfgSh, log) (cfgSh', log') /\
@@ -603,7 +607,7 @@ Theorem branching_sound :
       | (TSh', _, _), (TB', _, _, _) => matching_threads TSh' TB'
       end.
 Proof.
-  introv Hwf HdescSh HdescB Hthr Hrf Hstep.
+  introv Hwf HdescSh HdescB Hthr Hrf Hne Hstep.
   destruct cfgSh as ((Tsh & Hp) & Lsh).
   destruct cfgB as [[(T & G) L] V].
   forwards Hlck: matching_locks_describes HdescSh HdescB.
@@ -762,7 +766,17 @@ Proof.
     }
     clears HdescSh HdescB.
     simpls*.
+  + (* the four conflict exceptions leave the log unchanged, and are excluded
+       by [log' <> log]: the equivalence is about steps that perform an
+       operation. (That a conflict implies a racy log is established by
+       [branching_join_conflict_sound] and the other [*_conflict_sound]
+       theorems.) *)
+    exfalso. apply Hne. reflexivity.
+  + exfalso. apply Hne. reflexivity.
+  + exfalso. apply Hne. reflexivity.
+  + exfalso. apply Hne. reflexivity.
 Qed.
+
 
 (* The original equivalence is the conjunction of the two directions. *)
 Corollary branching_equiv :
@@ -774,10 +788,11 @@ Corollary branching_equiv :
     | (TSh, _, _), (TB, _, _, _) => matching_threads TSh TB
     end ->
     race_free log' ->
+    log' <> log ->
       (exists cfgSh', LoggingSharedMemory.step (cfgSh, log) (cfgSh', log')) <->
       (exists cfgB', LoggingBranching.step (cfgB, log) (cfgB', log')).
 Proof.
-  introv Hwf HdescSh HdescB Hmatch Hrf. split.
+  introv Hwf HdescSh HdescB Hmatch Hrf Hne. split.
   - introv (cfgSh' & Hstep).
     forwards* (cfgB' & Hb & _): branching_complete.
   - introv (cfgB' & Hstep).

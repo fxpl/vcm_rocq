@@ -105,38 +105,6 @@ Definition forbidden (cfg : cfg) : Prop :=
         ~ enabled G L t d h a
   end.
 
-(* A thread is poised to synchronise (join a terminated thread, or acquire a
-   free lock) but the merge that synchronisation would perform is not
-   conflict-free. This is another (non-[forbidden]) way a thread can get
-   stuck: not a deadlock (the target is available), not a language-level
-   violation (the effect is enabled), but a genuine data race between the
-   two histories being merged. *)
-Definition conflict_detected (cfg : cfg) : Prop :=
-  match cfg with
-  | (T, G, L, V) =>
-      exists t e d h K,
-        binds T t (state_running, te_exp e, d, h) /\
-        ((exists t' r d' c',
-             step_ul e K (eff_join t') /\
-             binds T t' (state_terminated, te_ret r, d', c') /\
-             ~ conflict_free_merge d h c' G)
-         \/
-         (exists l h',
-             step_ul e K (eff_lock l) /\
-             lock_read L l = (ls_free, h') /\
-             ~ conflict_free_merge d h h' G)
-         \/
-         (exists x,
-             step_ul e K (eff_read x) /\
-             x \in Volatiles /\
-             ~conflict_free_merge d h (vc_read V x) G)
-         \/
-         (exists x v,
-             step_ul e K (eff_write x v) /\
-             x \in Volatiles /\
-             ~conflict_free_merge d[x := v] h (vc_read V x) G))
-  end.
-
 (* A thread has terminated. *)
 Definition terminated (cfg : cfg) (t : tid) : Prop :=
   match cfg with
@@ -322,6 +290,11 @@ Proof.
     match goal with H : push_lock _ _ _ _ _ _ = (_, _, _) |- _ =>
       forwards Hfin': finite_push_lock H Hfin end.
     rew_dom. autos.
+  - (* the four conflict exceptions replace a thread in place *)
+    rew_dom. autos.
+  - rew_dom. autos.
+  - rew_dom. autos.
+  - rew_dom. autos.
 Qed.
 
 (* A step's fresh commit never writes a volatile variable (its diff is some
@@ -921,6 +894,86 @@ Proof.
       { introv Hxvol0. applys Hvd Hxvol0. eassumption. }
       introv Hxvol Hgw.
       applys* (>> exwa_preserved_commit Hedge HdomV HrootIndom Hexwa (HnoVolInD x Hxvol) Hxvol Hgw).
+  - (* StepReadVolatileConflict: the thread only receives [ret_race] *)
+    splits 10.
+    + autos.
+    + exact Hwf.
+    + exact HrootIndom.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq. applys* HdomT.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* HdomT.
+    + exact HdomL.
+    + exact HdomV.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts* Hbinds'.
+      * auto_star.
+    + exact Hvwa.
+    + exact Hexwa.
+  - (* StepWriteVolatileConflict: the thread only receives [ret_race] *)
+    splits 10.
+    + autos.
+    + exact Hwf.
+    + exact HrootIndom.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq. applys* HdomT.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* HdomT.
+    + exact HdomL.
+    + exact HdomV.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts* Hbinds'.
+      * auto_star.
+    + exact Hvwa.
+    + exact Hexwa.
+  - (* StepJoinConflict: the thread only receives [ret_race] *)
+    splits 10.
+    + autos.
+    + exact Hwf.
+    + exact HrootIndom.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq. applys* HdomT.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* HdomT.
+    + exact HdomL.
+    + exact HdomV.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts* Hbinds'.
+      * auto_star.
+    + exact Hvwa.
+    + exact Hexwa.
+  - (* StepLockConflict: the thread only receives [ret_race] *)
+    splits 10.
+    + autos.
+    + exact Hwf.
+    + exact HrootIndom.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq. applys* HdomT.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* HdomT.
+    + exact HdomL.
+    + exact HdomV.
+    + introv Hvol Hbinds.
+      forwards Hbinds': binds_update_inv Hbinds.
+      case_if as C.
+      * subst. inverts* Hbinds'.
+      * auto_star.
+    + exact Hvwa.
+    + exact Hexwa.
 Qed.
 
 (* ===================================================================== *)
@@ -954,7 +1007,8 @@ Proof. introv Hb1 Hb2. exact (@binds_inj lid ll (lock_state * commit) Branching.
 (* The heart of progress: keep the whole configuration [(T, G, L)] fixed and
    induct over a *list of thread ids* [l]. Either every thread named in [l]
    is terminated-or-inert, or some thread can take a step, or the
-   configuration is forbidden, or a synchronising thread's merge conflicts. *)
+   configuration is forbidden. (A synchronising thread whose merge conflicts
+   also takes a step, throwing [ret_race].) *)
 Lemma progress_aux :
   forall T G L V (l : list tid),
     ul_progress (T, G, L, V) ->
@@ -962,18 +1016,16 @@ Lemma progress_aux :
     (forall t, mem t l -> t \indom T ->
        terminated (T, G, L, V) t \/ inert (T, G, L, V) t)
     \/ (exists cfg', step (T, G, L, V) cfg')
-    \/ forbidden (T, G, L, V)
-    \/ conflict_detected (T, G, L, V).
+    \/ forbidden (T, G, L, V).
 Proof.
   introv Hulp Hwfc.
   lets (Hfin & Hwf & HrootIndom & Hterm & HdomT & HdomL & HdomV & Hvd & Hvwa & Hexwa): Hwfc.
   lets (_ & _ & Hedge): Hwf.
   induction l as [| a l IH].
   - left. introv Hmem. inverts Hmem.
-  - destruct IH as [Hall | [Hstep | [Hforb | Hconf]]];
+  - destruct IH as [Hall | [Hstep | Hforb]];
       [ | right; left; exact Hstep
-        | right; right; left; exact Hforb
-        | right; right; right; exact Hconf ].
+        | right; right; exact Hforb ].
     destruct (classic (a \indom T)) as [Hain | Hanotin].
     + asserts Hbth: (binds T a (T[a])).
       { exact (thread_binds_of_indom_read Hain eq_refl). }
@@ -1022,9 +1074,9 @@ Proof.
                          reflexivity.
                        - apply binds_update_same. }
                      exists. applys (>> StepJoin Hbth Hul Hbr Hcfm Hfresh Hpull Hbindspull).
-                 --- right. right. right.
-                     exists a e d h K. split; [exact Hbth |].
-                     left. exists t r1 empty_diff c0. splits*.
+                 --- (* conflicting merge: the thread receives [ret_race] *)
+                     right. left. exists.
+                     applys (>> StepJoinConflict Hbth Hul Hbr Hncfm).
               ** (* read: volatile or normal *)
                  destruct (classic (x \in Volatiles)) as [Hvol | Hnvol].
                  --- (* volatile read: split on whether the merge is conflict-free *)
@@ -1046,7 +1098,7 @@ Proof.
                          destruct (classic (exists v, is_latest_value G' c'' x v)) as [(v & Hlv)| Hnex].
                          *** right. left.
                              exists. applys* StepReadVolatile.
-                         *** right. right. left.
+                         *** right. right.
                              exists a e d h K (eff_read x). splits; auto.
                              unfolds pull_volatile, do_merge.
                              replace (T[a]) with (state_running, te_exp e, d, h) in Hpull.
@@ -1061,10 +1113,8 @@ Proof.
                              asserts Hp2dom: (graph_indom G h). { applys* HdomT. }
                              exists v0.
                              applys* is_latest_value_graph_merge_fresh Hedge Hfresh Hp1dom Hp2dom Hval0.
-                     +++ right. right. right.
-                         exists a e d h K. splits~.
-                         right. right. left.
-                         exists x. splits*.
+                     +++ right. left. exists.
+                         applys (>> StepReadVolatileConflict Hbth Hul Hvol Hncfm).
                  --- (* normal read: local (in [d]) or global ([is_latest_value]),
                         otherwise forbidden *)
                    destruct (classic (x \indom d)) as [Hxd | Hxnd].
@@ -1073,7 +1123,7 @@ Proof.
                        exists. applys StepReadLocal Hbth Hul Hnvol Hbv.
                    +++ destruct (classic (exists v, is_latest_value G h x v)) as [(v & Hlv) | Hnlv].
                        *** right. left. exists. applys StepReadGlobal Hbth Hul Hnvol Hxnd Hlv.
-                       *** right. right. left.
+                       *** right. right.
                            exists a e d h K (eff_read x). splits*.
                            simpl. rew_logic. splits*.
               ** (* write: volatile or normal *)
@@ -1126,10 +1176,8 @@ Proof.
                          unfolds pull_volatile, do_merge.
                          replace (T[a]) with (state_running, te_exp e, d, h) in Hpull.
                          inverts* Hpull.
-                     +++ right. right. right.
-                         exists a e d h K. splits~.
-                         right. right. right.
-                         exists x v. splits*.
+                     +++ right. left. exists.
+                         applys (>> StepWriteVolatileConflict Hbth Hul Hvol Hncfm).
                  --- right. left. exists. applys StepWrite Hbth Hul Hnvol.
               ** (* lock: not blocked => free (or never-acquired); then
                     split on whether the merge is conflict-free *)
@@ -1154,14 +1202,11 @@ Proof.
                          reflexivity.
                        - apply binds_update_same. }
                      exists. applys (>> StepLock Hbth Hul Hlr Hcfm Hfresh Hpull Hbinds'').
-                 --- right. right. right.
-                     exists a e d h K. split; [exact Hbth |].
-                     right. left. exists l0 (snd (lock_read L l0)).
-                     splits.
-                     +++ exact Hul.
-                     +++ destruct (lock_read L l0) as [ls hc] eqn:E. simpl in Hnbl. simpl.
-                         rewrite Hnbl. reflexivity.
-                     +++ exact Hncfm.
+                 --- asserts Hlr: (lock_read L l0 = (ls_free, snd (lock_read L l0))).
+                     { destruct (lock_read L l0) as [ls hc] eqn:E. simpl in Hnbl. simpl.
+                       rewrite Hnbl. reflexivity. }
+                     right. left. exists.
+                     applys (>> StepLockConflict Hbth Hul Hlr Hncfm).
               ** (* unlock: enabled (thread holds the lock) fires,
                     otherwise forbidden *)
                  destruct (classic (exists h', lock_read L l0 = (ls_held a, h'))) as [(h0 & Hheld) | Hnheld].
@@ -1197,7 +1242,7 @@ Proof.
                          reflexivity.
                        - apply binds_update_same. }
                      exists. applys (>> StepRelease Hbth Hul Hbl Hfresh Hpush Hbinds').
-                 --- right. right. left.
+                 --- right. right.
                      exists a e d h K (eff_unlock l0). splits*.
            ++ (* every reduction is blocked: [a] is inert *)
               asserts Hib: (forall K0 a0, step_ul e K0 a0 -> blocked T L a0).
@@ -1233,14 +1278,13 @@ Theorem progress :
     done (T, G, L, V)
     \/ deadlocked (T, G, L, V)
     \/ (exists cfg', step (T, G, L, V) cfg')
-    \/ forbidden (T, G, L, V)
-    \/ conflict_detected (T, G, L, V).
+    \/ forbidden (T, G, L, V).
 Proof.
   introv Hulp Hwfc.
   lets (Hfin & _): Hwfc.
   lets (l & Hcov): finite_inv_list_covers Hfin.
   forwards Hres: (progress_aux T G L V l Hulp Hwfc).
-  destruct Hres as [Hall | [Hstep | [Hforb | Hconf]]].
+  destruct Hres as [Hall | [Hstep | Hforb]].
   - (* every thread in [dom T] is terminated or inert (via the cover [l]) *)
     asserts Hdi: (forall t, t \indom T ->
                             terminated (T, G, L, V) t \/ inert (T, G, L, V) t).
@@ -1252,6 +1296,5 @@ Proof.
       left. introv Hin. forwards* [Ht | Hinrt]: Hdi Hin.
       false*.
   - right. right. left. exact Hstep.
-  - right. right. right. left. exact Hforb.
-  - right. right. right. right. exact Hconf.
+  - right. right. right. exact Hforb.
 Qed.

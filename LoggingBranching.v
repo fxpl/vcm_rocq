@@ -232,6 +232,36 @@ Inductive step : (cfg * log) -> (cfg * log) -> Prop :=
     push_lock t l c'' T G L = (T', G', L') ->
     binds T' t (state_running, te_exp e, empty, c'') ->
     step ((T, G, L, V), log) ((T'[t := (state_running, K void, empty, c'')], G', L'[l := (ls_free, c'')], V), log & event_unlock t l)
+(* Failed conflict checks (see [Branching.step]): the thread receives the
+   exception [ret_race] and keeps its staging area and commit; the graph and
+   the log do not change. A conflict implies that the log (extended with the
+   attempted write, for a volatile write) is not race free (see
+   [branching_join_conflict_sound] and friends). The equivalence theorems are
+   about steps that extend the log, which excludes these. *)
+| StepReadVolatileConflict : forall T G L V t e d c K x log,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_read x) ->
+    x \in Volatiles ->
+    ~ conflict_free_merge d c (vc_read V x) G ->
+    step ((T, G, L, V), log) ((T[t := (state_running, K ret_race, d, c)], G, L, V), log)
+| StepWriteVolatileConflict : forall T G L V t e d c K x v log,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_write x v) ->
+    x \in Volatiles ->
+    ~ conflict_free_merge d[x := v] c (vc_read V x) G ->
+    step ((T, G, L, V), log) ((T[t := (state_running, K ret_race, d, c)], G, L, V), log)
+| StepJoinConflict : forall T G L V t t' e d c c' K r log,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_join t') ->
+    binds T t' (state_terminated, te_ret r, empty, c') ->
+    ~ conflict_free_merge d c c' G ->
+    step ((T, G, L, V), log) ((T[t := (state_running, K ret_race, d, c)], G, L, V), log)
+| StepLockConflict : forall T G L V t e d c c' K l log,
+    binds T t (state_running, te_exp e, d, c) ->
+    step_ul e K (eff_lock l) ->
+    lock_read L l = (ls_free, c') ->
+    ~ conflict_free_merge d c c' G ->
+    step ((T, G, L, V), log) ((T[t := (state_running, K ret_race, d, c)], G, L, V), log)
 .
 
 Hint Constructors step Branching.step : vcm.

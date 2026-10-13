@@ -205,4 +205,33 @@ Inductive step : cfg -> cfg -> Prop :=
     push_lock t l h'' T G L = (T', G', L') ->
     binds T' t (state_running, te_exp e, empty, h'') ->
     step (T, G, L, V) (T'[t := (state_running, K void, empty, h'')], G', L'[l := (ls_free, h'')], V)
+(* A failed conflict check does not stop the semantics: the thread receives the
+   exception [ret_race] instead of the result of the operation, and keeps its
+   staging area and commit. The commit graph, locks and volatiles do not
+   change, and no operation takes place (the target thread is not consumed, the
+   lock is not acquired, the volatile is neither read nor written). *)
+| StepReadVolatileConflict : forall T G L V t e d h K x,
+    binds T t (state_running, te_exp e, d, h) ->
+    step_ul e K (eff_read x) ->
+    x \in Volatiles ->
+    ~ conflict_free_merge d h (vc_read V x) G ->
+    step (T, G, L, V) (T[t := (state_running, K ret_race, d, h)], G, L, V)
+| StepWriteVolatileConflict : forall T G L V t e d h K x v,
+    binds T t (state_running, te_exp e, d, h) ->
+    step_ul e K (eff_write x v) ->
+    x \in Volatiles ->
+    ~ conflict_free_merge d[x := v] h (vc_read V x) G ->
+    step (T, G, L, V) (T[t := (state_running, K ret_race, d, h)], G, L, V)
+| StepJoinConflict : forall T G L V t t' e d h h' K r,
+    binds T t (state_running, te_exp e, d, h) ->
+    step_ul e K (eff_join t') ->
+    binds T t' (state_terminated, te_ret r, empty, h') ->
+    ~ conflict_free_merge d h h' G ->
+    step (T, G, L, V) (T[t := (state_running, K ret_race, d, h)], G, L, V)
+| StepLockConflict : forall T G L V t e d h h' K l,
+    binds T t (state_running, te_exp e, d, h) ->
+    step_ul e K (eff_lock l) ->
+    lock_read L l = (ls_free, h') ->
+    ~ conflict_free_merge d h h' G ->
+    step (T, G, L, V) (T[t := (state_running, K ret_race, d, h)], G, L, V)
 .

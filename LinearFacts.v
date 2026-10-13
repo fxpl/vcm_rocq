@@ -51,8 +51,8 @@ Definition wf_cfg (cfg : cfg) : Prop :=
    exactly [SharedMemory]'s notion). Writes, spawns, joins and locks have no
    such precondition -- whether a join/lock can actually fire is the
    *blocking* question below, and whether *any* synchronising or
-   volatile-touching step can fire *without* a conflict is the separate
-   [conflict_detected] question. *)
+   volatile-touching step can fire is not a question: a failed conflict check
+   is itself a step, throwing [ret_race]. *)
 Definition enabled (G : graph) (L : locks) (t : tid) (d : diff) (c g : commit) (a : eff) : Prop :=
   match a with
   | eff_read x   => (x \in Volatiles /\ exists v, is_latest_value G g x v)
@@ -94,32 +94,6 @@ Definition forbidden (cfg : cfg) : Prop :=
         binds T t (state_running, te_exp e, d, c) /\
         step_ul e K a /\
         ~ enabled G L t d c g a
-  end.
-
-Definition conflict_detected (cfg : cfg) : Prop :=
-  match cfg with
-  | (T, G, L) =>
-      exists t d c g,
-        is_global_head G g /\
-        ((exists r,
-            binds T t (state_running, te_ret r, d, c) /\
-            ~ lin_conflict_free d c g G)
-        \/
-        (exists e K,
-            binds T t (state_running, te_exp e, d, c) /\
-            ((exists e', step_ul e K (eff_spawn e') /\
-                         ~ lin_conflict_free d c g G) \/
-             (exists t' r d' c', step_ul e K (eff_join t') /\
-                                  binds T t' (state_terminated, te_ret r, d', c') /\
-                                  ~ lin_conflict_free d c g G) \/
-             (exists l, step_ul e K (eff_lock l) /\ lock_read L l = ls_free /\
-                        ~ lin_conflict_free d c g G) \/
-             (exists l, step_ul e K (eff_unlock l) /\ lock_read L l = ls_held t /\
-                        ~ lin_conflict_free d c g G) \/
-             (exists x, step_ul e K (eff_read x) /\ x \in Volatiles /\
-                        ~ lin_conflict_free d c g G) \/
-             (exists x v, step_ul e K (eff_write x v) /\ x \in Volatiles /\
-                          ~ lin_conflict_free d[x := v] c g G))))
   end.
 
 (* A thread has terminated. *)
@@ -376,6 +350,69 @@ Proof.
       * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
       * forwards Hbinds': binds_update_neq_inv Hbinds Hne.
         forwards Hbinds'': binds_update_neq_inv Hbinds' Hne. applys* Hterm.
+  - (* conflict exception: only the thread's expression changes *)
+    splits.
+    + unfolds finite. rew_dom. autos.
+    + exact Hwf.
+    + exact Htot.
+    + exact Hhex.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+  - (* conflict exception: only the thread's expression changes *)
+    splits.
+    + unfolds finite. rew_dom. autos.
+    + exact Hwf.
+    + exact Htot.
+    + exact Hhex.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+  - (* conflict exception: only the thread's expression changes *)
+    splits.
+    + unfolds finite. rew_dom. autos.
+    + exact Hwf.
+    + exact Htot.
+    + exact Hhex.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+  - (* conflict exception: only the thread's expression changes *)
+    splits.
+    + unfolds finite. rew_dom. autos.
+    + exact Hwf.
+    + exact Htot.
+    + exact Hhex.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+  - (* conflict exception: only the thread's expression changes *)
+    splits.
+    + unfolds finite. rew_dom. autos.
+    + exact Hwf.
+    + exact Htot.
+    + exact Hhex.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+  - (* conflict exception: only the thread's expression changes *)
+    splits.
+    + unfolds finite. rew_dom. autos.
+    + exact Hwf.
+    + exact Htot.
+    + exact Hhex.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
+  - (* conflict exception: only the thread's expression changes *)
+    splits.
+    + unfolds finite. rew_dom. autos.
+    + exact Hwf.
+    + exact Htot.
+    + exact Hhex.
+    + introv Hbinds. destruct (classic (t0 = t)) as [->|Hne].
+      * forwards Heq: binds_update_same_inv Hbinds. inverts Heq.
+      * forwards Hbinds': binds_update_neq_inv Hbinds Hne. applys* Hterm.
 Qed.
 
 (* ===================================================================== *)
@@ -385,8 +422,8 @@ Qed.
 (* The heart of progress: keep the whole configuration [(T, G, L)] fixed
    and induct over a *list of thread ids* [l]. Either every thread named in
    [l] is terminated-or-inert, or some thread can take a step, or the
-   configuration is forbidden, or a synchronising thread's commit
-   conflicts. *)
+   configuration is forbidden. (A synchronising thread whose commit conflicts
+   also takes a step, throwing [ret_race].) *)
 Lemma progress_aux :
   forall T G L (l : list tid),
     ul_progress (T, G, L) ->
@@ -394,17 +431,15 @@ Lemma progress_aux :
     (forall t, mem t l -> t \indom T ->
        terminated (T, G, L) t \/ inert (T, G, L) t)
     \/ (exists cfg', step (T, G, L) cfg')
-    \/ forbidden (T, G, L)
-    \/ conflict_detected (T, G, L).
+    \/ forbidden (T, G, L).
 Proof.
   introv Hulp Hwfc.
   lets (Hfin & Hwf & Htot & (g & Hhead) & Hterm): Hwfc.
   induction l as [| a l IH].
   - left. introv Hmem. inverts Hmem.
-  - destruct IH as [Hall | [Hstep | [Hforb | Hconf]]];
+  - destruct IH as [Hall | [Hstep | Hforb]];
       [ | right; left; exact Hstep
-        | right; right; left; exact Hforb
-        | right; right; right; exact Hconf ].
+        | right; right; exact Hforb ].
     destruct (classic (a \indom T)) as [Hain | Hanotin].
     + asserts Hbth: (binds T a (T[a])).
       { exact (thread_binds_of_indom_read Hain eq_refl). }
@@ -430,11 +465,8 @@ Proof.
                          (T[a := (state_running, K t', d, c)][t' := (state_new, te_exp e0, empty, g'')]) G)
                        as [T' G'] eqn:Heq.
                      exists. applys (>> StepSpawn Hbth Hul Ht' Hhead Hcfm Hfresh Heq).
-                 --- right. right. right.
-                     exists a d c g. split; [ exact Hhead | ].
-                     right. exists e K. split.
-                     +++ exact Hbth.
-                     +++ left. exists e0. split; [exact Hul | exact Hncfm].
+                 --- right. left. exists.
+                     applys (>> StepSpawnConflict Hbth Hul Hhead Hncfm).
               ** (* join: not blocked => target terminated; then split on the
                     conflict check *)
                  rew_logic in Hnbl. destruct Hnbl as (r0 & d0 & c0 & Hbr).
@@ -442,12 +474,8 @@ Proof.
                  destruct (classic (lin_conflict_free d c g G)) as [Hcfm | Hncfm].
                  --- right. left.
                      exists. applys StepJoin Hbth Hul Hbr Hhead Hcfm.
-                 --- right. right. right.
-                     exists a d c g. split; [ exact Hhead | ].
-                     right. exists e K. split.
-                     +++ exact Hbth.
-                     +++ right. left. exists t r1 empty_diff c0.
-                         splits; [exact Hul | exact Hbr | exact Hncfm].
+                 --- right. left. exists.
+                     applys (>> StepJoinConflict Hbth Hul Hbr Hhead Hncfm).
               ** (* read: volatile (a pull, conflict-checked, then read at
                     the global head [g]) or normal (local in [d], or global
                     at [c]); otherwise forbidden / conflict-detected *)
@@ -457,15 +485,11 @@ Proof.
                      destruct (classic (lin_conflict_free d c g G)) as [Hcfm | Hncfm].
                      +++ destruct (classic (exists v, is_latest_value G g x v)) as [(v & Hlv) | Hnlv].
                          *** right. left. exists. applys (>> StepReadVolatile Hbth Hul Hxvol Hhead Hcfm Hlv).
-                         *** right. right. left.
+                         *** right. right.
                              exists a e d c K (eff_read x). exists g. splits*.
                              simpl. rew_logic. splits*.
-                     +++ right. right. right.
-                         exists a d c g. split; [ exact Hhead | ].
-                         right. exists e K. split.
-                         *** exact Hbth.
-                         *** right; right; right; right; left. exists x.
-                             splits; [exact Hul | exact Hxvol | exact Hncfm].
+                     +++ right. left. exists.
+                         applys (>> StepReadVolatileConflict Hbth Hul Hxvol Hhead Hncfm).
                  --- (* normal: local (in [d]) or global ([is_latest_value]
                         at [c]), otherwise forbidden *)
                      destruct (classic (x \indom d)) as [Hxd | Hxnd].
@@ -474,7 +498,7 @@ Proof.
                          exists. applys StepReadLocal Hbth Hul Hxnvol Hbv.
                      +++ destruct (classic (exists v, is_latest_value G c x v)) as [(v & Hlv) | Hnlv].
                          *** right. left. exists. applys StepReadGlobal Hbth Hul Hxnvol Hxnd Hlv.
-                         *** right. right. left.
+                         *** right. right.
                              exists a e d c K (eff_read x). exists g. splits*.
                              simpl. rew_logic. splits*.
               ** (* write: volatile (a pull-then-push, conflict-checked) or
@@ -491,23 +515,16 @@ Proof.
                              (T[a := (state_running, te_exp e, d[x := v], c)]) G)
                            as [T' G'] eqn:Heq.
                          exists. applys (>> StepWriteVolatile Hbth Hul Hxvol Hhead Hcfm Hfresh Heq).
-                     +++ right. right. right.
-                         exists a d c g. split; [ exact Hhead | ].
-                         right. exists e K. split.
-                         *** exact Hbth.
-                         *** right; right; right; right; right. exists x v.
-                             splits; [exact Hul | exact Hxvol | exact Hncfm].
+                     +++ right. left. exists.
+                         applys (>> StepWriteVolatileConflict Hbth Hul Hxvol Hhead Hncfm).
                  --- right. left. exists. applys StepWrite Hbth Hul Hxnvol.
               ** (* lock: not blocked => free; then split on the conflict
                     check *)
                  rew_logic in Hnbl.
                  destruct (classic (lin_conflict_free d c g G)) as [Hcfm | Hncfm].
                  --- right. left. exists. applys StepLock Hbth Hul Hnbl Hhead Hcfm.
-                 --- right. right. right.
-                     exists a d c g. split; [ exact Hhead | ].
-                     right. exists e K. split.
-                     +++ exact Hbth.
-                     +++ right. right. left. exists l0. splits; [exact Hul | exact Hnbl | exact Hncfm].
+                 --- right. left. exists.
+                     applys (>> StepLockConflict Hbth Hul Hnbl Hhead Hncfm).
               ** (* unlock: enabled (thread holds the lock) fires -- modulo
                     the conflict check -- otherwise forbidden *)
                  destruct (classic (lock_read L l0 = ls_held a)) as [Hheld | Hnheld].
@@ -516,13 +533,9 @@ Proof.
                          forwards (g'' & Hfresh): exists_commit_fresh Hwf.
                          destruct (global_commit a g g'' T G) as [T' G'] eqn:Heq.
                          exists. applys (>> StepRelease Hbth Hul Hheld Hhead Hcfm Hfresh Heq).
-                     +++ right. right. right.
-                         exists a d c g. split; [ exact Hhead | ].
-                         right. exists e K. split.
-                         *** exact Hbth.
-                         *** right. right. right. left. exists l0.
-                             splits; [exact Hul | exact Hheld | exact Hncfm].
-                 --- right. right. left.
+                     +++ right. left. exists.
+                         applys (>> StepReleaseConflict Hbth Hul Hheld Hhead Hncfm).
+                 --- right. right.
                      exists a e d c K (eff_unlock l0). exists g. splits*.
            ++ (* every reduction is blocked: [a] is inert *)
               asserts Hib: (forall K0 a0, step_ul e K0 a0 -> blocked T L a0).
@@ -538,9 +551,8 @@ Proof.
               forwards (g'' & Hfresh): exists_commit_fresh Hwf.
               destruct (global_commit a g g'' T G) as [T' G'] eqn:Heq.
               exists. applys StepEnd Hbth Hhead Hcfm Hfresh Heq.
-           ++ right. right. right.
-              exists a d c g. split; [ exact Hhead | ].
-              left. exists r. splits*.
+           ++ right. left. exists.
+              applys (>> StepEndConflict Hbth Hhead Hncfm).
       * (* state_terminated *)
         destruct e as [e | r].
         -- (* terminated but still carrying [te_exp]: impossible by [wf_cfg] *)
@@ -563,14 +575,13 @@ Theorem progress :
     done (T, G, L)
     \/ deadlocked (T, G, L)
     \/ (exists cfg', step (T, G, L) cfg')
-    \/ forbidden (T, G, L)
-    \/ conflict_detected (T, G, L).
+    \/ forbidden (T, G, L).
 Proof.
   introv Hulp Hwfc.
   lets (Hfin & _): Hwfc.
   lets (l & Hcov): finite_inv_list_covers Hfin.
   forwards Hres: (progress_aux T G L l Hulp Hwfc).
-  destruct Hres as [Hall | [Hstep | [Hforb | Hconf]]].
+  destruct Hres as [Hall | [Hstep | Hforb]].
   - (* every thread in [dom T] is terminated or inert (via the cover [l]) *)
     asserts Hdi: (forall t, t \indom T ->
                             terminated (T, G, L) t \/ inert (T, G, L) t).
@@ -582,6 +593,5 @@ Proof.
       left. introv Hin. forwards* [Ht | Hinrt]: Hdi Hin.
       false*.
   - right. right. left. exact Hstep.
-  - right. right. right. left. exact Hforb.
-  - right. right. right. right. exact Hconf.
+  - right. right. right. exact Hforb.
 Qed.
